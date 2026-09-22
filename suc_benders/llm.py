@@ -56,7 +56,15 @@ def _prompt(
         "You are a stochastic unit-commitment heuristic advisor. You propose binary "
         "on/off schedules only; you are not the optimizer. Never invent dispatch, "
         "theta, dual cuts, load, costs, or constraints. Return JSON only with a "
-        "candidates array. Every proposal will be independently validated."
+        "candidates array. Every proposal will be independently validated. "
+        "The dominant source of cost error is OVER-COMMITMENT: expensive small "
+        "units are kept online longer than needed. Your primary job is to find "
+        "unit-hours that can be turned OFF. Use context.unit_hour_decommit_gradient "
+        "and context.top_decommit_opportunities (negative estimated_total_change "
+        "means switching that unit-hour off reduces total cost) and "
+        "context.decommit_ladder (actual measured cost of progressively turning "
+        "hours off). Only keep a unit-hour ON when reserve or minimum up/down "
+        "constraints require it."
     )
     body = {
         "task": "Suggest diverse feasible-looking first-stage commitment schedules.",
@@ -99,7 +107,11 @@ def _prompt(
         "rules": [
             "Do not repeat base schedules",
             "Use only 0/1 values",
-            "Prefer multi-period or grouped changes",
+            "Prefer turning unit-hours OFF over turning them ON",
+            "Target shoulder hours and the low-load tail of the horizon, where "
+            "peaking units are commonly over-committed",
+            "Trim the ends of an ON block before removing its middle",
+            "Never turn a unit OFF if that would violate reserve or minimum up/down",
             "Return at most the requested number of candidates",
             "Do not include markdown fences",
         ],
@@ -222,7 +234,14 @@ def ask_llm_for_candidates(
     for entry in entries[: int(config.max_candidates)]:
         if not isinstance(entry, dict):
             continue
-        raw_u = np.asarray(entry.get("u"), dtype=float)
+        try:
+            raw_u = np.asarray(entry.get("u"), dtype=float)
+        except (TypeError, ValueError):
+            # Ragged or non-numeric matrices are malformed proposals, not a
+            # reason to abort the whole Benders run.
+            continue
+        if raw_u.shape != (data.n_units, data.horizon):
+            continue
         repaired = repair_commitment(data, scenarios, raw_u)
         if repaired is None:
             continue

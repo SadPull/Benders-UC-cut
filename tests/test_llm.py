@@ -100,6 +100,38 @@ class LLMAdvisorTests(unittest.TestCase):
         self.assertFalse(result.failed)
         self.assertEqual(result.raw_count, 1)
 
+    def test_ragged_matrix_is_discarded_not_fatal(self):
+        class Response:
+            def read(self):
+                ragged = [[0, 1], [0, 1, 0]]
+                content = json.dumps({"candidates": [{"name": "ragged", "u": ragged}]})
+                return json.dumps({"content": [{"type": "text", "text": content}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+        class Opener:
+            def open(self, *args, **kwargs):
+                return Response()
+
+        with patch.dict("os.environ", {"LLM_API_KEY": "test-key"}), patch(
+            "suc_benders.llm.build_opener", return_value=Opener()
+        ):
+            result = ask_llm_for_candidates(
+                self.units,
+                self.scenarios,
+                1,
+                self.base,
+                None,
+                LLMConfig(enabled=True),
+            )
+        # Malformed proposal is dropped; the call itself is not a failure.
+        self.assertFalse(result.failed)
+        self.assertEqual(result.candidates, [])
+
     def test_invalid_shape_is_discarded(self):
         class Response:
             def read(self):

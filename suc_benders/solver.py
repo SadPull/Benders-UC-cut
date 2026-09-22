@@ -6,9 +6,21 @@ from typing import List, Sequence
 
 import numpy as np
 
-from .candidates import commitment_key, make_candidate, perturb_commitment, repair_commitment
+from .candidates import (
+    commitment_key,
+    decommit_commitment,
+    make_candidate,
+    perturb_commitment,
+    repair_commitment,
+)
 from .common import Scenario, commitment_is_feasible
-from .context import CandidateEvaluation, LocalMoveResult, LLMContextInput, build_llm_context
+from .context import (
+    CandidateEvaluation,
+    LLMContextInput,
+    LocalMoveResult,
+    build_llm_context,
+    decommit_gradient_map,
+)
 from .data import UCData
 from .llm import LLMConfig, ask_llm_for_candidates
 from .master import BendersCut, MasterCandidate, QuantumConfig, QuantumMaster
@@ -23,7 +35,12 @@ class BendersConfig:
     theta_step: float = 1.0
     reserve_scale: float = 100.0
     repair_candidates: bool = True
-    perturb_candidates: bool = True
+    # Decommitment-first is the default direction: the gap is dominated by fixed
+    # cost from over-committed peaking units.
+    decommit_candidates: bool = True
+    decommit_ladder_size: int = 8
+    # Perturbation is kept but off by default so decommitment is isolated.
+    perturb_candidates: bool = False
     perturbations_per_candidate: int = 12
     perturbation_window_lengths: tuple[int, ...] = (2, 3, 4)
     group_size: int = 2
@@ -45,6 +62,7 @@ class IterationRecord:
     optimality_cuts_added: int
     feasibility_cuts_added: int
     incumbent: float
+    decommit_candidates: int = 0
     llm_candidates: int = 0
     llm_valid_candidates: int = 0
     llm_failed: bool = False
@@ -309,6 +327,42 @@ def solve_benders(
                 )
         local_move_history = local_move_history[-100:]
 
+        # Decommitment-first search: start from the incumbent and greedily turn
+        # OFF on-hours, scored by the same per-(unit, hour) gradient the LLM
+        # sees. This is the direction the exact solution moves.
+        decommit_evaluations: list[CandidateEvaluation] = []
+        decommit_generated: list[MasterCandidate] = []
+        if config.decommit_candidates and best_u is not None:
+            seed_candidate = make_candidate(data, scenarios, best_u, source="incumbent")
+            gradient = decommit_gradient_map(
+                data, scenarios, seed_candidate, best_scenario_results
+            )
+            decommit_generated = decommit_commitment(
+                data,
+                scenarios,
+                seed_candidate,
+                limit=int(config.decommit_ladder_size),
+                gradient=gradient,
+            )
+            for candidate in decommit_generated:
+                previous_incumbent = incumbent
+                evaluation = evaluate_candidate(candidate, "decommit")
+                decommit_evaluations.append(evaluation)
+                if candidate.move is not None:
+                    move = candidate.move
+                    local_move_history.append(
+                        LocalMoveResult(
+                            move=str(move.get("move", "unknown")),
+                            unit=int(move.get("unit", -1)),
+                            period=int(move.get("period", -1)),
+                            width=int(move.get("width", 1)),
+                            cost_change=evaluation.total_cost - previous_incumbent,
+                            improved=evaluation.total_cost < previous_incumbent,
+                            source="decommit",
+                        )
+                    )
+            local_move_history = local_move_history[-100:]
+
         # Build the compact P0/P1 context before asking the LLM for advice.
         llm_context = None
         if config.llm.enabled:
@@ -324,6 +378,7 @@ def solve_benders(
                 cuts=cuts,
                 history=history,
                 infeasible_diagnostics=current_infeasible_diagnostics,
+                decommit_ladder=decommit_evaluations,
             )
             llm_context = build_llm_context(data, scenarios, context_input)
 
@@ -352,7 +407,10 @@ def solve_benders(
         new_candidates = len(evaluation_cache) - cache_size_at_iteration_start
         feasible_subproblems = sum(
             1
-            for evaluation in base_evaluations + local_evaluations + llm_evaluations
+            for evaluation in base_evaluations
+            + local_evaluations
+            + decommit_evaluations
+            + llm_evaluations
             if evaluation.feasible
         )
         optimality_added = sum(
@@ -368,12 +426,15 @@ def solve_benders(
                 raw_candidates=raw_count,
                 repaired_candidates=repaired_count,
                 perturbed_candidates=perturbed_count,
-                feasible_candidates=len(unique_base) + len(generated) + len(llm_candidates),
+                feasible_candidates=(
+                    len(unique_base) + len(generated) + len(decommit_generated) + len(llm_candidates)
+                ),
                 new_candidates=new_candidates,
                 feasible_subproblems=feasible_subproblems,
                 optimality_cuts_added=optimality_added,
                 feasibility_cuts_added=feasibility_added,
                 incumbent=incumbent,
+                decommit_candidates=len(decommit_evaluations),
                 llm_candidates=llm_result.raw_count if llm_result else 0,
                 llm_valid_candidates=llm_result.valid_count if llm_result else 0,
                 llm_failed=llm_result.failed if llm_result else False,

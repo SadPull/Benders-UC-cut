@@ -45,6 +45,7 @@ class LLMContextInput:
     cuts: Sequence[BendersCut]
     history: Sequence[Any]
     infeasible_diagnostics: Sequence[Mapping[str, Any]] = field(default_factory=list)
+    decommit_ladder: Sequence[CandidateEvaluation] = field(default_factory=list)
 
 
 def _round3(value: Any) -> Any:
@@ -379,5 +380,191 @@ def build_llm_context(
             "unit_cost_decomposition": _unit_cost_decomposition(
                 data, scenarios, incumbent, results
             ),
+            "unit_hour_decommit_gradient": _unit_hour_decommit_gradient(
+                data, scenarios, incumbent, results, limit=60
+            ),
+            "top_decommit_opportunities": _unit_hour_decommit_gradient(
+                data, scenarios, incumbent, results, limit=20
+            ),
+            "hourly_commitment_profile": _hourly_commitment_profile(data, incumbent),
+            "peaker_usage": _peaker_usage(data, incumbent),
+            "decommit_ladder": _decommit_ladder_rows(context_input.decommit_ladder),
         }
     )
+
+
+def _expected_outputs(
+    scenarios: Sequence[Scenario], results: Sequence[ScenarioResult]
+) -> np.ndarray | None:
+    """Probability-weighted output, shape (units, horizon)."""
+
+    if not results:
+        return None
+    return sum(
+        scenario.probability * np.asarray(result.p, dtype=float)
+        for scenario, result in zip(scenarios, results)
+    )
+
+
+def _system_price(
+    scenarios: Sequence[Scenario], results: Sequence[ScenarioResult]
+) -> np.ndarray | None:
+    """Probability-weighted energy price from the balance duals, shape (horizon,)."""
+
+    usable = [
+        (scenario, result)
+        for scenario, result in zip(scenarios, results)
+        if result.balance_dual is not None
+    ]
+    if not usable:
+        return None
+    weight = sum(scenario.probability for scenario, _ in usable)
+    if weight <= 0:
+        return None
+    return sum(
+        scenario.probability * np.asarray(result.balance_dual, dtype=float)
+        for scenario, result in usable
+    ) / weight
+
+
+def _decommit_gradient_rows(
+    data: UCData,
+    scenarios: Sequence[Scenario],
+    incumbent: MasterCandidate | None,
+    results: Sequence[ScenarioResult],
+) -> list[dict]:
+    """Full per-(unit, hour) decommitment gradient table (untruncated)."""
+
+    output = _expected_outputs(scenarios, results)
+    price = _system_price(scenarios, results)
+    if incumbent is None or output is None or price is None:
+        return []
+
+    rows = []
+    for i in range(data.n_units):
+        for t in range(data.horizon):
+            if not incumbent.u[i, t]:
+                continue
+            p_mw = float(output[i, t])
+            marginal = float(2.0 * data.cost_a[i] * p_mw + data.cost_b[i])
+            fuel_change = p_mw * (float(price[t]) - marginal)
+            rows.append(
+                {
+                    "unit": i,
+                    "period": t,
+                    "fixed_saving": float(data.cost_c[i]),
+                    "output_mw": p_mw,
+                    "unit_marginal_cost": marginal,
+                    "system_price": float(price[t]),
+                    "estimated_fuel_change": fuel_change,
+                    "estimated_total_change": -float(data.cost_c[i]) + fuel_change,
+                }
+            )
+    rows.sort(key=lambda row: row["estimated_total_change"])
+    return rows
+
+
+def decommit_gradient_map(
+    data: UCData,
+    scenarios: Sequence[Scenario],
+    incumbent: MasterCandidate | None,
+    results: Sequence[ScenarioResult],
+) -> dict[tuple[int, int], float]:
+    """Map (unit, period) -> estimated total cost change of switching it off."""
+
+    return {
+        (row["unit"], row["period"]): row["estimated_total_change"]
+        for row in _decommit_gradient_rows(data, scenarios, incumbent, results)
+    }
+
+
+def _unit_hour_decommit_gradient(
+    data: UCData,
+    scenarios: Sequence[Scenario],
+    incumbent: MasterCandidate | None,
+    results: Sequence[ScenarioResult],
+    *,
+    limit: int = 12,
+) -> list[dict]:
+    """Truncated view of the decommitment gradient for the LLM prompt."""
+
+    return _decommit_gradient_rows(data, scenarios, incumbent, results)[:limit]
+
+
+def _hourly_commitment_profile(
+    data: UCData,
+    incumbent: MasterCandidate | None,
+    *,
+    limit: int = 24,
+) -> list[dict]:
+    """Per-hour on-count and fixed cost, exposing over-commitment in the tail."""
+
+    if incumbent is None:
+        return []
+    rows = []
+    for t in range(min(limit, data.horizon)):
+        units_on = np.flatnonzero(incumbent.u[:, t]).tolist()
+        hourly_fixed = float(np.sum(data.cost_c[units_on])) if units_on else 0.0
+        hourly_fixed += float(
+            sum(float(data.startup_cost[i]) * float(incumbent.v[i, t]) for i in units_on)
+        )
+        hourly_fixed += float(
+            sum(float(data.shutdown_cost[i]) * float(incumbent.w[i, t]) for i in units_on)
+        )
+        rows.append(
+            {
+                "period": t,
+                "units_on": len(units_on),
+                "unit_ids": units_on,
+                "hourly_fixed_cost": hourly_fixed,
+            }
+        )
+    return rows
+
+
+def _peaker_usage(data: UCData, incumbent: MasterCandidate | None) -> list[dict]:
+    """Per-unit on-hours and role, so the LLM can see which units are peakers."""
+
+    if incumbent is None:
+        return []
+    rows = []
+    for i in range(data.n_units):
+        on_hours = int(incumbent.u[i].sum())
+        if on_hours >= data.horizon:
+            role = "base"
+        elif on_hours <= 0.5 * data.horizon:
+            role = "peaker"
+        else:
+            role = "mid_merit"
+        rows.append(
+            {
+                "unit": i,
+                "on_hours": on_hours,
+                "cost_c": float(data.cost_c[i]),
+                "startup_cost": float(data.startup_cost[i]),
+                "pmax": float(data.pmax[i]),
+                "pmin": float(data.pmin[i]),
+                "role": role,
+                "cost_per_on_hour": float(data.cost_c[i] + data.startup_cost[i] / max(1, on_hours)),
+            }
+        )
+    return rows
+
+
+def _decommit_ladder_rows(
+    ladder: Sequence[CandidateEvaluation],
+) -> list[dict]:
+    rows = []
+    for index, evaluation in enumerate(ladder):
+        rows.append(
+            {
+                "rung": index + 1,
+                "source": evaluation.source,
+                "total_cost": evaluation.total_cost,
+                "fixed_cost": evaluation.fixed_cost,
+                "expected_fuel_cost": evaluation.expected_fuel_cost,
+                "feasible": evaluation.feasible,
+                "hamming_to_incumbent": evaluation.hamming_to_incumbent,
+            }
+        )
+    return rows[:10]

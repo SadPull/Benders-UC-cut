@@ -25,6 +25,11 @@ Python 3.10+ is expected.
 
 ## What this version adds
 
+- **Decommitment-first candidate generation**: from the incumbent, greedily turn
+  unit-hours OFF, scored by a per-(unit, hour) marginal-cost gradient
+- **Decommitment gradient context for the LLM**: `unit_hour_decommit_gradient`,
+  `top_decommit_opportunities`, `hourly_commitment_profile`, `peaker_usage`,
+  `decommit_ladder`
 - Deterministic candidate repair for infeasible Kaiwu schedules
 - Local perturbation around repaired candidates and the incumbent
 - Reserve constraints scaled to 100 MW in the QUBO energy
@@ -35,7 +40,7 @@ Python 3.10+ is expected.
   - quantum + repair + local
   - quantum + repair + local + LLM (when `--llm` is passed)
 
-The local-enhanced path on the 10x24 instance reaches roughly `7.5%` relative error to the exact Gurobi optimum after 5 iterations.
+On the 10x24 instance, the decommitment-first path reaches `2.19%` relative error to the exact Gurobi optimum deterministically, and `1.40%` best / `1.72%` mean with the optional LLM advisor, after 5 iterations.
 
 ## LLM context
 

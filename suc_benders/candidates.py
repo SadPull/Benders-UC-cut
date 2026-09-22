@@ -204,3 +204,124 @@ def perturb_commitment(
                 if add(trial, {"move": "replace", "unit": int(on_unit), "period": int(start), "width": 1, "off_unit": int(off_unit)}):
                     return result
     return result
+
+
+def on_blocks(row: np.ndarray) -> list[tuple[int, int]]:
+    """Return inclusive [start, end] spans of consecutive ON hours."""
+
+    blocks = []
+    t = 0
+    horizon = int(np.asarray(row).size)
+    values = np.asarray(row, dtype=int)
+    while t < horizon:
+        if values[t]:
+            start = t
+            while t < horizon and values[t]:
+                t += 1
+            blocks.append((start, t - 1))
+        else:
+            t += 1
+    return blocks
+
+
+def _fixed_cost_of(data: UCData, candidate: MasterCandidate) -> float:
+    return float(
+        np.sum(data.cost_c[:, None] * candidate.u)
+        + np.sum(data.startup_cost[:, None] * candidate.v)
+        + np.sum(data.shutdown_cost[:, None] * candidate.w)
+    )
+
+
+def _trim_options(start: int, end: int) -> list[tuple[int, int, dict]]:
+    """Removal and end-trim options for one ON-block, cheapest-to-apply first."""
+
+    options: list[tuple[int, int, dict]] = [
+        (start, end, {"move": "decommit_block", "period": int(start), "width": int(end - start + 1)})
+    ]
+    # Trimming the shoulders of a block is the move the exact solution uses to
+    # drop peakers after the peak, so offer both ends explicitly.
+    if end > start:
+        options.append((end, end, {"move": "decommit_trim_end", "period": int(end), "width": 1}))
+        options.append((start, start, {"move": "decommit_trim_start", "period": int(start), "width": 1}))
+    if end - start >= 1:
+        options.append((max(start, end - 1), end, {"move": "decommit_trim_end2", "period": int(max(start, end - 1)), "width": int(min(2, end - start + 1))}))
+        options.append((start, min(end, start + 1), {"move": "decommit_trim_start2", "period": int(start), "width": int(min(2, end - start + 1))}))
+    return options
+
+
+def decommit_commitment(
+    data: UCData,
+    scenarios: Sequence[Scenario],
+    base: MasterCandidate,
+    *,
+    limit: int = 8,
+    gradient: dict[tuple[int, int], float] | None = None,
+) -> list[MasterCandidate]:
+    """Greedy decommitment ladder starting from an incumbent commitment.
+
+    Each rung turns OFF hours that the incumbent currently keeps running, which
+    is the direction the exact solution moves: the gap is dominated by fixed
+    cost from over-committed peaking units.
+
+    When ``gradient`` is supplied it maps ``(unit, period) -> estimated change
+    in total cost from switching that unit-hour off`` (negative is good). The
+    rung score is then the predicted total cost change of the whole move, i.e.
+    the exact fixed-cost saving plus the summed fuel-cost estimate. Without a
+    gradient the exact fixed-cost saving is used alone.
+
+    Candidate selection uses only cheap discrete checks; no Gurobi subproblem is
+    solved here, the caller evaluates each rung.
+    """
+
+    current = np.asarray(base.u, dtype=int).copy()
+    ladder: list[MasterCandidate] = []
+    seen = {commitment_key(base.u, base.v, base.w)}
+
+    for _ in range(max(1, int(limit))):
+        current_candidate = make_candidate(data, scenarios, current)
+        base_fixed = _fixed_cost_of(data, current_candidate)
+        best = None
+        best_score: float | None = None
+        for i in range(data.n_units):
+            for start, end in on_blocks(current[i]):
+                for t1, t2, move in _trim_options(start, end):
+                    trial = current.copy()
+                    trial[i, t1 : t2 + 1] = 0
+                    option = make_candidate(
+                        data,
+                        scenarios,
+                        trial,
+                        source="decommit",
+                        move={"unit": int(i), **move},
+                    )
+                    if not commitment_is_feasible(
+                        data, scenarios, option.u, option.v, option.w
+                    ):
+                        continue
+                    # Realised fixed-cost saving of this move.
+                    saving = base_fixed - _fixed_cost_of(data, option)
+                    if saving <= 1e-6:
+                        continue
+                    if gradient:
+                        fuel_estimate = 0.0
+                        for period in range(t1, t2 + 1):
+                            cell = gradient.get((int(i), int(period)))
+                            if cell is not None:
+                                fuel_estimate += float(cell)
+                        # Predicted change in total cost; lower is better.
+                        score = -saving + fuel_estimate
+                    else:
+                        score = -saving
+                    if best_score is None or score < best_score:
+                        best_score = score
+                        best = option
+        if best is None:
+            break
+        key = commitment_key(best.u, best.v, best.w)
+        current = best.u.copy()
+        if key in seen:
+            break
+        seen.add(key)
+        ladder.append(best)
+
+    return ladder

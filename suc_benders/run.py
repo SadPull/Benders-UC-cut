@@ -19,8 +19,9 @@ def main() -> None:
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--llm", action="store_true")
     parser.add_argument("--no-perturb", action="store_true", help="Disable local perturbation")
+    parser.add_argument("--no-decommit", action="store_true", help="Disable decommitment-first search")
     parser.add_argument("--llm-timeout", type=float, default=180.0)
-    parser.add_argument("--llm-max-tokens", type=int, default=32000)
+    parser.add_argument("--llm-max-tokens", type=int, default=6144)
     parser.add_argument("--llm-max-retries", type=int, default=3)
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
@@ -29,6 +30,7 @@ def main() -> None:
     config = BendersConfig(
         max_iterations=args.max_iterations,
         perturb_candidates=not args.no_perturb,
+        decommit_candidates=not args.no_decommit,
         quantum=QuantumConfig(kaiwu_seed=args.seed),
         llm=LLMConfig(
             enabled=args.llm,

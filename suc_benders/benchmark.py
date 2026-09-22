@@ -18,12 +18,19 @@ def _config(
     perturb: bool,
     llm: bool = False,
     llm_timeout: float = 180.0,
+    llm_max_tokens: int = 6144,
+    decommit: bool = False,
 ) -> BendersConfig:
     return BendersConfig(
         max_iterations=max_iterations,
         repair_candidates=repair,
         perturb_candidates=perturb,
-        llm=LLMConfig(enabled=llm, timeout_seconds=llm_timeout),
+        decommit_candidates=decommit,
+        llm=LLMConfig(
+            enabled=llm,
+            timeout_seconds=llm_timeout,
+            max_tokens=llm_max_tokens,
+        ),
     )
 
 
@@ -35,6 +42,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--llm", action="store_true")
     parser.add_argument("--llm-timeout", type=float, default=180.0)
+    parser.add_argument("--llm-max-tokens", type=int, default=6144)
     parser.add_argument(
         "--strategies",
         default=None,
@@ -46,18 +54,20 @@ def main() -> None:
     units, scenarios = load_suc_data(args.data, args.scenario_file)
     exact = solve_full(units, scenarios, FullConfig(output_flag=0, mip_gap=1e-4))
 
-    # (name, repair, perturb/local, llm)
-    strategies: list[tuple[str, bool, bool, bool]] = [
-        ("quantum-only", False, False, False),
-        ("quantum+repair", True, False, False),
-        ("quantum+repair+local", True, True, False),
+    # (name, repair, perturb/local, llm, decommit)
+    strategies: list[tuple[str, bool, bool, bool, bool]] = [
+        ("quantum-only", False, False, False, False),
+        ("quantum+repair", True, False, False, False),
+        ("quantum+repair+decommit", True, False, False, True),
+        # Legacy local-search arms, kept for reference only.
+        ("quantum+repair+local", True, True, False, False),
     ]
     if args.llm:
-        # Isolated arm: LLM candidates with NO local perturbation, so the
-        # effect of the LLM can be read without local-search contamination.
-        strategies.append(("quantum+repair+llm", True, False, True))
-        # Combined arm, kept for reference only.
-        strategies.append(("quantum+repair+local+llm", True, True, True))
+        # Primary arm: decommitment-first with LLM guidance.
+        strategies.append(("quantum+repair+decommit+llm", True, False, True, True))
+        # Legacy isolated LLM arm (no decommitment), for reference.
+        strategies.append(("quantum+repair+llm", True, False, True, False))
+        strategies.append(("quantum+repair+local+llm", True, True, True, False))
 
     if args.strategies:
         wanted = [item.strip() for item in args.strategies.split(",") if item.strip()]
@@ -70,7 +80,7 @@ def main() -> None:
         strategies = [item for item in strategies if item[0] in wanted]
 
     rows = []
-    for name, repair, perturb, llm in strategies:
+    for name, repair, perturb, llm, decommit in strategies:
         started = time.perf_counter()
         result = solve_benders(
             units,
@@ -82,6 +92,8 @@ def main() -> None:
                 perturb=perturb,
                 llm=llm,
                 llm_timeout=args.llm_timeout,
+                llm_max_tokens=args.llm_max_tokens,
+                decommit=decommit,
             ),
         )
         rows.append(
@@ -97,6 +109,7 @@ def main() -> None:
                 "perturbed_candidates": sum(row.perturbed_candidates for row in result.history),
                 "llm_candidates": sum(row.llm_candidates for row in result.history),
                 "llm_valid_candidates": sum(row.llm_valid_candidates for row in result.history),
+                "decommit_candidates": sum(row.decommit_candidates for row in result.history),
                 "runtime": time.perf_counter() - started,
                 "status": result.status,
                 "message": result.message,
