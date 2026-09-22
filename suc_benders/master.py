@@ -33,6 +33,8 @@ class MasterCandidate:
     v: np.ndarray
     w: np.ndarray
     theta: float | None = None
+    source: str = "quantum"
+    move: dict | None = None
 
 
 @dataclass

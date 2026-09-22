@@ -44,6 +44,7 @@ def _prompt(
     incumbent: MasterCandidate | None,
     base_candidates: list[MasterCandidate],
     max_candidates: int,
+    context: dict | None = None,
 ) -> tuple[str, str]:
     system = (
         "You are a stochastic unit-commitment heuristic advisor. You propose binary "
@@ -98,6 +99,8 @@ def _prompt(
         ],
         "requested_candidates": max_candidates,
     }
+    if context is not None:
+        body["context"] = context
     return system, json.dumps(body, separators=(",", ":"), allow_nan=False)
 
 
@@ -108,6 +111,7 @@ def ask_llm_for_candidates(
     base_candidates: list[MasterCandidate],
     incumbent: MasterCandidate | None,
     config: LLMConfig,
+    context: dict | None = None,
 ) -> LLMAdviceResult:
     api_key = (os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("LLM_API_KEY") or "").strip()
     if not api_key:
@@ -127,6 +131,7 @@ def ask_llm_for_candidates(
             incumbent,
             base_candidates,
             int(config.max_candidates),
+            context,
         )
     except (TypeError, ValueError, OverflowError) as exc:
         return LLMAdviceResult([], failed=True, message=type(exc).__name__)
@@ -161,7 +166,12 @@ def ask_llm_for_candidates(
             raise ValueError("response content is empty")
         content = content.strip().removeprefix("```json").removesuffix("```").strip()
         parsed = json.loads(content)
-        entries = parsed.get("candidates", [])
+        if isinstance(parsed, list):
+            entries = parsed
+        elif isinstance(parsed, dict):
+            entries = parsed.get("candidates", [])
+        else:
+            raise ValueError("response root must be an object or list")
         if not isinstance(entries, list):
             raise ValueError("candidates is not a list")
     except (HTTPError, URLError, TimeoutError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -179,6 +189,7 @@ def ask_llm_for_candidates(
         repaired = repair_commitment(data, scenarios, raw_u)
         if repaired is None:
             continue
+        repaired.source = "llm"
         key = tuple(
             np.r_[
                 repaired.u.reshape(-1), repaired.v.reshape(-1), repaired.w.reshape(-1)

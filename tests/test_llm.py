@@ -70,6 +70,36 @@ class LLMAdvisorTests(unittest.TestCase):
         self.assertEqual(result.candidates, [])
         self.assertNotIn("test-key", result.message)
 
+    def test_list_root_response_is_accepted(self):
+        class Response:
+            def read(self):
+                content = '[{"name":"ok","u":' + json.dumps([[0] * 24 for _ in range(10)]) + '}]'
+                return json.dumps({"content":[{"type":"text","text":content}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+        class Opener:
+            def open(self, *args, **kwargs):
+                return Response()
+
+        with patch.dict("os.environ", {"LLM_API_KEY": "test-key"}), patch(
+            "suc_benders.llm.build_opener", return_value=Opener()
+        ):
+            result = ask_llm_for_candidates(
+                self.units,
+                self.scenarios,
+                1,
+                self.base,
+                None,
+                LLMConfig(enabled=True),
+            )
+        self.assertFalse(result.failed)
+        self.assertEqual(result.raw_count, 1)
+
     def test_invalid_shape_is_discarded(self):
         class Response:
             def read(self):

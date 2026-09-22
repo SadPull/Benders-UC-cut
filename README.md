@@ -37,6 +37,23 @@ Python 3.10+ is expected.
 
 The local-enhanced path on the 10x24 instance reaches roughly `7.5%` relative error to the exact Gurobi optimum after 5 iterations.
 
+## LLM context
+
+When `--llm` is enabled, the advisor receives a compact P0/P1 context containing:
+
+- incumbent cost decomposition and per-scenario fuel cost
+- base candidate costs and Hamming distance to the incumbent
+- scenario balance and reserve dual prices
+- Benders cut coverage and tightness summary
+- recent local move cost changes
+- candidate comparison table
+- scenario dispatch summary and reserve margins
+- tight constraints and infeasibility diagnostics
+- recent iteration history
+- unit marginal costs and unit cost decomposition
+
+All context values are rounded to three decimals and lists are capped to keep the prompt compact. LLM output remains advisory only and is always validated locally.
+
 ## Run the benchmark
 
 ```powershell

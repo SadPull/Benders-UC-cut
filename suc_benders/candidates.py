@@ -19,6 +19,8 @@ def make_candidate(
     scenarios: Sequence[Scenario],
     u: np.ndarray,
     theta: float | None = None,
+    source: str = "quantum",
+    move: dict | None = None,
 ) -> MasterCandidate:
     """Rebuild v/w from u and check all discrete constraints."""
 
@@ -33,6 +35,8 @@ def make_candidate(
         v=v,
         w=w,
         theta=theta,
+        source=source,
+        move=move,
     )
 
 
@@ -93,7 +97,7 @@ def repair_commitment(
     if values.shape != (data.n_units, data.horizon) or not np.all(np.isfinite(values)):
         return None
     binary = np.clip(np.rint(values), 0, 1).astype(int)
-    candidate = make_candidate(data, scenarios, _temporal_repair(data, binary))
+    candidate = make_candidate(data, scenarios, _temporal_repair(data, binary), source="repair")
 
     for _ in range(data.n_units + 1):
         if commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
@@ -148,8 +152,8 @@ def perturb_commitment(
     if seed is not None:
         rng.shuffle(units)
 
-    def add(trial: np.ndarray) -> bool:
-        candidate = make_candidate(data, scenarios, trial)
+    def add(trial: np.ndarray, move: dict) -> bool:
+        candidate = make_candidate(data, scenarios, trial, source="local", move=move)
         if not commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
             return False
         key = commitment_key(candidate.u, candidate.v, candidate.w)
@@ -164,7 +168,7 @@ def perturb_commitment(
         for i in units:
             trial = base.u.copy()
             trial[i, t] = 1 - trial[i, t]
-            if add(trial):
+            if add(trial, {"move": "single", "unit": int(i), "period": int(t), "width": 1}):
                 return result
 
     # Contiguous commitment-window moves.
@@ -176,7 +180,7 @@ def perturb_commitment(
             for i in units:
                 trial = base.u.copy()
                 trial[i, start : start + width] = 1 - trial[i, start : start + width]
-                if add(trial):
+                if add(trial, {"move": "window", "unit": int(i), "period": int(start), "width": int(width)}):
                     return result
 
     # Grouped startup/shutdown and one-on-one replacement moves.
@@ -188,7 +192,7 @@ def perturb_commitment(
             trial = base.u.copy()
             for i in group:
                 trial[i, start] = 1 - trial[i, start]
-            if add(trial):
+            if add(trial, {"move": "group", "unit": int(group[0]), "period": int(start), "width": int(group_size)}):
                 return result
         for on_unit in units:
             for off_unit in units:
@@ -197,6 +201,6 @@ def perturb_commitment(
                 trial = base.u.copy()
                 trial[on_unit, start] = 1
                 trial[off_unit, start] = 0
-                if add(trial):
+                if add(trial, {"move": "replace", "unit": int(on_unit), "period": int(start), "width": 1, "off_unit": int(off_unit)}):
                     return result
     return result

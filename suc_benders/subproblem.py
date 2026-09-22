@@ -20,6 +20,8 @@ class ScenarioResult:
     cut_beta_u: np.ndarray | None = None
     cut_beta_v: np.ndarray | None = None
     cut_beta_w: np.ndarray | None = None
+    balance_dual: np.ndarray | None = None
+    reserve_dual: np.ndarray | None = None
     message: str = ""
 
 
@@ -55,6 +57,8 @@ def _solve_scenario(
     p = model.addMVar((n, horizon), lb=0.0, name="p")
     r = model.addMVar((n, horizon), lb=0.0, name="r")
     records: List[Tuple[object, float, np.ndarray, np.ndarray, np.ndarray]] = []
+    balance_constraints: List[object] = []
+    reserve_constraints: List[object] = []
 
     def add(constr, constant, cu=None, cv=None, cw=None):
         records.append(
@@ -92,8 +96,12 @@ def _solve_scenario(
                 add(model.addConstr(p[i, t - 1] - p[i, t] <= data.ramp_down[i]), data.ramp_down[i])
 
     for t in range(horizon):
-        add(model.addConstr(sum(p[i, t] for i in range(n)) == scenario.load[t]), float(scenario.load[t]))
-        add(model.addConstr(sum(r[i, t] for i in range(n)) >= data.reserve_fraction * scenario.load[t]), data.reserve_fraction * scenario.load[t])
+        balance = model.addConstr(sum(p[i, t] for i in range(n)) == scenario.load[t])
+        reserve = model.addConstr(sum(r[i, t] for i in range(n)) >= data.reserve_fraction * scenario.load[t])
+        add(balance, float(scenario.load[t]))
+        add(reserve, data.reserve_fraction * scenario.load[t])
+        balance_constraints.append(balance)
+        reserve_constraints.append(reserve)
 
     fuel = sum(
         data.cost_a[i] * p[i, t] * p[i, t] + data.cost_b[i] * p[i, t]
@@ -123,6 +131,8 @@ def _solve_scenario(
         cut_beta_u=beta_u,
         cut_beta_v=beta_v,
         cut_beta_w=beta_w,
+        balance_dual=np.asarray([float(constr.Pi) for constr in balance_constraints], dtype=float),
+        reserve_dual=np.asarray([float(constr.Pi) for constr in reserve_constraints], dtype=float),
     )
 
 
