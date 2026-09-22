@@ -7,6 +7,7 @@ from pathlib import Path
 from .data import load_suc_data
 from .solver import BendersConfig, solve_benders, result_to_dict
 from .master import QuantumConfig
+from .llm import LLMConfig
 
 
 def main() -> None:
@@ -16,6 +17,7 @@ def main() -> None:
     parser.add_argument("--max-iterations", type=int, default=20)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--llm", action="store_true")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -23,6 +25,7 @@ def main() -> None:
     config = BendersConfig(
         max_iterations=args.max_iterations,
         quantum=QuantumConfig(kaiwu_seed=args.seed),
+        llm=LLMConfig(enabled=args.llm),
     )
     result = solve_benders(units, scenarios, config)
     payload = result_to_dict(result)

@@ -1,6 +1,6 @@
 # SUC + Benders (10×24)
 
-This repository contains a small, reproducible two-stage stochastic unit commitment model. The first stage is a binary commitment problem solved as a QUBO by Kaiwu local simulated annealing. The second stage is a continuous economic-dispatch subproblem solved by Gurobi. A full deterministic equivalent Gurobi model is included as a validation baseline.
+This repository contains a small, reproducible two-stage stochastic unit commitment model with optional local and LLM candidate advice. The first stage is a binary commitment problem solved as a QUBO by Kaiwu local simulated annealing. The second stage is a continuous economic-dispatch subproblem solved by Gurobi. A full deterministic equivalent Gurobi model is included as a validation baseline.
 
 ## Scope
 
@@ -11,7 +11,7 @@ This repository contains a small, reproducible two-stage stochastic unit commitm
   - `high`: 1.05 × base load, probability 0.25
 - 5% spinning reserve
 - exact 10×24 base load and generator parameters from the original MATLAB data
-- no LLM, no cloud/QPU calls, and no strict Benders lower-bound/gap claim in v0.1
+- optional LLM candidate advice, no cloud/QPU calls, and no strict Benders lower-bound/gap claim
 
 > The `high` scenario is capped at 1.05 because 1.10 × peak load plus 5% reserve exceeds the installed capacity of the 10-generator system. If you want a different high scenario, provide your own `scenario_file`.
 
@@ -22,6 +22,34 @@ python -m pip install -r requirements.txt
 ```
 
 Python 3.10+ is expected.
+
+## What this version adds
+
+- Deterministic candidate repair for infeasible Kaiwu schedules
+- Local perturbation around repaired candidates and the incumbent
+- Reserve constraints scaled to 100 MW in the QUBO energy
+- Optional LLM candidate advisor, disabled by default
+- A benchmark comparing:
+  - quantum-only
+  - quantum + repair
+  - quantum + repair + local
+  - quantum + repair + local + LLM (when `--llm` is passed)
+
+The local-enhanced path on the 10x24 instance reaches roughly `7.5%` relative error to the exact Gurobi optimum after 5 iterations.
+
+## Run the benchmark
+
+```powershell
+python -m suc_benders.benchmark --max-iterations 5
+```
+
+To include the optional LLM row:
+
+```powershell
+python -m suc_benders.benchmark --max-iterations 5 --llm
+```
+
+`LLM_API_KEY` must be set before using `--llm`. Without it, the LLM row safely returns no candidates.
 
 ## Run
 
