@@ -382,6 +382,12 @@ def solve_benders(
         )
 
         if new_candidates == 0:
+            # A failed LLM call is a transient infrastructure event, not
+            # evidence that candidate generation has genuinely stalled. Only
+            # treat the iteration as a deadlock when the LLM did not fail.
+            llm_failure = bool(llm_result and llm_result.failed)
+            if llm_failure and iteration < config.max_iterations:
+                continue
             status = "NO_NEW_CANDIDATES"
             message = "candidate generator produced no new discrete-feasible commitments"
             break

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import time
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -21,7 +22,12 @@ class LLMConfig:
     max_candidates: int = 4
     timeout_seconds: float = 180.0
     temperature: float = 0.2
-    max_tokens: int = 6144
+    # Reasoning models (e.g. deepseek-reasoner) spend part of this budget on
+    # hidden reasoning tokens before emitting any text, so the default is sized
+    # for those models rather than for a plain chat completion.
+    max_tokens: int = 32000
+    max_retries: int = 3
+    retry_backoff_seconds: float = 30.0
 
 
 @dataclass
@@ -154,16 +160,47 @@ def ask_llm_for_candidates(
         },
         method="POST",
     )
+    direct_opener = build_opener(ProxyHandler({}))
+    attempts = max(1, int(config.max_retries))
+    backoff = float(config.retry_backoff_seconds)
+    last_error = "unknown"
+    raw = None
+    for attempt in range(attempts):
+        try:
+            with direct_opener.open(
+                request, timeout=float(config.timeout_seconds)
+            ) as response:
+                raw = json.loads(response.read().decode("utf-8"))
+            break
+        except HTTPError as exc:
+            last_error = f"HTTP {exc.code}"
+            if exc.code == 429 and attempt + 1 < attempts:
+                time.sleep(backoff * (attempt + 1))
+                continue
+            return LLMAdviceResult([], failed=True, message=last_error)
+        except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+            last_error = type(exc).__name__
+            if attempt + 1 < attempts:
+                time.sleep(backoff * (attempt + 1))
+                continue
+            return LLMAdviceResult([], failed=True, message=last_error)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return LLMAdviceResult([], failed=True, message=type(exc).__name__)
+
+    if raw is None:
+        return LLMAdviceResult([], failed=True, message=last_error)
+
     try:
-        direct_opener = build_opener(ProxyHandler({}))
-        with direct_opener.open(request, timeout=float(config.timeout_seconds)) as response:
-            raw = json.loads(response.read().decode("utf-8"))
-        blocks = raw["content"]
+        blocks = raw.get("content", []) if isinstance(raw, dict) else []
         content = "".join(
             block.get("text", "") for block in blocks if block.get("type") == "text"
         )
         if not content:
-            raise ValueError("response content is empty")
+            # Reasoning models can consume the whole budget on hidden
+            # reasoning and return no text; report that distinctly.
+            stop = raw.get("stop_reason") if isinstance(raw, dict) else None
+            usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
+            raise ValueError(f"empty content (stop_reason={stop}, usage={usage})")
         content = content.strip().removeprefix("```json").removesuffix("```").strip()
         parsed = json.loads(content)
         if isinstance(parsed, list):
@@ -174,8 +211,8 @@ def ask_llm_for_candidates(
             raise ValueError("response root must be an object or list")
         if not isinstance(entries, list):
             raise ValueError("candidates is not a list")
-    except (HTTPError, URLError, TimeoutError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        return LLMAdviceResult([], failed=True, message=type(exc).__name__)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return LLMAdviceResult([], failed=True, message=str(exc)[:200])
 
     output: list[MasterCandidate] = []
     seen = {
