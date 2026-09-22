@@ -1,0 +1,8 @@
+{
+  "reserve_fraction": 0.05,
+  "scenarios": [
+    {"name": "low", "probability": 0.25, "load_factor": 0.9},
+    {"name": "base", "probability": 0.5, "load_factor": 1.0},
+    {"name": "high", "probability": 0.25, "load_factor": 1.05}
+  ]
+}
