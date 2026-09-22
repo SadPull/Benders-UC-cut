@@ -10,12 +10,20 @@ from .llm import LLMConfig
 from .solver import BendersConfig, solve_benders
 
 
-def _config(max_iterations: int, seed: int, *, repair: bool, perturb: bool, llm: bool = False) -> BendersConfig:
+def _config(
+    max_iterations: int,
+    seed: int,
+    *,
+    repair: bool,
+    perturb: bool,
+    llm: bool = False,
+    llm_timeout: float = 180.0,
+) -> BendersConfig:
     return BendersConfig(
         max_iterations=max_iterations,
         repair_candidates=repair,
         perturb_candidates=perturb,
-        llm=LLMConfig(enabled=llm),
+        llm=LLMConfig(enabled=llm, timeout_seconds=llm_timeout),
     )
 
 
@@ -26,19 +34,40 @@ def main() -> None:
     parser.add_argument("--max-iterations", type=int, default=5)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--llm", action="store_true")
+    parser.add_argument("--llm-timeout", type=float, default=180.0)
+    parser.add_argument(
+        "--strategies",
+        default=None,
+        help="Comma-separated subset of strategy names to run (default: all).",
+    )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     units, scenarios = load_suc_data(args.data, args.scenario_file)
     exact = solve_full(units, scenarios, FullConfig(output_flag=0, mip_gap=1e-4))
 
+    # (name, repair, perturb/local, llm)
     strategies: list[tuple[str, bool, bool, bool]] = [
         ("quantum-only", False, False, False),
         ("quantum+repair", True, False, False),
         ("quantum+repair+local", True, True, False),
     ]
     if args.llm:
+        # Isolated arm: LLM candidates with NO local perturbation, so the
+        # effect of the LLM can be read without local-search contamination.
+        strategies.append(("quantum+repair+llm", True, False, True))
+        # Combined arm, kept for reference only.
         strategies.append(("quantum+repair+local+llm", True, True, True))
+
+    if args.strategies:
+        wanted = [item.strip() for item in args.strategies.split(",") if item.strip()]
+        available = {item[0] for item in strategies}
+        unknown = [item for item in wanted if item not in available]
+        if unknown:
+            raise SystemExit(
+                f"unknown strategy name(s): {unknown}; available: {sorted(available)}"
+            )
+        strategies = [item for item in strategies if item[0] in wanted]
 
     rows = []
     for name, repair, perturb, llm in strategies:
@@ -52,6 +81,7 @@ def main() -> None:
                 repair=repair,
                 perturb=perturb,
                 llm=llm,
+                llm_timeout=args.llm_timeout,
             ),
         )
         rows.append(
@@ -74,6 +104,9 @@ def main() -> None:
         )
     payload = {
         "exact_objective": exact.objective,
+        "llm_timeout_seconds": args.llm_timeout,
+        "max_iterations": args.max_iterations,
+        "seed": args.seed,
         "rows": rows,
     }
     print(json.dumps(payload, indent=2, allow_nan=False))

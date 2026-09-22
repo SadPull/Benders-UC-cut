@@ -1,5 +1,12 @@
 # EXP-1: Real-LLM benchmark on 10x24 SUC (v0.4.0)
 
+> **CORRECTION (see EXPERIMENT_2_LLM_vs_LOCAL.md).** The row labelled
+> "+ LLM" below was actually `quantum+repair+local+llm`: local perturbation was
+> **enabled**. It measures LLM + local combined, not LLM alone, and the gain
+> cannot be attributed to the LLM. The isolated local-free measurement is in
+> EXPERIMENT_2_LLM_vs_LOCAL.md.
+
+
 Date: 2026-09-22
 Code: commit `fbdf2b5` (tag `v0.4.0`)
 Model: `qwen3.8-27b` via `https://models.sjtu.edu.cn/api/v1`

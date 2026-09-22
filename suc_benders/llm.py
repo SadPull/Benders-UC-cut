@@ -19,7 +19,7 @@ from .master import MasterCandidate
 class LLMConfig:
     enabled: bool = False
     max_candidates: int = 4
-    timeout_seconds: float = 60.0
+    timeout_seconds: float = 180.0
     temperature: float = 0.2
     max_tokens: int = 6144
 
