@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import json
 import time
 from typing import List, Sequence
 
 import numpy as np
 
+from .candidates import commitment_key, make_candidate, perturb_commitment, repair_commitment
 from .common import Scenario, commitment_is_feasible
 from .data import UCData
+from .llm import LLMConfig, ask_llm_for_candidates
 from .master import BendersCut, MasterCandidate, QuantumConfig, QuantumMaster
 from .quantum import solve_qubo
 from .subproblem import aggregate_optimality_cut, solve_scenario
@@ -19,7 +20,15 @@ class BendersConfig:
     max_iterations: int = 20
     penalty: float = 1_000_000.0
     theta_step: float = 1.0
+    reserve_scale: float = 100.0
+    repair_candidates: bool = True
+    perturb_candidates: bool = True
+    perturbations_per_candidate: int = 12
+    perturbation_window_lengths: tuple[int, ...] = (2, 3, 4)
+    group_size: int = 2
+    max_generated_candidates: int = 32
     quantum: QuantumConfig = field(default_factory=QuantumConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     subproblem_output_flag: int = 0
 
 
@@ -27,12 +36,17 @@ class BendersConfig:
 class IterationRecord:
     iteration: int
     raw_candidates: int
+    repaired_candidates: int
+    perturbed_candidates: int
     feasible_candidates: int
     new_candidates: int
     feasible_subproblems: int
     optimality_cuts_added: int
     feasibility_cuts_added: int
     incumbent: float
+    llm_candidates: int = 0
+    llm_valid_candidates: int = 0
+    llm_failed: bool = False
     message: str = ""
 
 
@@ -60,10 +74,6 @@ class BendersResult:
     message: str = ""
 
 
-def _key(u: np.ndarray, v: np.ndarray, w: np.ndarray) -> tuple[int, ...]:
-    return tuple(np.r_[u.reshape(-1), v.reshape(-1), w.reshape(-1)].astype(int).tolist())
-
-
 def _fixed_cost(data: UCData, u: np.ndarray, v: np.ndarray, w: np.ndarray) -> float:
     return float(
         np.sum(data.cost_c[:, None] * u)
@@ -80,16 +90,10 @@ def _construct_feasible_candidate(data: UCData, scenarios: Sequence[Scenario]) -
     for i in range(n):
         start = 0 if data.initial_on[i] else max(0, int(data.min_down[i]) - int(data.initial_duration[i]))
         u[i, start:] = 1
-    v = np.zeros_like(u)
-    w = np.zeros_like(u)
-    prev = data.initial_on.astype(int)
-    for t in range(horizon):
-        v[:, t] = np.maximum(u[:, t] - prev, 0)
-        w[:, t] = np.maximum(prev - u[:, t], 0)
-        prev = u[:, t]
-    if not commitment_is_feasible(data, scenarios, u, v, w):
+    candidate = make_candidate(data, scenarios, u)
+    if not commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
         raise RuntimeError("deterministic fallback commitment is infeasible")
-    return MasterCandidate(u, v, w, theta=None)
+    return candidate
 
 
 def solve_benders(
@@ -123,18 +127,88 @@ def solve_benders(
             theta_cap=theta_cap,
             penalty=config.penalty,
             theta_step=config.theta_step,
+            reserve_scale=config.reserve_scale,
         )
         binaries = solve_qubo(master.matrix(), config.quantum)
-        candidates = [master.decode(binary) for binary in binaries]
-        candidates.append(_construct_feasible_candidate(data, scenarios))
+        quantum_candidates = [master.decode(binary) for binary in binaries]
+        fallback = _construct_feasible_candidate(data, scenarios)
 
-        raw_count = len(candidates)
-        feasible_candidates = [
-            candidate for candidate in candidates if commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w)
-        ]
+        raw_count = len(quantum_candidates) + 1
+        repaired_count = 0
+        base_candidates: list[MasterCandidate] = []
+
+        for candidate in quantum_candidates:
+            if config.repair_candidates:
+                repaired = repair_commitment(data, scenarios, candidate.u)
+                if repaired is None:
+                    continue
+                if not np.array_equal(repaired.u, candidate.u):
+                    repaired_count += 1
+                base_candidates.append(repaired)
+            elif commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
+                base_candidates.append(candidate)
+        base_candidates.append(fallback)
+        if best_u is not None:
+            base_candidates.append(make_candidate(data, scenarios, best_u))
+
+        # Remove duplicate base candidates while preserving order.
+        unique_base: list[MasterCandidate] = []
+        base_seen: set[tuple[int, ...]] = set()
+        for candidate in base_candidates:
+            key = commitment_key(candidate.u, candidate.v, candidate.w)
+            if key not in base_seen:
+                base_seen.add(key)
+                unique_base.append(candidate)
+
+        generated: list[MasterCandidate] = []
+        perturbed_count = 0
+        if config.perturb_candidates:
+            for base in unique_base:
+                neighbors = perturb_commitment(
+                    data,
+                    scenarios,
+                    base,
+                    limit=int(config.perturbations_per_candidate),
+                    window_lengths=config.perturbation_window_lengths,
+                    group_size=int(config.group_size),
+                    seed=config.quantum.kaiwu_seed,
+                )
+                perturbed_count += len(neighbors)
+                generated.extend(neighbors)
+
+        llm_result = None
+        llm_candidates: list[MasterCandidate] = []
+        if config.llm.enabled:
+            incumbent_candidate = None
+            if best_u is not None:
+                incumbent_candidate = make_candidate(data, scenarios, best_u)
+            llm_result = ask_llm_for_candidates(
+                data,
+                scenarios,
+                iteration,
+                unique_base,
+                incumbent_candidate,
+                config.llm,
+            )
+            llm_candidates = llm_result.candidates
+
+        # LLM candidates are scarce and expensive; let them survive the cap first.
+        all_candidates = llm_candidates + generated + unique_base
+        unique_candidates: list[MasterCandidate] = []
+        candidate_seen: set[tuple[int, ...]] = set()
+        for candidate in all_candidates:
+            key = commitment_key(candidate.u, candidate.v, candidate.w)
+            if key in candidate_seen:
+                continue
+            if not commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
+                continue
+            candidate_seen.add(key)
+            unique_candidates.append(candidate)
+        unique_candidates = unique_candidates[: int(config.max_generated_candidates)]
+
         new_candidates: list[MasterCandidate] = []
-        for candidate in feasible_candidates:
-            key = _key(candidate.u, candidate.v, candidate.w)
+        for candidate in unique_candidates:
+            key = commitment_key(candidate.u, candidate.v, candidate.w)
             if key not in seen:
                 seen.add(key)
                 new_candidates.append(candidate)
@@ -189,17 +263,23 @@ def solve_benders(
             IterationRecord(
                 iteration=iteration,
                 raw_candidates=raw_count,
-                feasible_candidates=len(feasible_candidates),
+                repaired_candidates=repaired_count,
+                perturbed_candidates=perturbed_count,
+                feasible_candidates=len(unique_candidates),
                 new_candidates=len(new_candidates),
                 feasible_subproblems=feasible_subproblems,
                 optimality_cuts_added=optimality_added,
                 feasibility_cuts_added=feasibility_added,
                 incumbent=incumbent,
+                llm_candidates=llm_result.raw_count if llm_result else 0,
+                llm_valid_candidates=llm_result.valid_count if llm_result else 0,
+                llm_failed=llm_result.failed if llm_result else False,
+                message=llm_result.message if llm_result else "",
             )
         )
         if len(new_candidates) == 0:
             status = "NO_NEW_CANDIDATES"
-            message = "quantum backend produced no new discrete-feasible commitments"
+            message = "candidate generator produced no new discrete-feasible commitments"
             break
         if iteration < config.max_iterations:
             theta_cap = min(theta_cap, max(incumbent, 1.0))

@@ -65,6 +65,7 @@ class QuantumMaster:
         *,
         penalty: float = 1_000_000.0,
         theta_step: float = 1.0,
+        reserve_scale: float = 100.0,
     ):
         if theta_cap <= 0 or theta_step <= 0:
             raise ValueError("theta cap and step must be positive")
@@ -74,6 +75,9 @@ class QuantumMaster:
         self.penalty = float(penalty)
         self.theta_step = float(theta_step)
         self.theta_cap = float(theta_cap)
+        self.reserve_scale = float(reserve_scale)
+        if self.reserve_scale <= 0:
+            raise ValueError("reserve_scale must be positive")
         self.theta_bits = theta_bit_width(self.theta_cap, self.theta_step)
         self.kw = get_kaiwu()
         self.model = self.kw.qubo.QuboModel()
@@ -146,9 +150,9 @@ class QuantumMaster:
                     expr = data.pmax[i] * self.u[i, t] - (data.pmax[i] - data.pstart[i]) * self.v[i, t]
                     if t + 1 < horizon:
                         expr = expr - (data.pmax[i] - data.pshut[i]) * self.w[i, t + 1]
-                    capacity.append(expr)
+                    capacity.append(expr * (1.0 / self.reserve_scale))
                 self.model.add_constraint(
-                    self._sum(capacity) >= float(reserve[t]),
+                    self._sum(capacity) >= float(reserve[t]) / self.reserve_scale,
                     constr_type="hard", penalty=self.penalty,
                 )
 
