@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 import time
 from typing import List, Sequence
 
@@ -22,6 +23,7 @@ from .context import (
     decommit_gradient_map,
 )
 from .data import UCData
+from .exact_master import ExactMasterConfig, ExactMasterResult, solve_exact_master
 from .llm import LLMConfig, ask_llm_for_candidates
 from .master import BendersCut, MasterCandidate, QuantumConfig, QuantumMaster
 from .quantum import solve_qubo
@@ -48,6 +50,11 @@ class BendersConfig:
     quantum: QuantumConfig = field(default_factory=QuantumConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     subproblem_output_flag: int = 0
+    # Exact Gurobi Benders master: supplies a certified lower bound and an exact
+    # master candidate. Kaiwu and the LLM stay candidate generators.
+    exact_master: bool = True
+    exact_master_config: ExactMasterConfig = field(default_factory=ExactMasterConfig)
+    gap_tolerance: float = 1e-4
 
 
 @dataclass
@@ -67,6 +74,10 @@ class IterationRecord:
     llm_valid_candidates: int = 0
     llm_failed: bool = False
     message: str = ""
+    lower_bound: float = float("-inf")
+    gap: float = float("inf")
+    exact_candidates: int = 0
+    master_status: str = "DISABLED"
 
 
 @dataclass
@@ -91,6 +102,10 @@ class BendersResult:
     feasibility_cuts: int
     runtime: float
     message: str = ""
+    lower_bound: float = float("-inf")
+    gap: float = float("inf")
+    master_status: str = "DISABLED"
+    master_runtime: float = 0.0
 
 
 def _fixed_cost(data: UCData, u: np.ndarray, v: np.ndarray, w: np.ndarray) -> float:
@@ -158,6 +173,12 @@ def solve_benders(
     status = "MAX_ITERATIONS"
     message = ""
     current_infeasible_diagnostics: list[dict] = []
+
+    # Certified lower bound bookkeeping from the exact Gurobi Benders master.
+    lower_bound: float = float("-inf")
+    master_status = "DISABLED"
+    master_runtime = 0.0
+    cuts_at_last_master = -1
 
     def evaluate_candidate(candidate: MasterCandidate, source: str) -> CandidateEvaluation:
         nonlocal incumbent, best_u, best_v, best_w, best_scenario_results, best_solutions
@@ -232,8 +253,45 @@ def solve_benders(
         evaluation_cache[key] = evaluation
         return evaluation
 
+    def run_exact_master() -> tuple[ExactMasterResult | None, MasterCandidate | None]:
+        """Solve the exact Benders master and return its candidate, if any."""
+
+        nonlocal lower_bound, master_status, master_runtime, cuts_at_last_master
+        result = solve_exact_master(data, scenarios, cuts, config.exact_master_config)
+        master_status = result.status
+        master_runtime += result.runtime
+        cuts_at_last_master = len(cuts)
+        if math.isfinite(result.bound):
+            if not math.isfinite(lower_bound):
+                lower_bound = result.bound
+            else:
+                lower_bound = max(lower_bound, result.bound)
+        if result.u is None:
+            return result, None
+        candidate = MasterCandidate(
+            u=result.u,
+            v=result.v,
+            w=result.w,
+            theta=result.theta,
+            source="exact",
+        )
+        if not commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
+            return result, None
+        return result, candidate
+
     for iteration in range(1, config.max_iterations + 1):
         current_infeasible_diagnostics.clear()
+
+        exact_master_result = None
+        exact_candidate = None
+        if config.exact_master:
+            exact_master_result, exact_candidate = run_exact_master()
+            if exact_master_result is not None and exact_master_result.u is None:
+                if exact_master_result.status in ("INFEASIBLE", "INF_OR_UNBD"):
+                    status = "INFEASIBLE"
+                    message = "exact Benders master proved infeasibility"
+                    break
+
         master = QuantumMaster(
             data,
             scenarios,
@@ -268,6 +326,8 @@ def solve_benders(
             elif commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
                 base_candidates.append(candidate)
         base_candidates.append(fallback)
+        if exact_candidate is not None:
+            base_candidates.append(exact_candidate)
         if best_u is not None:
             incumbent_candidate = make_candidate(data, scenarios, best_u, source="incumbent")
             base_candidates.append(incumbent_candidate)
@@ -439,8 +499,40 @@ def solve_benders(
                 llm_valid_candidates=llm_result.valid_count if llm_result else 0,
                 llm_failed=llm_result.failed if llm_result else False,
                 message=llm_result.message if llm_result else "",
+                lower_bound=lower_bound,
+                gap=(
+                    (incumbent - lower_bound) / max(1.0, abs(incumbent))
+                    if math.isfinite(lower_bound) and math.isfinite(incumbent)
+                    else float("inf")
+                ),
+                exact_candidates=1 if exact_candidate is not None else 0,
+                master_status=master_status,
             )
         )
+
+        # Certified Benders gap: stop as soon as UB and the exact master bound
+        # agree. This is a proven statement about the current cut set, not a
+        # heuristic convergence signal.
+        if (
+            config.exact_master
+            and math.isfinite(lower_bound)
+            and math.isfinite(incumbent)
+        ):
+            tolerance = 1e-6 * max(1.0, abs(incumbent))
+            if lower_bound > incumbent + tolerance:
+                status = "BOUND_INCONSISTENCY"
+                message = (
+                    f"exact master bound {lower_bound:.6f} exceeds incumbent "
+                    f"{incumbent:.6f}"
+                )
+                break
+            if incumbent - lower_bound <= config.gap_tolerance * max(1.0, abs(incumbent)):
+                status = "CONVERGED"
+                message = (
+                    f"Benders gap {(incumbent - lower_bound) / max(1.0, abs(incumbent)):.3e} "
+                    f"within tolerance {config.gap_tolerance:.3e}"
+                )
+                break
 
         if new_candidates == 0:
             # A failed LLM call is a transient infrastructure event, not
@@ -454,6 +546,11 @@ def solve_benders(
             break
         if iteration < config.max_iterations:
             theta_cap = min(theta_cap, max(incumbent, 1.0))
+
+    # Cuts added after the last master solve tighten the bound; refresh once so
+    # the reported gap reflects the final cut set.
+    if config.exact_master and cuts and len(cuts) != cuts_at_last_master:
+        run_exact_master()
 
     optimality_count = sum(cut.kind == "optimality" for cut in cuts)
     feasibility_count = sum(cut.kind == "feasibility" for cut in cuts)
@@ -470,6 +567,10 @@ def solve_benders(
             feasibility_cuts=feasibility_count,
             runtime=time.perf_counter() - started,
             message="no candidate was feasible in every scenario",
+            lower_bound=lower_bound,
+            gap=float("inf"),
+            master_status=master_status,
+            master_runtime=master_runtime,
         )
     return BendersResult(
         status=status,
@@ -483,6 +584,14 @@ def solve_benders(
         feasibility_cuts=feasibility_count,
         runtime=time.perf_counter() - started,
         message=message,
+        lower_bound=lower_bound,
+        gap=(
+            (incumbent - lower_bound) / max(1.0, abs(incumbent))
+            if math.isfinite(lower_bound) and math.isfinite(incumbent)
+            else float("inf")
+        ),
+        master_status=master_status,
+        master_runtime=master_runtime,
     )
 
 

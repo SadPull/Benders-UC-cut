@@ -1,6 +1,6 @@
 # SUC + Benders (10×24)
 
-This repository contains a small, reproducible two-stage stochastic unit commitment model with optional local and LLM candidate advice. The first stage is a binary commitment problem solved as a QUBO by Kaiwu local simulated annealing. The second stage is a continuous economic-dispatch subproblem solved by Gurobi. A full deterministic equivalent Gurobi model is included as a validation baseline.
+This repository contains a small, reproducible two-stage stochastic unit commitment model with a hybrid Benders architecture. The first stage is a binary commitment problem: an exact Gurobi Benders master supplies the certified lower bound and an exact master candidate, while Kaiwu local simulated annealing and an optional LLM only generate additional candidates. The second stage is a continuous economic-dispatch subproblem solved by Gurobi. A full deterministic equivalent Gurobi model is included as an external validation baseline.
 
 ## Scope
 
@@ -11,7 +11,8 @@ This repository contains a small, reproducible two-stage stochastic unit commitm
   - `high`: 1.05 × base load, probability 0.25
 - 5% spinning reserve
 - exact 10×24 base load and generator parameters from the original MATLAB data
-- optional LLM candidate advice, no cloud/QPU calls, and no strict Benders lower-bound/gap claim
+- hybrid exact Gurobi Benders master for a certified lower bound and Benders gap
+- optional LLM candidate advice, no cloud/QPU calls
 
 > The `high` scenario is capped at 1.05 because 1.10 × peak load plus 5% reserve exceeds the installed capacity of the 10-generator system. If you want a different high scenario, provide your own `scenario_file`.
 
@@ -23,8 +24,31 @@ python -m pip install -r requirements.txt
 
 Python 3.10+ is expected.
 
+## Architecture
+
+```text
+Kaiwu SA + repair + decommit + optional LLM   ->  candidate commitments
+Gurobi subproblems (per scenario)             ->  dispatch, cuts
+Gurobi exact Benders master                   ->  certified lower bound + gap
+```
+
+- The **exact Gurobi Benders master** is the convergence authority. It solves the
+  current cut relaxation with a continuous `theta` and reports `ObjBound`, so the
+  reported gap is a certified Benders gap for the accumulated cut set.
+- **Kaiwu local simulated annealing** is a candidate generator, not a certified
+  master. Its QUBO output is repaired, validated, and then evaluated by Gurobi.
+- **LLM advice is optional and heuristic only.** It never enters the lower bound.
+
+The Benders gap is:
+
+```text
+gap = (UB - LB) / max(1, abs(UB))
+```
+
 ## What this version adds
 
+- **Hybrid exact Benders master** (`suc_benders/exact_master.py`) with certified
+  lower bound and a `CONVERGED` stopping rule
 - **Decommitment-first candidate generation**: from the incumbent, greedily turn
   unit-hours OFF, scored by a per-(unit, hour) marginal-cost gradient
 - **Decommitment gradient context for the LLM**: `unit_hour_decommit_gradient`,
@@ -40,7 +64,7 @@ Python 3.10+ is expected.
   - quantum + repair + local
   - quantum + repair + local + LLM (when `--llm` is passed)
 
-On the 10x24 instance, the decommitment-first path reaches `2.19%` relative error to the exact Gurobi optimum deterministically, and `1.40%` best / `1.72%` mean with the optional LLM advisor, after 5 iterations.
+On the 10x24 instance, the decommitment-first path reaches `2.19%` relative error to the exact Gurobi optimum deterministically, and `1.40%` best / `1.72%` mean with the optional LLM advisor, after 5 iterations. Those are distances to the external Gurobi optimum; the hybrid exact master additionally reports a certified Benders gap for the accumulated cut set.
 
 ## LLM context
 
@@ -65,6 +89,12 @@ All context values are rounded to three decimals and lists are capped to keep th
 python -m suc_benders.benchmark --max-iterations 5
 ```
 
+Hybrid arm with the certified bound:
+
+```powershell
+python -m suc_benders.benchmark --max-iterations 5 --strategies hybrid-exact
+```
+
 To include the optional LLM row:
 
 ```powershell
@@ -75,10 +105,16 @@ python -m suc_benders.benchmark --max-iterations 5 --llm
 
 ## Run
 
-Benders main problem with Kaiwu local simulated annealing:
+Benders with the hybrid master (exact Gurobi bound plus Kaiwu candidates):
 
 ```powershell
 python -m suc_benders.run --max-iterations 5
+```
+
+Kaiwu-only path without the exact master:
+
+```powershell
+python -m suc_benders.run --max-iterations 5 --no-exact-master
 ```
 
 Exact full Gurobi benchmark:
@@ -93,6 +129,9 @@ Optional arguments:
 --data data/suc_10x24.json
 --scenario-file data/scenarios.json
 --quiet
+--no-exact-master
+--master-time-limit 60
+--master-mip-gap 1e-6
 ```
 
 To use a custom scenario set, create a JSON file such as:
@@ -117,6 +156,12 @@ python -m unittest discover -s tests -v
 ## Limitations
 
 - Kaiwu local simulated annealing is the only implemented quantum backend; cloud/QPU is not configured.
-- The Benders loop reports feasible incumbent objective values, cut counts, and iteration history, but does not claim a certified optimality gap.
+- The certified gap refers to the **current Benders cut set**. It becomes a bound on
+  the full two-stage problem only as cuts accumulate; a small gap is not by itself a
+  claim of quantum advantage.
+- `solve_full()` remains the external reference optimum. `exact_master` is a MILP
+  master relaxation, not the full MIQP.
 - The feasibility cut is a generic normalized-shortfall cut derived from Gurobi duals; it is not a specialized strong cut.
+- If the master hits its time limit, the reported bound is Gurobi's proven `ObjBound`,
+  never the incumbent objective.
 - The project is model scaffolding, not a research benchmark.

@@ -7,6 +7,7 @@ from pathlib import Path
 from .data import load_suc_data
 from .solver import BendersConfig, solve_benders, result_to_dict
 from .master import QuantumConfig
+from .exact_master import ExactMasterConfig
 from .llm import LLMConfig
 
 
@@ -23,6 +24,13 @@ def main() -> None:
     parser.add_argument("--llm-timeout", type=float, default=180.0)
     parser.add_argument("--llm-max-tokens", type=int, default=6144)
     parser.add_argument("--llm-max-retries", type=int, default=3)
+    parser.add_argument(
+        "--no-exact-master",
+        action="store_true",
+        help="Disable the exact Gurobi Benders master and its certified bound.",
+    )
+    parser.add_argument("--master-time-limit", type=float, default=60.0)
+    parser.add_argument("--master-mip-gap", type=float, default=1e-6)
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -38,6 +46,11 @@ def main() -> None:
             max_tokens=args.llm_max_tokens,
             max_retries=args.llm_max_retries,
         ),
+        exact_master=not args.no_exact_master,
+        exact_master_config=ExactMasterConfig(
+            time_limit=args.master_time_limit,
+            mip_gap=args.master_mip_gap,
+        ),
     )
     result = solve_benders(units, scenarios, config)
     payload = result_to_dict(result)
@@ -47,6 +60,10 @@ def main() -> None:
     print(f"optimality_cuts={result.optimality_cuts}")
     print(f"feasibility_cuts={result.feasibility_cuts}")
     print(f"runtime_seconds={result.runtime:.3f}")
+    print(f"lower_bound={result.lower_bound:.6f}")
+    print(f"benders_gap={result.gap:.6g}")
+    print(f"master_status={result.master_status}")
+    print(f"master_runtime_seconds={result.master_runtime:.3f}")
     print(f"message={result.message}")
     if args.output:
         Path(args.output).write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")

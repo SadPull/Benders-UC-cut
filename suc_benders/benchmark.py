@@ -5,6 +5,7 @@ import json
 import time
 
 from .data import load_suc_data
+from .exact_master import ExactMasterConfig
 from .full_model import FullConfig, solve_full
 from .llm import LLMConfig
 from .solver import BendersConfig, solve_benders
@@ -20,6 +21,8 @@ def _config(
     llm_timeout: float = 180.0,
     llm_max_tokens: int = 6144,
     decommit: bool = False,
+    exact_master: bool = False,
+    master_time_limit: float = 60.0,
 ) -> BendersConfig:
     return BendersConfig(
         max_iterations=max_iterations,
@@ -31,6 +34,8 @@ def _config(
             timeout_seconds=llm_timeout,
             max_tokens=llm_max_tokens,
         ),
+        exact_master=exact_master,
+        exact_master_config=ExactMasterConfig(time_limit=master_time_limit),
     )
 
 
@@ -44,6 +49,12 @@ def main() -> None:
     parser.add_argument("--llm-timeout", type=float, default=180.0)
     parser.add_argument("--llm-max-tokens", type=int, default=6144)
     parser.add_argument(
+        "--master-time-limit",
+        type=float,
+        default=60.0,
+        help="Time limit in seconds for each exact Benders master solve.",
+    )
+    parser.add_argument(
         "--strategies",
         default=None,
         help="Comma-separated subset of strategy names to run (default: all).",
@@ -54,20 +65,24 @@ def main() -> None:
     units, scenarios = load_suc_data(args.data, args.scenario_file)
     exact = solve_full(units, scenarios, FullConfig(output_flag=0, mip_gap=1e-4))
 
-    # (name, repair, perturb/local, llm, decommit)
-    strategies: list[tuple[str, bool, bool, bool, bool]] = [
-        ("quantum-only", False, False, False, False),
-        ("quantum+repair", True, False, False, False),
-        ("quantum+repair+decommit", True, False, False, True),
-        # Legacy local-search arms, kept for reference only.
-        ("quantum+repair+local", True, True, False, False),
+    # (name, repair, perturb/local, llm, decommit, exact_master)
+    strategies: list[tuple[str, bool, bool, bool, bool, bool]] = [
+        ("quantum-only", False, False, False, False, False),
+        ("quantum+repair", True, False, False, False, False),
+        ("quantum+repair+decommit", True, False, False, True, False),
+        # Hybrid arms: exact Gurobi Benders master for the certified bound,
+        # Kaiwu plus optional LLM only as candidate generators.
+        ("hybrid-exact", True, False, False, True, True),
+        # Legacy local-search arm, kept for reference only.
+        ("quantum+repair+local", True, True, False, False, False),
     ]
     if args.llm:
         # Primary arm: decommitment-first with LLM guidance.
-        strategies.append(("quantum+repair+decommit+llm", True, False, True, True))
+        strategies.append(("quantum+repair+decommit+llm", True, False, True, True, False))
+        strategies.append(("hybrid-exact+llm", True, False, True, True, True))
         # Legacy isolated LLM arm (no decommitment), for reference.
-        strategies.append(("quantum+repair+llm", True, False, True, False))
-        strategies.append(("quantum+repair+local+llm", True, True, True, False))
+        strategies.append(("quantum+repair+llm", True, False, True, False, False))
+        strategies.append(("quantum+repair+local+llm", True, True, True, False, False))
 
     if args.strategies:
         wanted = [item.strip() for item in args.strategies.split(",") if item.strip()]
@@ -80,7 +95,7 @@ def main() -> None:
         strategies = [item for item in strategies if item[0] in wanted]
 
     rows = []
-    for name, repair, perturb, llm, decommit in strategies:
+    for name, repair, perturb, llm, decommit, exact_master in strategies:
         started = time.perf_counter()
         result = solve_benders(
             units,
@@ -94,6 +109,8 @@ def main() -> None:
                 llm_timeout=args.llm_timeout,
                 llm_max_tokens=args.llm_max_tokens,
                 decommit=decommit,
+                exact_master=exact_master,
+                master_time_limit=args.master_time_limit,
             ),
         )
         rows.append(
@@ -112,6 +129,11 @@ def main() -> None:
                 "decommit_candidates": sum(row.decommit_candidates for row in result.history),
                 "runtime": time.perf_counter() - started,
                 "status": result.status,
+                "lower_bound": result.lower_bound,
+                "benders_gap": result.gap,
+                "master_status": result.master_status,
+                "master_runtime": result.master_runtime,
+                "exact_candidates": sum(row.exact_candidates for row in result.history),
                 "message": result.message,
             }
         )
