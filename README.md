@@ -27,14 +27,15 @@ Python 3.10+ is expected.
 ## Architecture
 
 ```text
-Kaiwu SA + repair + decommit + optional LLM   ->  candidate commitments
-Gurobi subproblems (per scenario)             ->  dispatch, cuts
-Gurobi exact Benders master                   ->  certified lower bound + gap
+Gurobi exact Benders master       ->  certified lower bound, exact candidate
+Gurobi subproblems (per scenario) ->  dispatch, cuts
+Kaiwu SA + repair + decommit + optional LLM -> additional candidates (optional)
 ```
 
 - The **exact Gurobi Benders master** is the convergence authority. It solves the
-  current cut relaxation with a continuous `theta` and reports `ObjBound`, so the
-  reported gap is a certified Benders gap for the accumulated cut set.
+  cut relaxation with a continuous `theta`, adds a first-hour ramp-reaching cover,
+  and reports Gurobi's proven `ObjBound`. The reported gap is therefore a valid
+  Benders gap for the current cut relaxation, not merely a heuristic distance.
 - **Kaiwu local simulated annealing** is a candidate generator, not a certified
   master. Its QUBO output is repaired, validated, and then evaluated by Gurobi.
 - **LLM advice is optional and heuristic only.** It never enters the lower bound.
@@ -48,7 +49,10 @@ gap = (UB - LB) / max(1, abs(UB))
 ## What this version adds
 
 - **Hybrid exact Benders master** (`suc_benders/exact_master.py`) with certified
-  lower bound and a `CONVERGED` stopping rule
+  lower bound, a first-hour ramp-reaching cover, and a `CONVERGED` stopping rule
+- **Independent exact-only mode** that skips Kaiwu/QUBO entirely and seeds the
+  first master with an evaluated deterministic feasible commitment
+- Feasibility feedback from every failed scenario, not only the first failure
 - **Decommitment-first candidate generation**: from the incumbent, greedily turn
   unit-hours OFF, scored by a per-(unit, hour) marginal-cost gradient
 - **Decommitment gradient context for the LLM**: `unit_hour_decommit_gradient`,
@@ -89,6 +93,12 @@ All context values are rounded to three decimals and lists are capped to keep th
 python -m suc_benders.benchmark --max-iterations 5
 ```
 
+Exact-only arm with the certified bound and no Kaiwu/QUBO dependency:
+
+```powershell
+python -m suc_benders.benchmark --max-iterations 12 --strategies exact-only
+```
+
 Hybrid arm with the certified bound:
 
 ```powershell
@@ -111,6 +121,12 @@ Benders with the hybrid master (exact Gurobi bound plus Kaiwu candidates):
 python -m suc_benders.run --max-iterations 5
 ```
 
+Independent exact Benders path without Kaiwu/QUBO:
+
+```powershell
+python -m suc_benders.run --max-iterations 12 --no-quantum --no-decommit --no-perturb
+```
+
 Kaiwu-only path without the exact master:
 
 ```powershell
@@ -130,6 +146,7 @@ Optional arguments:
 --scenario-file data/scenarios.json
 --quiet
 --no-exact-master
+--no-quantum
 --master-time-limit 60
 --master-mip-gap 1e-6
 ```
@@ -156,8 +173,8 @@ python -m unittest discover -s tests -v
 ## Limitations
 
 - Kaiwu local simulated annealing is the only implemented quantum backend; cloud/QPU is not configured.
-- The certified gap refers to the **current Benders cut set**. It becomes a bound on
-  the full two-stage problem only as cuts accumulate; a small gap is not by itself a
+- The certified gap is valid for the current cut relaxation from the first master
+  solve onward, provided the cuts and bound are valid. A small gap is not by itself a
   claim of quantum advantage.
 - `solve_full()` remains the external reference optimum. `exact_master` is a MILP
   master relaxation, not the full MIQP.

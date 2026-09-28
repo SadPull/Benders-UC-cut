@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -107,6 +108,22 @@ class SolverExactMasterTests(unittest.TestCase):
         for record in payload["history"]:
             for key in ("lower_bound", "gap", "exact_candidates", "master_status"):
                 self.assertIn(key, record)
+
+    def test_exact_only_does_not_run_kaiwu_and_has_initial_cut(self):
+        with patch("suc_benders.solver.QuantumMaster", side_effect=AssertionError("QUBO constructed")), \
+             patch("suc_benders.solver.solve_qubo", side_effect=AssertionError("SA called")):
+            result = solve_benders(self.units, self.scenarios, self._config(
+                max_iterations=2,
+                quantum_candidates=False,
+                decommit_candidates=False,
+                perturb_candidates=False,
+                exact_master_config=ExactMasterConfig(time_limit=10.0, output_flag=0),
+            ))
+        self.assertGreaterEqual(result.optimality_cuts, 1)
+        self.assertGreater(sum(row.exact_candidates for row in result.history), 0)
+        self.assertTrue(np.isfinite(result.objective))
+        self.assertTrue(np.isfinite(result.lower_bound))
+        self.assertEqual([row.raw_candidates for row in result.history], [1, 1])
 
 
 if __name__ == "__main__":

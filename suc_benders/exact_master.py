@@ -33,6 +33,7 @@ class ExactMasterResult:
     w: np.ndarray | None = None
     theta: float | None = None
     model: Any = None
+    candidate: Any = None
 
 
 def _status_name(gp, status: int) -> str:
@@ -71,9 +72,8 @@ def solve_exact_master(
 
     The model carries the same first-stage constraints as the full two-stage
     model plus the accumulated Benders cuts, with a continuous theta.  Its
-    objective value is therefore a valid lower bound for the original
-    stochastic unit commitment problem whenever the reported bound was proven
-    by the solver.
+    proven ObjBound is a lower bound for the original stochastic unit
+    commitment problem, including when MIPGap or a time limit stops the solve.
     """
 
     config = config or ExactMasterConfig()
@@ -126,6 +126,15 @@ def solve_exact_master(
                 gp.quicksum(capacity) >= (1.0 + data.reserve_fraction) * float(scenario.load[t])
             )
 
+    # Nameplate capacity alone can overstate the power reachable at hour 0.
+    # Reserve has no ramp constraint in the recourse model, so only cover load.
+    initial_capacity = np.minimum(data.pmax, data.initial_output + data.ramp_up)
+    model.addConstr(
+        gp.quicksum(float(initial_capacity[i]) * u[i, 0] for i in range(n))
+        >= max(float(scenario.load[0]) for scenario in scenarios),
+        name="initial_ramp_cover",
+    )
+
     for cut in cut_list:
         terms = _cut_terms(gp, cut, u, v, w)
         if cut.kind == "optimality":
@@ -146,20 +155,20 @@ def solve_exact_master(
 
     status = _status_name(gp, model.Status)
     objective = float(model.ObjVal) if model.SolCount > 0 else float("inf")
-    if model.Status == gp.GRB.OPTIMAL:
-        bound = objective
-    elif model.Status in (gp.GRB.INFEASIBLE, gp.GRB.INF_OR_UNBD):
+    if model.Status == gp.GRB.INFEASIBLE:
         # An empty master relaxation means the original problem is infeasible.
         bound = float("inf")
+    elif model.Status in (gp.GRB.INF_OR_UNBD, gp.GRB.UNBOUNDED):
+        bound = float("-inf")
     else:
-        # Only a proven bound may be reported; a truncated solve returns the
-        # best proven bound, never the incumbent objective.
+        # OPTIMAL also includes termination at a nonzero MIPGap. ObjVal is an
+        # incumbent, not a proven lower bound, even in that case.
         bound = float(model.ObjBound)
         tolerance = 1e-6 * max(1.0, abs(objective)) if math.isfinite(objective) else 0.0
         if not math.isfinite(bound) or (math.isfinite(objective) and bound > objective + tolerance):
             bound = float("-inf")
 
-    mip_gap = float(model.MIPGap) if model.IsMIP else 0.0
+    mip_gap = float(model.MIPGap) if model.SolCount > 0 else float("inf")
     if math.isinf(bound) and bound > 0:
         mip_gap = float("inf")
 

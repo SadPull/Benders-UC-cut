@@ -12,13 +12,14 @@ from .llm import LLMConfig
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Solve 10x24 SUC with Kaiwu Benders master and Gurobi subproblems")
+    parser = argparse.ArgumentParser(description="Solve 10x24 SUC with a Gurobi Benders master and optional candidate generators")
     parser.add_argument("--data", default="data/suc_10x24.json")
     parser.add_argument("--scenario-file", default=None)
     parser.add_argument("--max-iterations", type=int, default=20)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--llm", action="store_true")
+    parser.add_argument("--no-quantum", action="store_true", help="Skip Kaiwu QUBO construction and simulated annealing")
     parser.add_argument("--no-perturb", action="store_true", help="Disable local perturbation")
     parser.add_argument("--no-decommit", action="store_true", help="Disable decommitment-first search")
     parser.add_argument("--llm-timeout", type=float, default=180.0)
@@ -37,6 +38,7 @@ def main() -> None:
     units, scenarios = load_suc_data(args.data, args.scenario_file)
     config = BendersConfig(
         max_iterations=args.max_iterations,
+        quantum_candidates=not args.no_quantum,
         perturb_candidates=not args.no_perturb,
         decommit_candidates=not args.no_decommit,
         quantum=QuantumConfig(kaiwu_seed=args.seed),

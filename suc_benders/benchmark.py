@@ -8,7 +8,8 @@ from .data import load_suc_data
 from .exact_master import ExactMasterConfig
 from .full_model import FullConfig, solve_full
 from .llm import LLMConfig
-from .solver import BendersConfig, solve_benders
+from .master import QuantumConfig
+from .solver import BendersConfig, result_to_dict, solve_benders
 
 
 def _config(
@@ -23,9 +24,12 @@ def _config(
     decommit: bool = False,
     exact_master: bool = False,
     master_time_limit: float = 60.0,
+    quantum_candidates: bool = True,
 ) -> BendersConfig:
     return BendersConfig(
         max_iterations=max_iterations,
+        quantum_candidates=quantum_candidates,
+        quantum=QuantumConfig(kaiwu_seed=seed),
         repair_candidates=repair,
         perturb_candidates=perturb,
         decommit_candidates=decommit,
@@ -67,6 +71,7 @@ def main() -> None:
 
     # (name, repair, perturb/local, llm, decommit, exact_master)
     strategies: list[tuple[str, bool, bool, bool, bool, bool]] = [
+        ("exact-only", False, False, False, False, True),
         ("quantum-only", False, False, False, False, False),
         ("quantum+repair", True, False, False, False, False),
         ("quantum+repair+decommit", True, False, False, True, False),
@@ -111,6 +116,7 @@ def main() -> None:
                 decommit=decommit,
                 exact_master=exact_master,
                 master_time_limit=args.master_time_limit,
+                quantum_candidates=name != "exact-only",
             ),
         )
         rows.append(
@@ -135,6 +141,7 @@ def main() -> None:
                 "master_runtime": result.master_runtime,
                 "exact_candidates": sum(row.exact_candidates for row in result.history),
                 "message": result.message,
+                "history": result_to_dict(result)["history"],
             }
         )
     payload = {
@@ -144,7 +151,7 @@ def main() -> None:
         "seed": args.seed,
         "rows": rows,
     }
-    print(json.dumps(payload, indent=2, allow_nan=False))
+    print(json.dumps(result_to_dict(payload), indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":

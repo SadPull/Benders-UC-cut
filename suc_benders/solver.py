@@ -47,6 +47,7 @@ class BendersConfig:
     perturbation_window_lengths: tuple[int, ...] = (2, 3, 4)
     group_size: int = 2
     max_generated_candidates: int = 32
+    quantum_candidates: bool = True
     quantum: QuantumConfig = field(default_factory=QuantumConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     subproblem_output_flag: int = 0
@@ -116,7 +117,7 @@ def _fixed_cost(data: UCData, u: np.ndarray, v: np.ndarray, w: np.ndarray) -> fl
     )
 
 
-def _construct_feasible_candidate(data: UCData, scenarios: Sequence[Scenario]) -> MasterCandidate:
+def _construct_feasible_candidate(data: UCData, scenarios: Sequence[Scenario]) -> MasterCandidate | None:
     """Deterministic fallback: start every unit after its initial restriction."""
 
     n, horizon = data.n_units, data.horizon
@@ -126,7 +127,7 @@ def _construct_feasible_candidate(data: UCData, scenarios: Sequence[Scenario]) -
         u[i, start:] = 1
     candidate = make_candidate(data, scenarios, u, source="fallback")
     if not commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
-        raise RuntimeError("deterministic fallback commitment is infeasible")
+        return None
     return candidate
 
 
@@ -225,13 +226,12 @@ def solve_benders(
                 "optimality",
             ))
         else:
-            for result in scenario_results:
+            for scenario, result in zip(scenarios, scenario_results):
                 if not result.feasible:
                     cuts.append(BendersCut(result.cut_alpha, result.cut_beta_u, result.cut_beta_v, result.cut_beta_w, "feasibility"))
                     diagnosis = _diagnose_infeasible_result(source, result, scenario)
                     infeasible_diagnostics.append(diagnosis)
                     current_infeasible_diagnostics.append(diagnosis)
-                    break
 
         hamming = (
             int(np.count_nonzero(candidate.u != best_u)) if best_u is not None else None
@@ -247,14 +247,14 @@ def solve_benders(
             },
             feasible=feasible,
             optimality_cuts=1 if feasible else 0,
-            feasibility_cuts=0 if feasible else 1,
+            feasibility_cuts=sum(not result.feasible for result in scenario_results),
             hamming_to_incumbent=hamming,
         )
         evaluation_cache[key] = evaluation
         return evaluation
 
-    def run_exact_master() -> tuple[ExactMasterResult | None, MasterCandidate | None]:
-        """Solve the exact Benders master and return its candidate, if any."""
+    def run_exact_master() -> ExactMasterResult:
+        """Solve the exact Benders master and attach a discrete-feasible candidate."""
 
         nonlocal lower_bound, master_status, master_runtime, cuts_at_last_master
         result = solve_exact_master(data, scenarios, cuts, config.exact_master_config)
@@ -267,7 +267,7 @@ def solve_benders(
             else:
                 lower_bound = max(lower_bound, result.bound)
         if result.u is None:
-            return result, None
+            return result
         candidate = MasterCandidate(
             u=result.u,
             v=result.v,
@@ -275,37 +275,43 @@ def solve_benders(
             theta=result.theta,
             source="exact",
         )
-        if not commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
-            return result, None
-        return result, candidate
+        if commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
+            result.candidate = candidate
+        return result
 
     for iteration in range(1, config.max_iterations + 1):
         current_infeasible_diagnostics.clear()
 
-        exact_master_result = None
         exact_candidate = None
         if config.exact_master:
-            exact_master_result, exact_candidate = run_exact_master()
-            if exact_master_result is not None and exact_master_result.u is None:
-                if exact_master_result.status in ("INFEASIBLE", "INF_OR_UNBD"):
+            exact_result = run_exact_master()
+            if exact_result.status in ("INFEASIBLE", "INF_OR_UNBD", "UNBOUNDED"):
+                if exact_result.status == "INFEASIBLE":
                     status = "INFEASIBLE"
                     message = "exact Benders master proved infeasibility"
-                    break
+                else:
+                    status = "MASTER_UNRESOLVED"
+                    message = f"exact Benders master returned {exact_result.status}"
+                break
+            exact_candidate = exact_result.candidate
 
-        master = QuantumMaster(
-            data,
-            scenarios,
-            cuts,
-            theta_cap=theta_cap,
-            penalty=config.penalty,
-            theta_step=config.theta_step,
-            reserve_scale=config.reserve_scale,
-        )
-        binaries = solve_qubo(master.matrix(), config.quantum)
-        quantum_candidates = [master.decode(binary) for binary in binaries]
+        quantum_candidates = []
+        if config.quantum_candidates:
+            master = QuantumMaster(
+                data,
+                scenarios,
+                cuts,
+                theta_cap=theta_cap,
+                penalty=config.penalty,
+                theta_step=config.theta_step,
+                reserve_scale=config.reserve_scale,
+            )
+            binaries = solve_qubo(master.matrix(), config.quantum)
+            quantum_candidates = [master.decode(binary) for binary in binaries]
+
         fallback = _construct_feasible_candidate(data, scenarios)
 
-        raw_count = len(quantum_candidates) + 1
+        raw_candidates = len(quantum_candidates) + int(fallback is not None)
         repaired_count = 0
         base_candidates: list[MasterCandidate] = []
         for candidate in quantum_candidates:
@@ -325,7 +331,10 @@ def solve_benders(
                 base_candidates.append(repaired)
             elif commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
                 base_candidates.append(candidate)
-        base_candidates.append(fallback)
+        if fallback is not None:
+            base_candidates.append(fallback)
+        if config.exact_master and not config.quantum_candidates and iteration == 1 and fallback is not None:
+            evaluate_candidate(fallback, fallback.source)
         if exact_candidate is not None:
             base_candidates.append(exact_candidate)
         if best_u is not None:
@@ -483,7 +492,7 @@ def solve_benders(
         history.append(
             IterationRecord(
                 iteration=iteration,
-                raw_candidates=raw_count,
+                raw_candidates=raw_candidates,
                 repaired_candidates=repaired_count,
                 perturbed_candidates=perturbed_count,
                 feasible_candidates=(
@@ -510,9 +519,6 @@ def solve_benders(
             )
         )
 
-        # Certified Benders gap: stop as soon as UB and the exact master bound
-        # agree. This is a proven statement about the current cut set, not a
-        # heuristic convergence signal.
         if (
             config.exact_master
             and math.isfinite(lower_bound)
@@ -539,10 +545,15 @@ def solve_benders(
             # evidence that candidate generation has genuinely stalled. Only
             # treat the iteration as a deadlock when the LLM did not fail.
             llm_failure = bool(llm_result and llm_result.failed)
-            if llm_failure and iteration < config.max_iterations:
+            master_timeout = config.exact_master and master_status == "TIME_LIMIT"
+            if (llm_failure or master_timeout) and iteration < config.max_iterations:
                 continue
-            status = "NO_NEW_CANDIDATES"
-            message = "candidate generator produced no new discrete-feasible commitments"
+            status = "MASTER_TIME_LIMIT" if master_timeout else "NO_NEW_CANDIDATES"
+            message = (
+                "no new commitments; exact master timed out"
+                if master_timeout
+                else "candidate generator produced no new discrete-feasible commitments"
+            )
             break
         if iteration < config.max_iterations:
             theta_cap = min(theta_cap, max(incumbent, 1.0))
@@ -550,23 +561,51 @@ def solve_benders(
     # Cuts added after the last master solve tighten the bound; refresh once so
     # the reported gap reflects the final cut set.
     if config.exact_master and cuts and len(cuts) != cuts_at_last_master:
-        run_exact_master()
+        final_result = run_exact_master()
+        if final_result.status == "INFEASIBLE" and math.isfinite(incumbent):
+            status = "BOUND_INCONSISTENCY"
+            message = "infeasible exact master contradicts a scenario-feasible incumbent"
+        elif math.isfinite(lower_bound) and math.isfinite(incumbent):
+            tolerance = 1e-6 * max(1.0, abs(incumbent))
+            if lower_bound > incumbent + tolerance:
+                status = "BOUND_INCONSISTENCY"
+                message = f"exact master bound {lower_bound:.6f} exceeds incumbent {incumbent:.6f}"
+            elif (incumbent - lower_bound) / max(1.0, abs(incumbent)) <= config.gap_tolerance:
+                status = "CONVERGED"
+                message = (
+                    f"Benders gap {(incumbent - lower_bound) / max(1.0, abs(incumbent)):.3e} "
+                    f"within tolerance {config.gap_tolerance:.3e}"
+                )
+        if history:
+            history[-1].lower_bound = lower_bound
+            history[-1].gap = (
+                (incumbent - lower_bound) / max(1.0, abs(incumbent))
+                if math.isfinite(lower_bound) and math.isfinite(incumbent)
+                else float("inf")
+            )
+            history[-1].master_status = master_status
 
     optimality_count = sum(cut.kind == "optimality" for cut in cuts)
     feasibility_count = sum(cut.kind == "feasibility" for cut in cuts)
     if best_u is None:
+        if config.exact_master and master_status in ("INF_OR_UNBD", "UNBOUNDED"):
+            status = "MASTER_UNRESOLVED"
+            message = f"exact Benders master returned {master_status}"
+        elif status != "INFEASIBLE":
+            status = "NO_FEASIBLE_SOLUTION"
+            message = "no candidate was feasible in every scenario"
         return BendersResult(
-            status="INFEASIBLE",
+            status=status,
             objective=float("inf"),
-            u=np.empty((data.n_units, data.horizon)),
-            v=np.empty_like(np.empty((data.n_units, data.horizon))),
-            w=np.empty_like(np.empty((data.n_units, data.horizon))),
+            u=np.empty((0, 0), dtype=int),
+            v=np.empty((0, 0), dtype=int),
+            w=np.empty((0, 0), dtype=int),
             scenarios=[],
             history=history,
             optimality_cuts=optimality_count,
             feasibility_cuts=feasibility_count,
             runtime=time.perf_counter() - started,
-            message="no candidate was feasible in every scenario",
+            message=message,
             lower_bound=lower_bound,
             gap=float("inf"),
             master_status=master_status,
@@ -595,14 +634,18 @@ def solve_benders(
     )
 
 
-def result_to_dict(result: BendersResult) -> dict:
+def result_to_dict(result: BendersResult | dict) -> dict:
     def clean(value):
         if isinstance(value, np.ndarray):
-            return value.tolist()
+            return clean(value.tolist())
         if isinstance(value, np.generic):
-            return value.item()
+            return clean(value.item())
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
         if isinstance(value, list):
             return [clean(item) for item in value]
+        if isinstance(value, dict):
+            return {key: clean(item) for key, item in value.items()}
         if hasattr(value, "__dict__"):
             return {key: clean(val) for key, val in vars(value).items()}
         return value
