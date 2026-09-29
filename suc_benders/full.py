@@ -24,9 +24,11 @@ def main() -> None:
     )
     print(f"status={result.status}")
     print(f"objective={result.objective:.6f}")
+    print(f"lower_bound={result.lower_bound:.6f}")
     print(f"fixed_cost={result.fixed_cost:.6f}")
     print(f"expected_fuel_cost={result.expected_fuel_cost:.6f}")
     print(f"mip_gap={result.mip_gap:.6g}")
+    print(f"mip_gap_tolerance={args.mip_gap:.6g}")
     print(f"runtime_seconds={result.runtime:.3f}")
 
 

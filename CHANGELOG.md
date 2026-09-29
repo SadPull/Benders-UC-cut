@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.11.0 - 2026-09-30
+
+### Fixed
+
+- Restrict research commitment generation to Kaiwu simulated annealing,
+  decommitment, and optional LLM advice, with deterministic initialization and repair.
+- Remove Gurobi master candidates, bound feedback, and convergence decisions
+  from the research Benders loop. Gurobi only solves continuous subproblems there.
+
+### Changed
+
+- Remove the exact master module and independent local perturbation, including
+  their configuration/CLI options and benchmark strategies.
+- Remove research bound/gap, exact-master, and perturbation result fields;
+  callers must migrate to the reduced research API.
+- Add `FullResult.lower_bound` from Gurobi `ObjBound`. The independent full-model
+  CLI reports bound, objective, status, achieved MIP gap, and target tolerance.
+- Run the full reference after all benchmark research strategies. Report its
+  objective, lower bound, status, MIP gap, tolerance, and runtime separately.
+- Compute `relative_error` and `reference_gap` only for post-run comparisons;
+  unavailable values serialize as null. Reference runtime is excluded from research runtime.
+
+### Validation
+
+- All 66 tests passed with Python 3.10, Kaiwu SDK 1.4.1, and Gurobi 13.0.1.
+- A one-iteration benchmark with seed 7 completed using default annealing and
+  decommitment, followed by the independent full-model reference.
+- Add regression tests guarding Gurobi optimization calls: research models must
+  contain only continuous variables and never call the full reference solver.
+- Cover external-reference independence, removed interfaces, comparison metrics,
+  LLM recovery, duplicate candidates, and scenario infeasibility feedback.
+
 ## v0.10.0 - 2026-09-29
 
 ### Fixed

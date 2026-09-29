@@ -36,7 +36,6 @@ class SolverDecommitTests(unittest.TestCase):
                 max_iterations=2,
                 quantum=_fast_quantum(),
                 decommit_candidates=True,
-                perturb_candidates=False,
             ),
         )
         total = sum(row.decommit_candidates for row in result.history)
@@ -51,24 +50,10 @@ class SolverDecommitTests(unittest.TestCase):
                 max_iterations=2,
                 quantum=_fast_quantum(),
                 decommit_candidates=False,
-                perturb_candidates=False,
             ),
         )
         total = sum(row.decommit_candidates for row in result.history)
         self.assertEqual(total, 0)
-
-    def test_decommit_disabled_still_no_perturbation(self):
-        result = solve_benders(
-            self.units,
-            self.scenarios,
-            BendersConfig(
-                max_iterations=2,
-                quantum=_fast_quantum(),
-                decommit_candidates=False,
-                perturb_candidates=False,
-            ),
-        )
-        self.assertEqual(sum(row.perturbed_candidates for row in result.history), 0)
 
     def test_ladder_is_passed_to_llm_context(self):
         captured = {}
@@ -85,7 +70,6 @@ class SolverDecommitTests(unittest.TestCase):
                     max_iterations=1,
                     quantum=_fast_quantum(),
                     decommit_candidates=True,
-                    perturb_candidates=False,
                     llm=LLMConfig(enabled=True),
                 ),
             )
@@ -105,7 +89,6 @@ class SolverDecommitTests(unittest.TestCase):
                 max_iterations=2,
                 quantum=_fast_quantum(),
                 decommit_candidates=False,
-                perturb_candidates=False,
             ),
         )
         decommitted = solve_benders(
@@ -115,7 +98,6 @@ class SolverDecommitTests(unittest.TestCase):
                 max_iterations=2,
                 quantum=_fast_quantum(),
                 decommit_candidates=True,
-                perturb_candidates=False,
             ),
         )
         self.assertLessEqual(

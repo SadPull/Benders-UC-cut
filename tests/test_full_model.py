@@ -1,6 +1,8 @@
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 from suc_benders import load_suc_data
 from suc_benders.full_model import FullConfig, solve_full
 from suc_benders.subproblem import solve_scenario
@@ -35,6 +37,19 @@ class FullModelTests(unittest.TestCase):
                 self.result.w,
             )
         )
+
+    def test_reference_bound_uses_objbound_even_with_nonzero_mip_gap(self):
+        self.assertTrue(np.isfinite(self.result.lower_bound))
+        self.assertEqual(self.result.lower_bound, self.result.model.ObjBound)
+        self.assertLessEqual(self.result.lower_bound, self.result.objective + 1e-6)
+
+    def test_reference_timeout_without_incumbent(self):
+        result = solve_full(self.units, self.scenarios, FullConfig(time_limit=0, output_flag=0))
+        self.assertEqual(result.status, "TIME_LIMIT")
+        self.assertEqual(result.objective, float("inf"))
+        self.assertEqual(result.scenarios, [])
+        self.assertEqual(result.mip_gap, float("inf"))
+        self.assertFalse(np.isnan(result.lower_bound))
 
     def test_scenario_subproblems_match_full_model(self):
         for scenario in self.scenarios:

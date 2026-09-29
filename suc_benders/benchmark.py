@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import time
+import math
 
 from .data import load_suc_data
-from .exact_master import ExactMasterConfig
 from .full_model import FullConfig, solve_full
 from .llm import LLMConfig
 from .master import QuantumConfig
@@ -17,29 +16,21 @@ def _config(
     seed: int,
     *,
     repair: bool,
-    perturb: bool,
     llm: bool = False,
     llm_timeout: float = 180.0,
     llm_max_tokens: int = 6144,
     decommit: bool = False,
-    exact_master: bool = False,
-    master_time_limit: float = 60.0,
-    quantum_candidates: bool = True,
 ) -> BendersConfig:
     return BendersConfig(
         max_iterations=max_iterations,
-        quantum_candidates=quantum_candidates,
         quantum=QuantumConfig(kaiwu_seed=seed),
         repair_candidates=repair,
-        perturb_candidates=perturb,
         decommit_candidates=decommit,
         llm=LLMConfig(
             enabled=llm,
             timeout_seconds=llm_timeout,
             max_tokens=llm_max_tokens,
         ),
-        exact_master=exact_master,
-        exact_master_config=ExactMasterConfig(time_limit=master_time_limit),
     )
 
 
@@ -53,12 +44,6 @@ def main() -> None:
     parser.add_argument("--llm-timeout", type=float, default=180.0)
     parser.add_argument("--llm-max-tokens", type=int, default=6144)
     parser.add_argument(
-        "--master-time-limit",
-        type=float,
-        default=60.0,
-        help="Time limit in seconds for each exact Benders master solve.",
-    )
-    parser.add_argument(
         "--strategies",
         default=None,
         help="Comma-separated subset of strategy names to run (default: all).",
@@ -67,27 +52,16 @@ def main() -> None:
     args = parser.parse_args()
 
     units, scenarios = load_suc_data(args.data, args.scenario_file)
-    exact = solve_full(units, scenarios, FullConfig(output_flag=0, mip_gap=1e-4))
 
-    # (name, repair, perturb/local, llm, decommit, exact_master)
-    strategies: list[tuple[str, bool, bool, bool, bool, bool]] = [
-        ("exact-only", False, False, False, False, True),
-        ("quantum-only", False, False, False, False, False),
-        ("quantum+repair", True, False, False, False, False),
-        ("quantum+repair+decommit", True, False, False, True, False),
-        # Hybrid arms: exact Gurobi Benders master for the certified bound,
-        # Kaiwu plus optional LLM only as candidate generators.
-        ("hybrid-exact", True, False, False, True, True),
-        # Legacy local-search arm, kept for reference only.
-        ("quantum+repair+local", True, True, False, False, False),
+    # (name, repair, llm, decommit)
+    strategies: list[tuple[str, bool, bool, bool]] = [
+        ("quantum-only", False, False, False),
+        ("quantum+repair", True, False, False),
+        ("quantum+repair+decommit", True, False, True),
     ]
     if args.llm:
-        # Primary arm: decommitment-first with LLM guidance.
-        strategies.append(("quantum+repair+decommit+llm", True, False, True, True, False))
-        strategies.append(("hybrid-exact+llm", True, False, True, True, True))
-        # Legacy isolated LLM arm (no decommitment), for reference.
-        strategies.append(("quantum+repair+llm", True, False, True, False, False))
-        strategies.append(("quantum+repair+local+llm", True, True, True, False, False))
+        strategies.append(("quantum+repair+decommit+llm", True, True, True))
+        strategies.append(("quantum+repair+llm", True, True, False))
 
     if args.strategies:
         wanted = [item.strip() for item in args.strategies.split(",") if item.strip()]
@@ -100,8 +74,7 @@ def main() -> None:
         strategies = [item for item in strategies if item[0] in wanted]
 
     rows = []
-    for name, repair, perturb, llm, decommit, exact_master in strategies:
-        started = time.perf_counter()
+    for name, repair, llm, decommit in strategies:
         result = solve_benders(
             units,
             scenarios,
@@ -109,43 +82,52 @@ def main() -> None:
                 args.max_iterations,
                 args.seed,
                 repair=repair,
-                perturb=perturb,
                 llm=llm,
                 llm_timeout=args.llm_timeout,
                 llm_max_tokens=args.llm_max_tokens,
                 decommit=decommit,
-                exact_master=exact_master,
-                master_time_limit=args.master_time_limit,
-                quantum_candidates=name != "exact-only",
             ),
         )
         rows.append(
             {
                 "strategy": name,
                 "ub": result.objective,
-                "relative_error": (result.objective - exact.objective) / exact.objective,
                 "iterations": len(result.history),
                 "optimality_cuts": result.optimality_cuts,
                 "feasibility_cuts": result.feasibility_cuts,
                 "raw_candidates": sum(row.raw_candidates for row in result.history),
                 "repaired_candidates": sum(row.repaired_candidates for row in result.history),
-                "perturbed_candidates": sum(row.perturbed_candidates for row in result.history),
                 "llm_candidates": sum(row.llm_candidates for row in result.history),
                 "llm_valid_candidates": sum(row.llm_valid_candidates for row in result.history),
                 "decommit_candidates": sum(row.decommit_candidates for row in result.history),
-                "runtime": time.perf_counter() - started,
+                "runtime": result.runtime,
                 "status": result.status,
-                "lower_bound": result.lower_bound,
-                "benders_gap": result.gap,
-                "master_status": result.master_status,
-                "master_runtime": result.master_runtime,
-                "exact_candidates": sum(row.exact_candidates for row in result.history),
                 "message": result.message,
                 "history": result_to_dict(result)["history"],
             }
         )
+    # Solve the independent reference only after all research runs have ended.
+    reference_config = FullConfig(output_flag=0, mip_gap=1e-4)
+    exact = solve_full(units, scenarios, reference_config)
+    for row in rows:
+        objective = row["ub"]
+        row["relative_error"] = (
+            (objective - exact.objective) / exact.objective
+            if math.isfinite(objective) and math.isfinite(exact.objective) and exact.objective != 0
+            else None
+        )
+        row["reference_gap"] = (
+            (objective - exact.lower_bound) / max(1.0, abs(objective))
+            if math.isfinite(objective) and math.isfinite(exact.lower_bound)
+            else None
+        )
     payload = {
         "exact_objective": exact.objective,
+        "exact_lower_bound": exact.lower_bound,
+        "exact_status": exact.status,
+        "exact_mip_gap": exact.mip_gap,
+        "exact_mip_gap_tolerance": reference_config.mip_gap,
+        "exact_runtime": exact.runtime,
         "llm_timeout_seconds": args.llm_timeout,
         "max_iterations": args.max_iterations,
         "seed": args.seed,

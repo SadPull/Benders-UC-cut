@@ -39,6 +39,7 @@ class FullResult:
     mip_gap: float
     runtime: float
     model: Any = None
+    lower_bound: float = float("-inf")
 
 
 def solve_full(data: UCData, scenarios: Sequence[Scenario], config: FullConfig | None = None) -> FullResult:
@@ -124,8 +125,23 @@ def solve_full(data: UCData, scenarios: Sequence[Scenario], config: FullConfig |
     model.optimize()
     runtime = time.perf_counter() - started
 
+    status = {
+        gp.GRB.OPTIMAL: "OPTIMAL",
+        gp.GRB.TIME_LIMIT: "TIME_LIMIT",
+        gp.GRB.INFEASIBLE: "INFEASIBLE",
+        gp.GRB.INF_OR_UNBD: "INF_OR_UNBD",
+        gp.GRB.UNBOUNDED: "UNBOUNDED",
+    }.get(model.Status, str(model.Status))
+    # ObjVal is a feasible objective, even when OPTIMAL means a nonzero MIP gap.
+    # Only ObjBound supplies the independent reference lower bound.
+    lower_bound = float("-inf")
+    if status not in {"INFEASIBLE", "INF_OR_UNBD", "UNBOUNDED"}:
+        lower_bound = float(model.ObjBound)
+        if abs(lower_bound) >= gp.GRB.INFINITY:
+            lower_bound = float("-inf")
+
     if model.SolCount == 0:
-        return FullResult(str(model.Status), float("inf"), float("inf"), float("inf"), np.empty((n, horizon)), np.empty((n, horizon)), np.empty((n, horizon)), [], float("inf"), runtime, model)
+        return FullResult(status, float("inf"), float("inf"), float("inf"), np.empty((n, horizon)), np.empty((n, horizon)), np.empty((n, horizon)), [], float("inf"), runtime, model, lower_bound)
 
     u_value = np.rint(np.asarray(u.X, dtype=float)).astype(int)
     v_value = np.rint(np.asarray(v.X, dtype=float)).astype(int)
@@ -143,7 +159,6 @@ def solve_full(data: UCData, scenarios: Sequence[Scenario], config: FullConfig |
         + np.sum(data.startup_cost[:, None] * v_value)
         + np.sum(data.shutdown_cost[:, None] * w_value)
     )
-    status = {gp.GRB.OPTIMAL: "OPTIMAL", gp.GRB.TIME_LIMIT: "TIME_LIMIT"}.get(model.Status, str(model.Status))
     return FullResult(
         status=status,
         objective=fixed_cost + expected_cost,
@@ -156,4 +171,5 @@ def solve_full(data: UCData, scenarios: Sequence[Scenario], config: FullConfig |
         mip_gap=float(model.MIPGap) if model.IsMIP else 0.0,
         runtime=runtime,
         model=model,
+        lower_bound=lower_bound,
     )

@@ -1,8 +1,8 @@
 # SUC + Benders (10×24)
 
-Current release: [v0.10.0](CHANGELOG.md).
+Current release: [v0.11.0](CHANGELOG.md).
 
-This repository contains a small, reproducible two-stage stochastic unit commitment model with a hybrid Benders architecture. The first stage is a binary commitment problem: an exact Gurobi Benders master supplies the certified lower bound and an exact master candidate, while Kaiwu local simulated annealing and an optional LLM only generate additional candidates. The second stage is a continuous economic-dispatch subproblem solved by Gurobi. A full deterministic equivalent Gurobi model is included as an external validation baseline.
+This repository contains a small, reproducible two-stage stochastic unit commitment model. The research Benders algorithm generates binary commitment candidates using Kaiwu local simulated annealing, decommitment search, and an optional LLM. Gurobi solves only the continuous dispatch subproblems within that algorithm. A separate full deterministic equivalent Gurobi model supplies an external reference solution and proven lower bound for post-run comparisons.
 
 ## Scope
 
@@ -13,7 +13,7 @@ This repository contains a small, reproducible two-stage stochastic unit commitm
   - `high`: 1.05 × base load, probability 0.25
 - 5% spinning reserve
 - exact 10×24 base load and generator parameters from the original MATLAB data
-- hybrid exact Gurobi Benders master for a certified lower bound and Benders gap
+- simulated annealing and decommitment for the binary master search
 - optional LLM candidate advice, no cloud/QPU calls
 
 > The `high` scenario is capped at 1.05 because 1.10 × peak load plus 5% reserve exceeds the installed capacity of the 10-generator system. If you want a different high scenario, provide your own `scenario_file`.
@@ -37,46 +37,44 @@ commitment and theta bits and discards the auxiliary bits.
 ## Architecture
 
 ```text
-Gurobi exact Benders master       ->  certified lower bound, exact candidate
-Gurobi subproblems (per scenario) ->  dispatch, cuts
-Kaiwu SA + repair + decommit + optional LLM -> additional candidates (optional)
+Kaiwu SA + repair + decommit + optional LLM -> commitment candidates
+Gurobi continuous subproblems              -> dispatch, costs, duals, Benders cuts
+Benders cuts                              -> next Kaiwu QUBO
+
+Independent full Gurobi model              -> reference solution and lower bound
+Completed research results + reference    -> post-run comparison only
 ```
 
-- The **exact Gurobi Benders master** is the convergence authority. It solves the
-  cut relaxation with a continuous `theta`, adds a first-hour ramp-reaching cover,
-  and reports Gurobi's proven `ObjBound`. The reported gap is therefore a valid
-  Benders gap for the current cut relaxation, not merely a heuristic distance.
-- **Kaiwu local simulated annealing** is a candidate generator, not a certified
-  master. Its QUBO output is repaired, validated, and then evaluated by Gurobi.
-- **LLM advice is optional and heuristic only.** It never enters the lower bound.
+- **Candidate generation** uses simulated annealing and decommitment by default;
+  LLM advice is optional. Deterministic initialization, repair, deduplication, and
+  incumbent reuse support those searches without another optimization solver.
+- **Subproblems** receive fixed `u/v/w`; all Gurobi decision variables inside the
+  research loop are continuous. Their costs, duals, and cuts provide normal
+  Benders feedback and decommitment/LLM context.
+- **The full Gurobi reference is independent.** Its commitment, objective, bound,
+  and status never enter candidate generation, cuts, LLM context, or stopping
+  decisions. The benchmark solves it after all research strategies finish.
+- The research algorithm stops at `MAX_ITERATIONS` or `NO_NEW_CANDIDATES`.
+  Temporary LLM failures can retry within the iteration budget. If no evaluated
+  candidate is feasible in every scenario, it returns `NO_FEASIBLE_SOLUTION`;
+  this does not prove the original model infeasible.
+- The heuristic master does not supply a certified global lower bound or a
+  Benders convergence certificate. QUBO energies and sampled objectives must
+  not be treated as proven lower bounds.
 
-The Benders gap is:
+## Changes in v0.11.0
 
-```text
-gap = (UB - LB) / max(1, abs(UB))
-```
-
-## What this version adds
-
-- **Hybrid exact Benders master** (`suc_benders/exact_master.py`) with certified
-  lower bound, a first-hour ramp-reaching cover, and a `CONVERGED` stopping rule
-- **Independent exact-only mode** that skips Kaiwu/QUBO entirely and seeds the
-  first master with an evaluated deterministic feasible commitment
-- Feasibility feedback from every failed scenario, not only the first failure
-- **Decommitment-first candidate generation**: from the incumbent, greedily turn
-  unit-hours OFF, scored by a per-(unit, hour) marginal-cost gradient
-- **Decommitment gradient context for the LLM**: `unit_hour_decommit_gradient`,
-  `top_decommit_opportunities`, `hourly_commitment_profile`, `peaker_usage`,
-  `decommit_ladder`
-- Deterministic candidate repair for infeasible Kaiwu schedules
-- Local perturbation around repaired candidates and the incumbent
-- Reserve constraints scaled to 100 MW in the QUBO energy
-- Optional LLM candidate advisor, disabled by default
-- A benchmark comparing:
-  - quantum-only
-  - quantum + repair
-  - quantum + repair + local
-  - quantum + repair + local + LLM (when `--llm` is passed)
+- Remove the exact Gurobi master and its influence on candidates and termination.
+- Remove independent local perturbation; keep decommitment moves and their LLM
+  context (`unit_hour_decommit_gradient`, `top_decommit_opportunities`,
+  `hourly_commitment_profile`, `peaker_usage`, and `decommit_ladder`).
+- Report the full model's `ObjBound`, feasible objective, status, MIP gap, and
+  runtime separately as external reference results.
+- Remove the exact-master and perturbation settings from `BendersConfig` and
+  the CLI, including `--no-exact-master`, `--master-time-limit`,
+  `--master-mip-gap`, and `--no-perturb`. Old callers must remove these arguments.
+- Remove research result/history fields `lower_bound`, `gap`, `master_status`,
+  `master_runtime`, `exact_candidates`, and `perturbed_candidates`.
 
 ## LLM context
 
@@ -101,19 +99,15 @@ All context values are rounded to three decimals and lists are capped to keep th
 python -m suc_benders.benchmark --max-iterations 5
 ```
 
-Exact-only arm with the certified bound and no Kaiwu/QUBO dependency:
+The default strategy rows are `quantum-only`, `quantum+repair`, and
+`quantum+repair+decommit`. Every row retains the deterministic initial candidate.
+Select an individual strategy with:
 
 ```powershell
-python -m suc_benders.benchmark --max-iterations 12 --strategies exact-only
+python -m suc_benders.benchmark --max-iterations 5 --strategies quantum+repair+decommit
 ```
 
-Hybrid arm with the certified bound:
-
-```powershell
-python -m suc_benders.benchmark --max-iterations 5 --strategies hybrid-exact
-```
-
-To include the optional LLM row:
+To include `quantum+repair+llm` and `quantum+repair+decommit+llm`:
 
 ```powershell
 python -m suc_benders.benchmark --max-iterations 5 --llm
@@ -121,42 +115,60 @@ python -m suc_benders.benchmark --max-iterations 5 --llm
 
 `LLM_API_KEY` must be set before using `--llm`. Without it, the LLM row safely returns no candidates.
 
+Benchmark output keeps `exact_objective` as the independent reference's best
+feasible objective and adds `exact_lower_bound`, `exact_status`, `exact_mip_gap`,
+`exact_mip_gap_tolerance`, and `exact_runtime`. The benchmark uses a reference
+MIP gap tolerance of `1e-4`. `OPTIMAL` means optimal within the declared tolerance;
+with `TIME_LIMIT`, the objective is only the best feasible reference solution.
+The proven lower bound always comes from `ObjBound`, never the feasible objective.
+
+The following metrics are computed only after the research runs finish:
+
+```text
+relative_error = (research objective - reference objective) / reference objective
+reference_gap  = (research objective - reference lower bound) / max(1, abs(research objective))
+```
+
+Unavailable comparisons serialize as `null`, including a zero reference objective
+for `relative_error`. `reference_gap` is an external comparison, not a research
+Benders stopping criterion. Each strategy's `runtime` excludes the full model.
+
 ## Run
 
-Benders with the hybrid master (exact Gurobi bound plus Kaiwu candidates):
+Benders with simulated annealing and decommitment:
 
 ```powershell
 python -m suc_benders.run --max-iterations 5
 ```
 
-Independent exact Benders path without Kaiwu/QUBO:
+Add optional LLM advice:
 
 ```powershell
-python -m suc_benders.run --max-iterations 12 --no-quantum --no-decommit --no-perturb
+python -m suc_benders.run --max-iterations 5 --llm
 ```
 
-Kaiwu-only path without the exact master:
+The `--no-quantum` and `--no-decommit` switches support ablations. Disabling
+annealing skips Kaiwu/QUBO construction while retaining the deterministic seed.
 
-```powershell
-python -m suc_benders.run --max-iterations 5 --no-exact-master
-```
-
-Exact full Gurobi benchmark:
+Independent full Gurobi reference:
 
 ```powershell
 python -m suc_benders.full
 ```
 
-Optional arguments:
+This command reports both `objective` and `lower_bound`, along with `status`,
+`mip_gap`, and `mip_gap_tolerance`. It accepts `--time-limit` and `--mip-gap`.
+
+Optional research arguments:
 
 ```text
 --data data/suc_10x24.json
 --scenario-file data/scenarios.json
 --quiet
---no-exact-master
 --no-quantum
---master-time-limit 60
---master-mip-gap 1e-6
+--no-decommit
+--llm
+--output run.json
 ```
 
 To use a custom scenario set, create a JSON file such as:
@@ -181,12 +193,7 @@ python -m unittest discover -s tests -v
 ## Limitations
 
 - Kaiwu local simulated annealing is the only implemented quantum backend; cloud/QPU is not configured.
-- The certified gap is valid for the current cut relaxation from the first master
-  solve onward, provided the cuts and bound are valid. A small gap is not by itself a
-  claim of quantum advantage.
-- `solve_full()` remains the external reference optimum. `exact_master` is a MILP
-  master relaxation, not the full MIQP.
+- Candidate search is heuristic and does not prove global optimality or infeasibility.
+- `solve_full()` is an external validation reference, not part of the research algorithm.
 - The feasibility cut is a generic normalized-shortfall cut derived from Gurobi duals; it is not a specialized strong cut.
-- If the master hits its time limit, the reported bound is Gurobi's proven `ObjBound`,
-  never the incumbent objective.
 - The project is model scaffolding, not a research benchmark.

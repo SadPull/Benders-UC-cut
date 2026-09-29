@@ -6,7 +6,7 @@ from unittest.mock import patch
 import numpy as np
 
 from suc_benders import load_suc_data, Scenario
-from suc_benders.candidates import make_candidate, perturb_commitment, repair_commitment
+from suc_benders.candidates import make_candidate
 from suc_benders.context import build_llm_context, CandidateEvaluation, LLMContextInput, LocalMoveResult
 from suc_benders.llm import LLMAdviceResult, LLMConfig, _prompt
 from suc_benders.master import QuantumConfig
@@ -145,31 +145,6 @@ class SolverContextIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(np.isfinite(result.objective))
         self.assertGreaterEqual(result.optimality_cuts, 1)
-
-
-class CandidateMetadataTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
-
-    def test_perturbation_candidates_have_move_metadata(self):
-        base = repair_commitment(
-            self.units,
-            self.scenarios,
-            np.zeros((self.units.n_units, self.units.horizon), dtype=int),
-        )
-        self.assertIsNotNone(base)
-        neighbors = perturb_commitment(
-            self.units,
-            self.scenarios,
-            base,
-            limit=8,
-            seed=7,
-        )
-        self.assertTrue(neighbors)
-        self.assertTrue(all(candidate.source == "local" for candidate in neighbors))
-        self.assertTrue(all(candidate.move is not None for candidate in neighbors))
-        self.assertIn(neighbors[0].move["move"], {"single", "window", "group", "replace"})
 
 
 class ContextBuilderTests(unittest.TestCase):
