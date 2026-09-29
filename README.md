@@ -68,8 +68,6 @@ gap = (UB - LB) / max(1, abs(UB))
   - quantum + repair + local
   - quantum + repair + local + LLM (when `--llm` is passed)
 
-On the 10x24 instance, the decommitment-first path reaches `2.19%` relative error to the exact Gurobi optimum deterministically, and `1.40%` best / `1.72%` mean with the optional LLM advisor, after 5 iterations. Those are distances to the external Gurobi optimum; the hybrid exact master additionally reports a certified Benders gap for the accumulated cut set.
-
 ## LLM context
 
 When `--llm` is enabled, the advisor receives a compact P0/P1 context containing:
