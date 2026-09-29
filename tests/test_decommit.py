@@ -11,6 +11,7 @@ from suc_benders.candidates import (
     repair_commitment,
 )
 from suc_benders.common import commitment_is_feasible
+from suc_benders.data import UCData
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +85,33 @@ class DecommitTests(unittest.TestCase):
         self.assertEqual(int(move["unit"]), 9)
         self.assertLessEqual(int(move["period"]), 23)
         self.assertGreaterEqual(int(move["period"]), 20 - 2)
+
+    def test_gradient_counts_no_load_savings_once(self):
+        # Each unit runs for two hours. Removing unit 0 saves 200 but adds
+        # 160 in fuel; removing unit 1 saves 100 and adds no fuel.
+        for startup, expected_unit in [([0.0, 0.0], 1), ([100.0, 0.0], 0)]:
+            with self.subTest(startup=startup):
+                data = UCData(
+                    n_units=2, horizon=2,
+                    pmax=np.full(2, 100.0), pmin=np.zeros(2),
+                    pstart=np.full(2, 100.0), pshut=np.full(2, 100.0),
+                    min_up=np.ones(2, dtype=int), min_down=np.ones(2, dtype=int),
+                    ramp_up=np.full(2, 100.0), ramp_down=np.full(2, 100.0),
+                    initial_on=np.zeros(2, dtype=int),
+                    initial_duration=np.ones(2, dtype=int),
+                    initial_output=np.zeros(2), base_load=np.zeros(2),
+                    cost_a=np.zeros(2), cost_b=np.zeros(2),
+                    cost_c=np.array([100.0, 50.0]),
+                    startup_cost=np.array(startup), shutdown_cost=np.zeros(2),
+                )
+                base = make_candidate(data, [], np.ones((2, 2), dtype=int))
+                gradient = {(i, t): change for i, change in enumerate([-20.0, -50.0])
+                            for t in range(2)}
+                ladder = decommit_commitment(data, [], base, limit=1, gradient=gradient)
+                self.assertEqual(len(ladder), 1)
+                expected = base.u.copy()
+                expected[expected_unit, :] = 0
+                np.testing.assert_array_equal(ladder[0].u, expected)
 
     def test_ladder_has_no_gurobi_dependency(self):
         import inspect

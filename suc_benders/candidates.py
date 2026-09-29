@@ -307,7 +307,9 @@ def decommit_commitment(
                         for period in range(t1, t2 + 1):
                             cell = gradient.get((int(i), int(period)))
                             if cell is not None:
-                                fuel_estimate += float(cell)
+                                # The gradient already subtracts no-load cost;
+                                # saving accounts for it for the whole move.
+                                fuel_estimate += float(cell) + float(data.cost_c[i])
                         # Predicted change in total cost; lower is better.
                         score = -saving + fuel_estimate
                     else:
