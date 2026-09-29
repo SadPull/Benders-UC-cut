@@ -88,7 +88,9 @@ class QuantumMasterTests(unittest.TestCase):
         self.assertEqual(theta_bit_width(1024, 1), 11)
         master = QuantumMaster(self.units, self.scenarios, [], theta_cap=1023)
         self.assertEqual(master.variable_count(), 730)
-        self.assertEqual(master.matrix().shape, (730, 730))
+        size = len(master.qubo_variables())
+        self.assertGreater(size, master.variable_count())
+        self.assertEqual(master.matrix().shape, (size, size))
 
     def test_cut_changes_matrix_and_decode_roundtrip(self):
         shape = (self.units.n_units, self.units.horizon)
@@ -98,7 +100,7 @@ class QuantumMasterTests(unittest.TestCase):
         with_cut = QuantumMaster(self.units, self.scenarios, [cut], theta_cap=1024)
         self.assertEqual(with_cut.variable_count(), base.variable_count())
         self.assertFalse(np.array_equal(base.matrix(), with_cut.matrix()))
-        binary = np.zeros(base.variable_count(), dtype=int)
+        binary = np.zeros(len(with_cut.qubo_variables()), dtype=int)
         candidate = with_cut.decode(binary)
         self.assertTrue(np.all(candidate.u == 0))
         self.assertTrue(np.all(candidate.v == 0))
@@ -109,7 +111,30 @@ class QuantumMasterTests(unittest.TestCase):
         master = QuantumMaster(self.units, self.scenarios, [], theta_cap=1024)
         solutions = solve_qubo(master.matrix(), QuantumConfig(initial_temperature=20, alpha=0.9, cutoff_temperature=0.1, iterations_per_temperature=2, candidate_pool_size=4))
         self.assertTrue(solutions)
-        self.assertEqual({len(row) for row in solutions}, {master.variable_count()})
+        self.assertEqual({len(row) for row in solutions}, {len(master.qubo_variables())})
+
+    def test_full_matrix_preserves_sdk_energy_and_decode(self):
+        master = QuantumMaster(self.units, self.scenarios, [], theta_cap=1023)
+        matrix = master.matrix()
+        names = master.qubo_variables()
+        self.assertEqual(set(names), set(master.model.get_variables()))
+        binary = np.random.default_rng(7).integers(0, 2, len(names))
+        values = dict(zip(names, binary))
+        expression = master.model.make()
+        np.testing.assert_allclose(
+            binary @ matrix @ binary + expression.offset,
+            expression.get_val(values), rtol=1e-12,
+        )
+        candidate = master.decode(binary)
+        expected_u = np.array([[values[f"u_{i}_{t}"] for t in range(self.units.horizon)]
+                               for i in range(self.units.n_units)])
+        np.testing.assert_array_equal(candidate.u, expected_u)
+        changed_slack = binary.copy()
+        changed_slack[master.variable_count():] = 1 - changed_slack[master.variable_count():]
+        other = master.decode(changed_slack)
+        for name in ("u", "v", "w"):
+            np.testing.assert_array_equal(getattr(candidate, name), getattr(other, name))
+        self.assertEqual(candidate.theta, other.theta)
 
 
 class SubproblemTests(unittest.TestCase):

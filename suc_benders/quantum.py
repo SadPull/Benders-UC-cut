@@ -17,7 +17,7 @@ def solve_qubo(matrix: np.ndarray, config: QuantumConfig) -> list[np.ndarray]:
     matrix = np.asarray(matrix, dtype=float)
     scale = max(1.0, float(np.max(np.abs(matrix))) if matrix.size else 1.0)
     normalized = matrix / scale
-    ising, _ = kw.conversion.qubo_matrix_to_ising_matrix(normalized)
+    ising, _ = kw.core.qubo_matrix_to_ising_matrix(normalized)
     optimizer = kw.classical.SimulatedAnnealingOptimizer(
         initial_temperature=config.initial_temperature,
         alpha=config.alpha,

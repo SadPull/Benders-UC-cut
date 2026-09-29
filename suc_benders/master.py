@@ -82,7 +82,7 @@ class QuantumMaster:
             raise ValueError("reserve_scale must be positive")
         self.theta_bits = theta_bit_width(self.theta_cap, self.theta_step)
         self.kw = get_kaiwu()
-        self.model = self.kw.qubo.QuboModel()
+        self.model = self.kw.core.QuboModel()
         self.u: dict[tuple[int, int], object] = {}
         self.v: dict[tuple[int, int], object] = {}
         self.w: dict[tuple[int, int], object] = {}
@@ -192,18 +192,26 @@ class QuantumMaster:
         return names
 
     def variable_count(self) -> int:
+        """Number of decision bits, excluding SDK-generated slack bits."""
         return len(self.decision_variables())
 
-    def matrix(self) -> np.ndarray:
-        """Return the QUBO matrix ordered by decision_variables()."""
-        all_variables = self.model.get_variables()
+    def qubo_variables(self) -> list[str]:
+        """Decision bits followed by all SDK-generated auxiliary bits."""
         names = self.decision_variables()
-        indices = [all_variables['b' + name] for name in names]
+        decisions = set(names)
+        names.extend(name for name in self.model.get_variables() if name not in decisions)
+        return names
+
+    def matrix(self) -> np.ndarray:
+        """Return the full QUBO matrix ordered by qubo_variables()."""
+        all_variables = self.model.get_variables()
+        names = self.qubo_variables()
+        indices = [all_variables[name] for name in names]
         matrix = np.asarray(self.model.get_matrix(), dtype=float)
         return matrix[np.ix_(indices, indices)]
 
     def decode(self, binary: np.ndarray) -> MasterCandidate:
-        names = self.decision_variables()
+        names = self.qubo_variables()
         if len(names) != len(binary):
             raise ValueError(f"binary solution has {len(binary)} entries; expected {len(names)}")
         values = {name: int(value) for name, value in zip(names, np.asarray(binary, dtype=int))}

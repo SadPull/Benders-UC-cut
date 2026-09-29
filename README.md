@@ -1,5 +1,7 @@
 # SUC + Benders (10×24)
 
+Current release: [v0.10.0](CHANGELOG.md).
+
 This repository contains a small, reproducible two-stage stochastic unit commitment model with a hybrid Benders architecture. The first stage is a binary commitment problem: an exact Gurobi Benders master supplies the certified lower bound and an exact master candidate, while Kaiwu local simulated annealing and an optional LLM only generate additional candidates. The second stage is a continuous economic-dispatch subproblem solved by Gurobi. A full deterministic equivalent Gurobi model is included as an external validation baseline.
 
 ## Scope
@@ -22,7 +24,15 @@ This repository contains a small, reproducible two-stage stochastic unit commitm
 python -m pip install -r requirements.txt
 ```
 
-Python 3.10+ is expected.
+Use Python 3.10 with Kaiwu SDK 1.4.1, as specified by the
+[SDK installation guide](https://kaiwu-sdk-docs.qboson.com/zh/latest/source/getting_started/sdk_installation_instructions.html).
+If the SDK requests activation, follow its console instructions using your
+own user ID and SDK authorization code.
+
+The Kaiwu integration uses the documented `kaiwu.core.QuboModel` and
+`kaiwu.core.qubo_matrix_to_ising_matrix` APIs. The annealer receives the full
+QUBO matrix, including inequality slack variables; decoding extracts the
+commitment and theta bits and discards the auxiliary bits.
 
 ## Architecture
 

@@ -28,32 +28,8 @@ def require_kaiwu():
     return kw
 
 
-def _disable_local_license_check():
-    """Bypass the expired local-only Kaiwu SDK license gate.
-
-    This affects only the fully local simulated-annealing path used by this
-    project. No cloud or QPU authorization behavior is modified.
-    """
-
-    def noop(*args, **kwargs):
-        return True
-
-    try:
-        import kaiwu.license._license_utils as license_utils
-        license_utils.verify_license = noop
-    except ImportError:
-        pass
-    try:
-        import kaiwu.classical._simulated_annealing as sa_module
-        sa_module.verify_license = noop
-    except ImportError:
-        pass
-
-
 def get_kaiwu():
-    kw = require_kaiwu()
-    _disable_local_license_check()
-    return kw
+    return require_kaiwu()
 
 
 @dataclass(frozen=True)
