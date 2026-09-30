@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fractions import Fraction
+from math import ceil, floor, gcd, lcm
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -35,6 +37,7 @@ class MasterCandidate:
     theta: float | None = None
     source: str = "quantum"
     move: dict | None = None
+    provenance: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -53,6 +56,54 @@ def theta_bit_width(theta_cap: float, theta_step: float) -> int:
         raise ValueError("theta cap and step must be positive")
     max_steps = int(np.ceil(theta_cap / theta_step))
     return max(1, int(np.ceil(np.log2(max_steps + 1))))
+
+
+@dataclass(frozen=True)
+class _IntegerInequality:
+    """step * (constant + sum(coefficients[name] * bit)) <= 0."""
+
+    coefficients: dict[str, int]
+    constant: int
+    step: Fraction
+    rounding_error: float = 0.0
+
+
+def _capacity_inequality(
+    capacity: dict[str, Fraction], requirement: Fraction
+) -> _IntegerInequality:
+    """Encode a decimal capacity lattice exactly, including a fractional demand."""
+
+    capacity = {name: value for name, value in capacity.items() if value}
+    denominator = lcm(*(value.denominator for value in capacity.values()))
+    integers = {name: int(value * denominator) for name, value in capacity.items()}
+    divisor = gcd(*integers.values()) or 1
+    step = Fraction(divisor, denominator)
+    return _IntegerInequality(
+        {name: -value // divisor for name, value in integers.items()},
+        ceil(requirement / step),
+        step,
+    )
+
+
+def _quantize_inequality(
+    coefficients: dict[str, float], constant: float, error_budget: float,
+    exact_coefficients: dict[str, Fraction] | None = None,
+) -> _IntegerInequality:
+    """Round a supporting plane down, with a bound valid for every binary point."""
+
+    coefficients = {name: value for name, value in coefficients.items() if value}
+    step = Fraction(str(error_budget)) / (len(coefficients) + 1)
+    # Fractions of the actual floats keep flooring conservative even at grid edges.
+    integers = {name: floor(Fraction(float(value)) / step) for name, value in coefficients.items()}
+    integer_constant = floor(Fraction(float(constant)) / step)
+    error = Fraction(float(constant)) - integer_constant * step
+    error += sum(Fraction(float(value)) - integers[name] * step for name, value in coefficients.items())
+    for name, value in (exact_coefficients or {}).items():
+        integer = value / step
+        if integer.denominator != 1:
+            raise ValueError("exact coefficient is not on the quantization grid")
+        integers[name] = int(integer)
+    return _IntegerInequality(integers, integer_constant, step, float(error))
 
 
 class QuantumMaster:
@@ -77,6 +128,7 @@ class QuantumMaster:
         self.penalty = float(penalty)
         self.theta_step = float(theta_step)
         self.theta_cap = float(theta_cap)
+        self.cost_scale = max(1.0, self.theta_cap)
         self.reserve_scale = float(reserve_scale)
         if self.reserve_scale <= 0:
             raise ValueError("reserve_scale must be positive")
@@ -86,6 +138,7 @@ class QuantumMaster:
         self.u: dict[tuple[int, int], object] = {}
         self.v: dict[tuple[int, int], object] = {}
         self.w: dict[tuple[int, int], object] = {}
+        self._encoded_inequalities: dict[str, _IntegerInequality] = {}
         self._build()
 
     def _sum(self, expressions):
@@ -93,6 +146,24 @@ class QuantumMaster:
         for expression in expressions:
             result = result + expression
         return result
+
+    def _add_integer_inequality(
+        self, name: str, inequality: _IntegerInequality, scale: float
+    ) -> None:
+        self._encoded_inequalities[name] = inequality
+        lower = inequality.constant + sum(min(0, value) for value in inequality.coefficients.values())
+        upper = inequality.constant + sum(max(0, value) for value in inequality.coefficients.values())
+        if upper <= 0:
+            return
+        # A zero range needs no slack bit. An impossible inequality remains a
+        # positive penalty instead of failing in the SDK's automatic encoder.
+        slack = self.kw.core.Integer(f"_slack_{name}", 0, -lower) if lower < 0 else 0
+        residual = self.kw.core.BinaryExpression(
+            coefficient={(key,): value for key, value in inequality.coefficients.items() if value},
+            offset=inequality.constant,
+        ) + slack
+        residual = residual * float(inequality.step / Fraction(str(scale)))
+        self.model.add_constraint(residual ** 2, name=name, constr_type="hard", penalty=self.penalty)
 
     def _build(self) -> None:
         data = self.data
@@ -115,8 +186,10 @@ class QuantumMaster:
         theta = self._build_theta()
         objective.append(theta)
 
-        # State-transition, min-up/down, and scenario reserve constraints are
-        # linear and therefore safe in Kaiwu add_constraint.
+        costs = np.r_[data.cost_c, data.startup_cost, data.shutdown_cost, self.theta_step]
+        self.energy_unit = float(np.min(costs[costs > 0])) / self.cost_scale
+
+        # These temporal constraints have integer coefficients and exact SDK slack.
         for i in range(n):
             prev = 1.0 if data.initial_on[i] else 0.0
             for t in range(horizon):
@@ -144,38 +217,56 @@ class QuantumMaster:
                 for t in range(remaining):
                     self.model.add_constraint(self.u[i, t] == 0, constr_type="hard", penalty=self.penalty)
 
-        for scenario in self.scenarios:
-            reserve = (1.0 + data.reserve_fraction) * np.asarray(scenario.load)
-            for t in range(horizon):
-                capacity = []
-                for i in range(n):
-                    expr = data.pmax[i] * self.u[i, t] - (data.pmax[i] - data.pstart[i]) * self.v[i, t]
-                    if t + 1 < horizon:
-                        expr = expr - (data.pmax[i] - data.pshut[i]) * self.w[i, t + 1]
-                    capacity.append(expr * (1.0 / self.reserve_scale))
-                self.model.add_constraint(
-                    self._sum(capacity) >= float(reserve[t]) / self.reserve_scale,
-                    constr_type="hard", penalty=self.penalty,
+        for t in range(horizon):
+            capacity = {}
+            for i in range(n):
+                pmax = Fraction(str(data.pmax[i]))
+                start_reduction = pmax - Fraction(str(data.pstart[i]))
+                shut_reduction = pmax - Fraction(str(data.pshut[i]))
+                capacity[f"u_{i}_{t}"] = pmax
+                capacity[f"v_{i}_{t}"] = -start_reduction
+                if t + 1 < horizon:
+                    capacity[f"w_{i}_{t + 1}"] = -shut_reduction
+                    if data.min_up[i] == 1:
+                        # z = v[t] AND w[t+1]. The correction makes simultaneous
+                        # startup/shutdown capacity min(Pstart, Pshut).
+                        name = f"_one_hour_{i}_{t}"
+                        z = self.kw.core.Binary(name)
+                        v, w = self.v[i, t], self.w[i, t + 1]
+                        self.model.add_constraint(
+                            v * w - 2 * v * z - 2 * w * z + 3 * z,
+                            name=name, constr_type="hard", penalty=self.penalty,
+                        )
+                        capacity[name] = min(start_reduction, shut_reduction)
+            for index, scenario in enumerate(self.scenarios):
+                requirement = (1 + Fraction(str(data.reserve_fraction))) * Fraction(str(scenario.load[t]))
+                self._add_integer_inequality(
+                    f"reserve_{index}_{t}",
+                    _capacity_inequality(capacity, requirement),
+                    self.reserve_scale,
                 )
 
-        for cut in self.cuts:
-            terms = []
-            for i in range(n):
-                for t in range(horizon):
-                    terms.extend(
-                        (
-                            cut.beta_u[i, t] * self.u[i, t],
-                            cut.beta_v[i, t] * self.v[i, t],
-                            cut.beta_w[i, t] * self.w[i, t],
-                        )
-                    )
-            rhs = cut.alpha
+        for index, cut in enumerate(self.cuts):
+            coefficients = {
+                f"{name}_{i}_{t}": float(beta[i, t])
+                for name, beta in (("u", cut.beta_u), ("v", cut.beta_v), ("w", cut.beta_w))
+                for i in range(n) for t in range(horizon)
+            }
             if cut.kind == "optimality":
-                self.model.add_constraint(theta - self._sum(terms) >= rhs, constr_type="hard", penalty=self.penalty)
+                exact = {
+                    f"theta_{k}": -Fraction(str(self.theta_step)) * (1 << k)
+                    for k in range(self.theta_bits)
+                }
+                inequality = _quantize_inequality(
+                    coefficients, cut.alpha, self.theta_step, exact
+                )
+                scale = self.cost_scale
             else:
-                self.model.add_constraint(self._sum(terms) <= -rhs, constr_type="hard", penalty=self.penalty)
+                inequality = _quantize_inequality(coefficients, cut.alpha, 1e-3)
+                scale = self.reserve_scale
+            self._add_integer_inequality(f"cut_{index}", inequality, scale)
 
-        self.model.set_objective(self._sum(objective))
+        self.model.set_objective(self._sum(objective) * (1.0 / self.cost_scale))
 
     def _build_theta(self):
         return self._sum(
@@ -192,11 +283,11 @@ class QuantumMaster:
         return names
 
     def variable_count(self) -> int:
-        """Number of decision bits, excluding SDK-generated slack bits."""
+        """Number of decision bits, excluding slack and one-hour auxiliary bits."""
         return len(self.decision_variables())
 
     def qubo_variables(self) -> list[str]:
-        """Decision bits followed by all SDK-generated auxiliary bits."""
+        """Decision bits followed by all slack and one-hour auxiliary bits."""
         names = self.decision_variables()
         decisions = set(names)
         names.extend(name for name in self.model.get_variables() if name not in decisions)

@@ -5,7 +5,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from .common import Scenario
+from .common import Scenario, commitment_capacity
 from .data import UCData
 from .master import BendersCut, MasterCandidate
 from .subproblem import ScenarioResult
@@ -219,12 +219,7 @@ def _reserve_margin(
 ) -> list[list[float]]:
     if incumbent is None:
         return [[] for _ in scenarios]
-    capacity = (
-        data.pmax[:, None] * incumbent.u
-        - (data.pmax - data.pstart)[:, None] * incumbent.v
-    )
-    capacity[:, :-1] -= (data.pmax - data.pshut)[:, None] * incumbent.w[:, 1:]
-    capacity = capacity.sum(axis=0)
+    capacity = commitment_capacity(data, incumbent.u, incumbent.v, incumbent.w).sum(axis=0)
     return [
         (capacity - (1.0 + data.reserve_fraction) * scenario.load).tolist()
         for scenario in scenarios
@@ -315,21 +310,23 @@ def _unit_cost_decomposition(
 ) -> list[dict]:
     if incumbent is None or not results:
         return []
-    expected_p = sum(
-        scenario.probability * np.asarray(result.p, dtype=float)
-        for scenario, result in zip(scenarios, results)
-    )
-    current_p = expected_p.mean(axis=1)
     rows = []
     for i in range(data.n_units):
         fuel = float(
-            np.sum(data.cost_a[i] * expected_p[i] ** 2 + data.cost_b[i] * expected_p[i])
+            sum(
+                scenario.probability * np.sum(
+                    data.cost_a[i] * np.asarray(result.p)[i] ** 2
+                    + data.cost_b[i] * np.asarray(result.p)[i]
+                )
+                for scenario, result in zip(scenarios, results)
+            )
         )
         rows.append(
             {
                 "unit": i,
                 "fixed_cost": float(np.sum(data.cost_c[i] * incumbent.u[i])),
                 "startup_cost": float(np.sum(data.startup_cost[i] * incumbent.v[i])),
+                "shutdown_cost": float(np.sum(data.shutdown_cost[i] * incumbent.w[i])),
                 "fuel_cost": fuel,
             }
         )
@@ -506,10 +503,10 @@ def _hourly_commitment_profile(
         units_on = np.flatnonzero(incumbent.u[:, t]).tolist()
         hourly_fixed = float(np.sum(data.cost_c[units_on])) if units_on else 0.0
         hourly_fixed += float(
-            sum(float(data.startup_cost[i]) * float(incumbent.v[i, t]) for i in units_on)
+            np.sum(data.startup_cost * incumbent.v[:, t])
         )
         hourly_fixed += float(
-            sum(float(data.shutdown_cost[i]) * float(incumbent.w[i, t]) for i in units_on)
+            np.sum(data.shutdown_cost * incumbent.w[:, t])
         )
         rows.append(
             {

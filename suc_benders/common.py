@@ -39,6 +39,17 @@ class Scenario:
     load: np.ndarray
 
 
+def commitment_capacity(
+    data: UCData, u: np.ndarray, v: np.ndarray, w: np.ndarray
+) -> np.ndarray:
+    """Per-unit capacity subject to both startup and next-hour shutdown limits."""
+
+    startup = data.pmax[:, None] * u - (data.pmax - data.pstart)[:, None] * v
+    shutdown = data.pmax[:, None] * u
+    shutdown[:, :-1] -= (data.pmax - data.pshut)[:, None] * w[:, 1:]
+    return np.minimum(startup, shutdown)
+
+
 def commitment_is_feasible(
     data: UCData, scenarios: Sequence[Scenario], u: np.ndarray, v: np.ndarray, w: np.ndarray
 ) -> bool:
@@ -73,15 +84,9 @@ def commitment_is_feasible(
         if np.any(u[i, :remaining] != (1 if data.initial_on[i] else 0)):
             return False
 
+    capacity = commitment_capacity(data, u, v, w).sum(axis=0)
     for scenario in scenarios:
         reserve = (1.0 + data.reserve_fraction) * np.asarray(scenario.load)
-        for t in range(horizon):
-            capacity = sum(
-                data.pmax[i] * u[i, t]
-                - (data.pmax[i] - data.pstart[i]) * v[i, t]
-                - ((data.pmax[i] - data.pshut[i]) * w[i, t + 1] if t + 1 < horizon else 0.0)
-                for i in range(n)
-            )
-            if capacity + 0.5 < reserve[t]:
-                return False
+        if np.any(capacity + 1e-6 < reserve):
+            return False
     return True

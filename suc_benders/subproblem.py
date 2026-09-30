@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import List, Tuple
 
 import numpy as np
@@ -41,6 +42,8 @@ def _solve_scenario(
     v_value: np.ndarray,
     w_value: np.ndarray,
     output_flag: int = 0,
+    deadline: float | None = None,
+    threads: int | None = None,
 ) -> ScenarioResult:
     """Solve one continuous scenario and return a subgradient cut.
 
@@ -54,6 +57,13 @@ def _solve_scenario(
     n, horizon = data.n_units, data.horizon
     model = gp.Model("suc_scenario_subproblem")
     model.Params.OutputFlag = output_flag
+    if threads is not None:
+        model.Params.Threads = threads
+    if deadline is not None:
+        if time.perf_counter() >= deadline:
+            model.dispose()
+            return ScenarioResult(False, "TIME_LIMIT")
+        model.Params.TimeLimit = max(.001, deadline-time.perf_counter())
     p = model.addMVar((n, horizon), lb=0.0, name="p")
     r = model.addMVar((n, horizon), lb=0.0, name="r")
     records: List[Tuple[object, float, np.ndarray, np.ndarray, np.ndarray]] = []
@@ -79,14 +89,14 @@ def _solve_scenario(
             cu = np.zeros((n, horizon)); cv = np.zeros((n, horizon)); cw = np.zeros((n, horizon))
             cu[i, t] = data.pmax[i]
             cv[i, t] = -(data.pmax[i] - data.pstart[i])
+            startup_rhs = data.pmax[i] * u_value[i, t] + cv[i, t] * v_value[i, t]
+            add(model.addConstr(p[i, t] + r[i, t] <= startup_rhs), 0.0, cu=cu, cv=cv)
+
+            shutdown_rhs = data.pmax[i] * u_value[i, t]
             if t + 1 < horizon:
                 cw[i, t + 1] = -(data.pmax[i] - data.pshut[i])
-            rhs = (
-                data.pmax[i] * u_value[i, t]
-                - (data.pmax[i] - data.pstart[i]) * v_value[i, t]
-                - ((data.pmax[i] - data.pshut[i]) * w_value[i, t + 1] if t + 1 < horizon else 0.0)
-            )
-            add(model.addConstr(p[i, t] + r[i, t] <= rhs), 0.0, cu=cu, cv=cv, cw=cw)
+                shutdown_rhs += cw[i, t + 1] * w_value[i, t + 1]
+            add(model.addConstr(p[i, t] + r[i, t] <= shutdown_rhs), 0.0, cu=cu, cw=cw)
 
             if t == 0:
                 add(model.addConstr(p[i, t] <= data.initial_output[i] + data.ramp_up[i]), data.initial_output[i] + data.ramp_up[i])
@@ -111,7 +121,11 @@ def _solve_scenario(
     model.optimize()
     status = _status_name(gp, model.Status)
     if model.Status != gp.GRB.OPTIMAL or model.SolCount == 0:
-        return _feasibility_cut(data, scenario, u_value, v_value, w_value, output_flag, status)
+        if model.Status == gp.GRB.TIME_LIMIT:
+            model.dispose()
+            return ScenarioResult(False, status)
+        model.dispose()
+        return _feasibility_cut(data, scenario, u_value, v_value, w_value, output_flag, status, deadline, threads)
 
     beta_u = np.zeros((n, horizon)); beta_v = np.zeros((n, horizon)); beta_w = np.zeros((n, horizon))
     for constr, _constant, cu, cv, cw in records:
@@ -144,18 +158,27 @@ def _feasibility_cut(
     w_value: np.ndarray,
     output_flag: int,
     original_status: str,
+    deadline: float | None = None,
+    threads: int | None = None,
 ) -> ScenarioResult:
-    """Construct a Benders feasibility cut by minimizing normalized shortfall.
+    """Construct a Benders feasibility cut by minimizing total shortfall.
 
-    The auxiliary variables are unnormalized nonnegative shortages s=(load,
-    reserve, pmin, capacity, ramp). Normalizing by their RHS coefficients at
-    x0 makes phi affine with the same units and keeps multipliers interpretable.
+    Nonnegative shortages relax load, reserve, pmin, capacity and ramp limits.
+    A unit-hour capacity shortage relaxes both startup and shutdown bounds.
+    The dual supporting plane is anchored at the solved commitment.
     """
 
     gp = require_gurobi()
     n, horizon = data.n_units, data.horizon
     model = gp.Model("suc_scenario_feasibility")
     model.Params.OutputFlag = output_flag
+    if threads is not None:
+        model.Params.Threads = threads
+    if deadline is not None:
+        if time.perf_counter() >= deadline:
+            model.dispose()
+            return ScenarioResult(False, "TIME_LIMIT")
+        model.Params.TimeLimit = max(.001, deadline-time.perf_counter())
 
     s_balance = model.addMVar(horizon, lb=0.0, name="s_balance")
     s_reserve = model.addMVar(horizon, lb=0.0, name="s_reserve")
@@ -196,18 +219,22 @@ def _feasibility_cut(
             cw = zero.copy()
             cu[i, t] = data.pmax[i]
             cv[i, t] = -(data.pmax[i] - data.pstart[i])
-            if t + 1 < horizon:
-                cw[i, t + 1] = -(data.pmax[i] - data.pshut[i])
-            rhs = (
-                data.pmax[i] * u_value[i, t]
-                - (data.pmax[i] - data.pstart[i]) * v_value[i, t]
-                - ((data.pmax[i] - data.pshut[i]) * w_value[i, t + 1] if t + 1 < horizon else 0.0)
-            )
+            startup_rhs = data.pmax[i] * u_value[i, t] + cv[i, t] * v_value[i, t]
             add(
-                model.addConstr(p[i, t] + r[i, t] - s_capacity[i, t] <= rhs),
+                model.addConstr(p[i, t] + r[i, t] - s_capacity[i, t] <= startup_rhs),
                 0.0,
                 cu=cu,
                 cv=cv,
+            )
+
+            shutdown_rhs = data.pmax[i] * u_value[i, t]
+            if t + 1 < horizon:
+                cw[i, t + 1] = -(data.pmax[i] - data.pshut[i])
+                shutdown_rhs += cw[i, t + 1] * w_value[i, t + 1]
+            add(
+                model.addConstr(p[i, t] + r[i, t] - s_capacity[i, t] <= shutdown_rhs),
+                0.0,
+                cu=cu,
                 cw=cw,
             )
 

@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Sequence
 
 import numpy as np
 
-from .common import Scenario, commitment_is_feasible
+from .common import Scenario, commitment_capacity, commitment_is_feasible
 from .data import UCData
 from .master import MasterCandidate
 
 
 def commitment_key(u: np.ndarray, v: np.ndarray, w: np.ndarray) -> tuple[int, ...]:
     return tuple(np.r_[u.reshape(-1), v.reshape(-1), w.reshape(-1)].astype(int).tolist())
+
+
+def commitment_hash(candidate: MasterCandidate) -> str:
+    values = np.r_[candidate.u.ravel(), candidate.v.ravel(), candidate.w.ravel()]
+    return hashlib.sha256(values.astype(np.uint8).tobytes()).hexdigest()
 
 
 def make_candidate(
@@ -61,11 +67,7 @@ def _temporal_repair(data: UCData, u: np.ndarray) -> np.ndarray:
 
 
 def reserve_capacity(data: UCData, candidate: MasterCandidate, scenario: Scenario) -> np.ndarray:
-    capacity = (
-        data.pmax[:, None] * candidate.u
-        - (data.pmax - data.pstart)[:, None] * candidate.v
-    )
-    capacity[:, :-1] -= (data.pmax - data.pshut)[:, None] * candidate.w[:, 1:]
+    capacity = commitment_capacity(data, candidate.u, candidate.v, candidate.w)
     return capacity.sum(axis=0) - (1.0 + data.reserve_fraction) * scenario.load
 
 

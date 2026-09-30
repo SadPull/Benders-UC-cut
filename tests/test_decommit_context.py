@@ -191,6 +191,31 @@ class DecommitGradientTests(unittest.TestCase):
             self.assertIn(field, user)
         self.assertIn("turned OFF", _system)
 
+    def test_cost_decomposition_conserves_scenario_and_shutdown_costs(self):
+        from suc_benders.context import _hourly_commitment_profile, _unit_cost_decomposition
+        from suc_benders.data import Scenario
+        from tests.test_capacity import one_hour_data
+
+        data = one_hour_data()
+        scenarios = [Scenario("low", .25, np.array([15., 0., 0.])),
+                     Scenario("high", .75, np.array([30., 0., 0.]))]
+        incumbent = make_candidate(data, scenarios, np.array([[1, 0, 0]]))
+        results = [solve_scenario(data, s, incumbent.u, incumbent.v, incumbent.w)
+                   for s in scenarios]
+        rows = _unit_cost_decomposition(data, scenarios, incumbent, results)
+        expected_fuel = sum(s.probability * r.objective for s, r in zip(scenarios, results))
+        self.assertAlmostEqual(sum(row["fuel_cost"] for row in rows), expected_fuel, places=7)
+        self.assertEqual(rows[0]["shutdown_cost"], 4.)
+        profile = _hourly_commitment_profile(data, incumbent)
+        self.assertEqual(profile[1]["units_on"], 0)
+        self.assertEqual(profile[1]["hourly_fixed_cost"], 4.)
+        fixed = sum(row["fixed_cost"] + row["startup_cost"] + row["shutdown_cost"] for row in rows)
+        self.assertEqual(sum(row["hourly_fixed_cost"] for row in profile), fixed)
+        context = build_llm_context(data, scenarios, LLMContextInput(
+            incumbent, results, [], [], [], [], [],
+        ))
+        self.assertEqual(context["incumbent_cost"]["total"], round(fixed + expected_fuel, 3))
+
 
 if __name__ == "__main__":
     unittest.main()

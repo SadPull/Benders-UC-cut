@@ -1,6 +1,6 @@
 # SUC + Benders (10×24)
 
-Current release: [v0.11.0](CHANGELOG.md).
+Current release: [v0.12.0](CHANGELOG.md).
 
 This repository contains a small, reproducible two-stage stochastic unit commitment model. The research Benders algorithm generates binary commitment candidates using Kaiwu local simulated annealing, decommitment search, and an optional LLM. Gurobi solves only the continuous dispatch subproblems within that algorithm. A separate full deterministic equivalent Gurobi model supplies an external reference solution and proven lower bound for post-run comparisons.
 
@@ -14,7 +14,7 @@ This repository contains a small, reproducible two-stage stochastic unit commitm
 - 5% spinning reserve
 - exact 10×24 base load and generator parameters from the original MATLAB data
 - simulated annealing and decommitment for the binary master search
-- optional LLM candidate advice, no cloud/QPU calls
+- optional LLM candidate advice over HTTP; no QPU calls
 
 > The `high` scenario is capped at 1.05 because 1.10 × peak load plus 5% reserve exceeds the installed capacity of the 10-generator system. If you want a different high scenario, provide your own `scenario_file`.
 
@@ -33,6 +33,41 @@ The Kaiwu integration uses the documented `kaiwu.core.QuboModel` and
 `kaiwu.core.qubo_matrix_to_ising_matrix` APIs. The annealer receives the full
 QUBO matrix, including inequality slack variables; decoding extracts the
 commitment and theta bits and discards the auxiliary bits.
+
+## Capacity and QUBO encoding
+
+`pstart` and `pshut` are separate startup and shutdown output limits. Dispatch
+and reserve must satisfy both limits; a unit that starts in hour t and shuts
+down in hour t+1 has capacity `min(pstart, pshut)`. Candidate checks, repair,
+context, scenario subproblems, and the full reference use this same rule.
+The QUBO uses an auxiliary AND bit for this case when minimum up-time is one
+hour. Slack and AND bits are excluded from `variable_count()` and included in
+`qubo_variables()` and `matrix()`.
+
+Reserve inequalities use the exact decimal capacity lattice and explicitly
+bounded integer slack. Demand is rounded up to the next point on that lattice,
+which preserves the binary feasible set. `reserve_scale` affects conditioning,
+not the lattice or its feasible set. Candidate capacity checks use a numerical
+tolerance of 1e-6 MW rather than allowing a 0.5 MW shortage.
+
+Only copies of Benders cuts entering the QUBO are quantized. Constants and
+commitment coefficients are rounded downward in the form `affine <= 0`, so
+quantization can only relax a cut. The worst-case relaxation is at most
+`theta_step` for an optimality cut and 1e-3 in total-shortfall units for a
+feasibility cut. Theta coefficients remain exact on the chosen grid. Original
+cuts, Gurobi dispatch, and reported costs retain their original precision.
+Zero-range and constant inequalities do not request invalid SDK slack ranges.
+
+The objective and optimality cuts use `max(1, theta_cap)` as their common cost
+scale; reserve and feasibility cuts use `reserve_scale`. Scaling occurs before
+squaring constraint residuals. `QuantumConfig.initial_temperature` is a multiplier
+of the Ising single-spin energy-change bound; `cutoff_temperature` is a multiplier
+of the smallest positive objective coefficient. Both are expressed in the same
+units as the normalized matrix. `solve_qubo(matrix, config, *, energy_unit=1.0)`
+remains callable with two arguments; the research loop supplies the master's
+objective resolution explicitly. Cooling to this resolution can take more
+temperature steps than the former fixed normalized cutoff. These changes do not
+guarantee feasible annealing samples or global optimality.
 
 ## Architecture
 
@@ -92,6 +127,11 @@ When `--llm` is enabled, the advisor receives a compact P0/P1 context containing
 - unit marginal costs and unit cost decomposition
 
 All context values are rounded to three decimals and lists are capped to keep the prompt compact. LLM output remains advisory only and is always validated locally.
+
+Per-unit fuel cost is the probability-weighted cost of scenario outputs,
+`E[a*p^2 + b*p]`, rather than the cost of the expected output. Unit decomposition
+includes `shutdown_cost`; hourly fixed costs include shutdowns even when the
+unit is already off in that hour.
 
 ## Run the benchmark
 
@@ -184,6 +224,128 @@ To use a custom scenario set, create a JSON file such as:
 }
 ```
 
+## Attribution experiment
+
+The fixed `attribution` suite compares all eight on/off combinations of Kaiwu
+local simulated annealing (Q), LLM advice (L), and decommitment (D), with the same
+repair and initial candidate. Two controls add raw annealing without repair and
+16 independent Bernoulli(0.5) commitment proposals followed by the same repair.
+The latter is an experimental control, not a quantum backend.
+
+The suite runs the canonical three-scenario 10x24 model, a 90% load variant, and
+a two-hour cyclic load shift. Seeds are 7, 17, 27, 37, and 47: 150 research runs.
+Each run is limited to 10 iterations and 40 unique complete candidate evaluations,
+including initialization. Cache hits do not consume this budget. The additional
+`EVALUATION_LIMIT` status only applies when this optional limit is configured.
+The eight main groups retain the existing candidate evaluation order.
+
+Set `LLM_API_KEY` in the process environment before running; never save the key
+in the experiment directory. The selected service uses OpenAI-compatible Chat
+Completions. The original Messages protocol remains the ordinary CLI default.
+Use `--llm-api-format chat_completions`, `--llm-base-url`, and `--llm-model` with
+`suc_benders.run` to select that protocol for an individual run.
+
+```powershell
+$env:OMP_NUM_THREADS = "1"
+$env:OPENBLAS_NUM_THREADS = "1"
+$env:MKL_NUM_THREADS = "1"
+python -m suc_benders.benchmark --suite attribution --llm-base-url http://47.101.31.14:8300/v1 --llm-model deepseek-v4.1-flash --pilot
+python -m suc_benders.benchmark --suite attribution --llm-base-url http://47.101.31.14:8300/v1 --llm-model deepseek-v4.1-flash --resume
+```
+
+`--pilot` completes the first 10-strategy block without solving the full
+reference. `--resume` retains completed runs only when the solver fingerprint,
+inputs, dependencies, and settings match. `--output-dir` defaults to
+`results/attribution-20260930`. Existing benchmark arguments such as
+`--max-iterations` and `--seed` belong to the legacy suite; attribution uses its
+fixed, recorded matrix. The suite executes serially with one Gurobi thread.
+
+LLM settings are temperature 0.2, at most four candidates, 8192 completion tokens,
+180-second timeout, and one retry after 30 seconds for network errors, HTTP 429,
+or HTTP 5xx. There are at most 600 logical calls and 1200 HTTP requests. Auth
+errors, invalid JSON, empty output, truncation, and duplicate proposals are
+reported distinctly. Live call progress is written to `progress.log`.
+
+Each run records provenance before and after repair, candidate hashes, cache
+hits, dispatch feasibility, actual incumbent improvement, timing by phase,
+QUBO size, raw annealing diversity, and sanitized LLM requests/responses with
+reported token usage. A run is checked for physical residuals and cost
+conservation before its completion record is saved. A process interruption
+does not turn an incomplete run into a completed statistical sample.
+
+After all research runs, three independent full models supply reference
+objectives and ObjBound values, with a 300-second time limit and MIPGap 1e-4.
+Reports compare budgets of 10/20/40 evaluations and 30/60/120/300 seconds,
+preserving observed stopping points. Paired bootstrap intervals use 10,000
+resamples. For each fixed D, interaction is C10+C01-C00-C11; a positive value
+means superadditive cost improvement. Deterministic objective repeats are not
+independent algorithm samples; remote LLM outputs are not guaranteed to be
+reproducible from the local seed.
+
+Artifacts include the source snapshot and manifest, per-run JSON and JSONL
+traces, `runs.csv`, `summary.csv`, `checkpoints.csv`, `effects.csv`, `controls.csv`, static plots,
+and a Chinese `report.md`. Report generation is independent of research state.
+
+The completed 2026-09-30 study is in
+[`results/attribution-20260930/report.md`](results/attribution-20260930/report.md).
+Its recovery ledger includes interrupted-call overhead in the total API budget.
+
+## Paper transfer: temporal SA-Benders
+
+The opt-in paper transfer implements bounded Lagrangian cutting-plane
+coordination of 1/2/3-hour blocks, with local continuous convex dispatch,
+SA-only integer masters, and full-horizon repair and validation. It preserves
+the original global time indices: initial conditions are not repeated at block
+boundaries, and cross-block ramps, minimum up/down constraints, transitions,
+and next-hour shutdown capacity limits enter the coupling rows.
+
+```powershell
+python -m suc_benders.run --master-encoding dynamic --decomposition temporal --block-hours 2 --no-decommit --max-iterations 10 --time-limit-seconds 300 --max-candidate-evaluations 40
+```
+
+`--master-encoding compact` selects a static total-cost QUBO;
+`--master-encoding dynamic` enables continuous master relaxation and local
+objective bounds. Omit `--decomposition temporal` for the whole-horizon
+versions. These experimental modes require repair and reject LLM, decommitment,
+random-candidate, or disabled-SA configurations. The default remains legacy.
+`theta` continues to mean recourse cost; the new internal total-cost variable
+can be negative under Lagrangian prices. Fixed variables, bounded objective
+bits, exact capacity lattices and one-sided cut quantization are retained.
+
+Local optimality cuts and objective upper bounds are rebuilt at every price
+change; local feasibility cuts survive. The sum of local sampled costs is not
+a certified global lower bound. Only the continuous relaxation bounds at the
+same prices may be summed, including the coupling constant. Kelley planes are
+affine upper bounds, not necessarily tangent planes with an approximate SA
+oracle. The multiplier box is fixed at +/-10 for normalized equalities and
+[0,10] for inequalities; no global convergence claim is made.
+
+Run the fixed six-strategy, five-seed comparison (original 10x24 case only):
+
+```powershell
+$env:OMP_NUM_THREADS = "1"
+$env:OPENBLAS_NUM_THREADS = "1"
+$env:MKL_NUM_THREADS = "1"
+python -m suc_benders.paper_experiment --pilot
+python -m suc_benders.paper_experiment --resume
+```
+
+Each run allows 300 seconds and 40 unique complete candidate evaluations;
+block evaluations are counted separately, with all costs included in runtime.
+SA calls cannot be interrupted, so overshoots are reported and time-checkpoint
+comparisons exclude results completed after the checkpoint. The independent
+full reference runs after all 30 research runs. The manifest fingerprints
+sources, inputs, dependencies and settings; resume refuses mismatched solvers.
+An implementation or validation exception produces an error file, not a
+completed sample. Reports and CSVs are in `results/paper-transfer-20260930-v2`.
+
+The completed 30-run study is preserved in Git under
+[`experiments/paper-transfer-20260930-v2/`](experiments/paper-transfer-20260930-v2/README.md),
+including the [Chinese report](experiments/paper-transfer-20260930-v2/report.md),
+CSVs, plots, validation audit, and a checksummed archive with the complete run
+data and exact experiment source snapshot. The archive predates release-only
+documentation changes; use its source snapshot to reproduce its fingerprint.
+
 ## Tests
 
 ```powershell
@@ -195,5 +357,6 @@ python -m unittest discover -s tests -v
 - Kaiwu local simulated annealing is the only implemented quantum backend; cloud/QPU is not configured.
 - Candidate search is heuristic and does not prove global optimality or infeasibility.
 - `solve_full()` is an external validation reference, not part of the research algorithm.
-- The feasibility cut is a generic normalized-shortfall cut derived from Gurobi duals; it is not a specialized strong cut.
-- The project is model scaffolding, not a research benchmark.
+- The feasibility cut is a generic total-shortfall cut derived from Gurobi duals; it is not a specialized strong cut.
+- Attribution results concern three related 10x24 cases, not general scaling
+  behavior or quantum hardware advantage.

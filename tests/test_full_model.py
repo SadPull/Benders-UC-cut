@@ -52,10 +52,28 @@ class FullModelTests(unittest.TestCase):
         self.assertFalse(np.isnan(result.lower_bound))
 
     def test_scenario_subproblems_match_full_model(self):
+        import gurobipy as gp
+
+        fixed = self.result.model.fixed()
+        self.addCleanup(fixed.dispose)
+        fixed.Params.OutputFlag = 0
+        fixed.optimize()
+        self.assertEqual(fixed.Status, gp.GRB.OPTIMAL)
+        expected_fuel = 0.0
         for scenario in self.scenarios:
             sub = solve_scenario(self.units, scenario, self.result.u, self.result.v, self.result.w)
             self.assertTrue(sub.feasible)
-            self.assertAlmostEqual(sub.objective, scenario.probability * sub.objective / scenario.probability, places=5)
+            p = np.array([
+                [fixed.getVarByName(f"p_{scenario.name}[{i},{t}]").X
+                 for t in range(self.units.horizon)]
+                for i in range(self.units.n_units)
+            ])
+            fuel = np.sum(self.units.cost_a[:, None] * p ** 2 + self.units.cost_b[:, None] * p)
+            np.testing.assert_allclose(sub.objective, fuel, rtol=1e-8, atol=1e-4)
+            expected_fuel += scenario.probability * sub.objective
+        np.testing.assert_allclose(
+            self.result.fixed_cost + expected_fuel, fixed.ObjVal, rtol=1e-8, atol=1e-4,
+        )
 
 
 if __name__ == "__main__":

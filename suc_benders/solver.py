@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import math
 import time
 from typing import List, Sequence
@@ -8,6 +8,7 @@ from typing import List, Sequence
 import numpy as np
 
 from .candidates import (
+    commitment_hash,
     commitment_key,
     decommit_commitment,
     make_candidate,
@@ -43,6 +44,16 @@ class BendersConfig:
     quantum: QuantumConfig = field(default_factory=QuantumConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     subproblem_output_flag: int = 0
+    max_candidate_evaluations: int | None = None
+    collect_diagnostics: bool = False
+    random_candidates: bool = False
+    random_seed: int = 7
+    random_candidate_pool_size: int = 16
+    master_encoding: str = "legacy"
+    decomposition: str = "none"
+    block_hours: int = 2
+    block_inner_iterations: int = 3
+    time_limit_seconds: float | None = None
 
 
 @dataclass
@@ -85,6 +96,7 @@ class BendersResult:
     feasibility_cuts: int
     runtime: float
     message: str = ""
+    diagnostics: dict = field(default_factory=dict)
 
 
 def _fixed_cost(data: UCData, u: np.ndarray, v: np.ndarray, w: np.ndarray) -> float:
@@ -126,7 +138,29 @@ def solve_benders(
     config: BendersConfig | None = None,
 ) -> BendersResult:
     config = config or BendersConfig()
+    if config.master_encoding not in ("legacy", "compact", "dynamic") or config.decomposition not in ("none", "temporal"):
+        raise ValueError("unknown encoding or decomposition")
+    if config.block_hours < 1 or config.block_inner_iterations < 1:
+        raise ValueError("block hours and inner iterations must be positive")
+    if config.time_limit_seconds is not None and config.time_limit_seconds <= 0:
+        raise ValueError("time limit must be positive")
+    if config.decomposition == "temporal" and config.master_encoding != "dynamic":
+        raise ValueError("temporal decomposition requires dynamic encoding")
+    if config.master_encoding != "legacy" or config.decomposition != "none":
+        from .paper_solver import solve_paper
+        return solve_paper(data, scenarios, config)
+    if config.max_candidate_evaluations is not None and config.max_candidate_evaluations < 1:
+        raise ValueError("max_candidate_evaluations must be positive or None")
+    if config.quantum_candidates and config.random_candidates:
+        raise ValueError("random and quantum candidate generators are mutually exclusive")
     started = time.perf_counter()
+    deadline = started + (config.time_limit_seconds if config.time_limit_seconds is not None else float("inf"))
+    random_generator = np.random.default_rng(config.random_seed) if config.random_candidates else None
+    timings = {name: 0.0 for name in ("qubo", "annealing", "random", "repair", "decommit", "context", "llm", "subproblems")}
+    diagnostics = {
+        "evaluations": [], "proposals": [], "sampling": [], "llm_calls": [],
+        "iterations": [], "timings": timings,
+    } if config.collect_diagnostics else {}
 
     cuts: list[BendersCut] = []
     history: list[IterationRecord] = []
@@ -153,13 +187,72 @@ def solve_benders(
     message = ""
     current_infeasible_diagnostics: list[dict] = []
 
-    def evaluate_candidate(candidate: MasterCandidate, source: str) -> CandidateEvaluation:
+    def budget_available() -> bool:
+        return time.perf_counter() < deadline and (config.max_candidate_evaluations is None or len(evaluation_cache) < config.max_candidate_evaluations)
+
+    def record_proposal(raw, final, origin, index, repair_attempted=False):
+        proposal_id = f"{origin}:{iteration}:{index}"
+        if final is not None:
+            final.provenance = {
+                "origin": origin, "proposal_id": proposal_id,
+                "repair_attempted": repair_attempted,
+                "repair_changed": commitment_key(raw.u, raw.v, raw.w) != commitment_key(final.u, final.v, final.w),
+            }
+        if not config.collect_diagnostics:
+            return
+        diagnostics["proposals"].append({
+            "iteration": iteration, "proposal_id": proposal_id, "origin": origin,
+            "raw_id": commitment_hash(raw), "raw_u": raw.u.copy(),
+            "raw_v": raw.v.copy(), "raw_w": raw.w.copy(),
+            "raw_discrete_feasible": commitment_is_feasible(data, scenarios, raw.u, raw.v, raw.w),
+            "repair_attempted": repair_attempted,
+            "commitment_id": commitment_hash(final) if final is not None else None,
+            "repaired_u": final.u.copy() if final is not None else None,
+            "hamming_u": int(np.count_nonzero(raw.u != final.u)) if final is not None else None,
+            "hamming_uvw": sum(int(np.count_nonzero(a != b)) for a, b in zip(
+                (raw.u, raw.v, raw.w), (final.u, final.v, final.w),
+            )) if final is not None else None,
+            "outcome": "accepted" if final is not None else "rejected",
+        })
+
+    def record_evaluation(candidate, source, evaluation, before, previous_u, cache_hit, elapsed):
+        if not config.collect_diagnostics:
+            return
+        diagnostics["evaluations"].append({
+            "iteration": iteration, "evaluation_count": len(evaluation_cache),
+            "elapsed_seconds": time.perf_counter() - started,
+            "commitment_id": commitment_hash(candidate),
+            "source": source, "origin": candidate.provenance.get("origin", source),
+            "provenance": dict(candidate.provenance), "cache_hit": cache_hit,
+            "u": candidate.u.copy(), "v": candidate.v.copy(), "w": candidate.w.copy(),
+            "feasible": evaluation.feasible, "scenario_costs": evaluation.scenario_costs,
+            "scenario_feasible": {name: math.isfinite(value) for name, value in evaluation.scenario_costs.items()},
+            "objective": evaluation.total_cost, "fixed_cost": evaluation.fixed_cost,
+            "expected_fuel_cost": evaluation.expected_fuel_cost,
+            "no_load_cost": float(np.sum(data.cost_c[:, None] * candidate.u)),
+            "startup_cost": float(np.sum(data.startup_cost[:, None] * candidate.v)),
+            "shutdown_cost": float(np.sum(data.shutdown_cost[:, None] * candidate.w)),
+            "incumbent_before": before, "incumbent": incumbent,
+            "improved": bool(not cache_hit and incumbent < before - 1e-7),
+            "improvement": before - incumbent if math.isfinite(before) else None,
+            "hamming_to_previous_incumbent": int(np.count_nonzero(candidate.u != previous_u)) if previous_u is not None else None,
+            "subproblem_seconds": elapsed,
+            "scenario_solves": 0 if cache_hit else len(scenarios),
+        })
+
+    def evaluate_candidate(candidate: MasterCandidate, source: str) -> CandidateEvaluation | None:
         nonlocal incumbent, best_u, best_v, best_w, best_scenario_results, best_solutions
 
         key = commitment_key(candidate.u, candidate.v, candidate.w)
         if key in evaluation_cache:
+            record_evaluation(candidate, source, evaluation_cache[key], incumbent, best_u, True, 0.0)
             return evaluation_cache[key]
+        if not budget_available():
+            return None
 
+        before = incumbent
+        previous_u = best_u
+        scenario_started = time.perf_counter()
         scenario_results = [
             solve_scenario(
                 data,
@@ -168,9 +261,14 @@ def solve_benders(
                 candidate.v,
                 candidate.w,
                 output_flag=config.subproblem_output_flag,
+                **({"deadline": deadline, "threads": 1} if config.time_limit_seconds is not None else {}),
             )
             for scenario in scenarios
         ]
+        scenario_seconds = time.perf_counter() - scenario_started
+        timings["subproblems"] += scenario_seconds
+        if any("TIME_LIMIT" in result.status for result in scenario_results):
+            return None
         feasible = all(result.feasible for result in scenario_results)
         fixed = _fixed_cost(data, candidate.u, candidate.v, candidate.w)
         expected_fuel = (
@@ -223,13 +321,18 @@ def solve_benders(
             hamming_to_incumbent=hamming,
         )
         evaluation_cache[key] = evaluation
+        record_evaluation(candidate, source, evaluation, before, previous_u, False, scenario_seconds)
         return evaluation
 
     for iteration in range(1, config.max_iterations + 1):
+        if not budget_available():
+            break
+        iteration_started = time.perf_counter()
         current_infeasible_diagnostics.clear()
 
         quantum_candidates = []
         if config.quantum_candidates:
+            phase_started = time.perf_counter()
             master = QuantumMaster(
                 data,
                 scenarios,
@@ -239,20 +342,52 @@ def solve_benders(
                 theta_step=config.theta_step,
                 reserve_scale=config.reserve_scale,
             )
-            binaries = solve_qubo(master.matrix(), config.quantum)
+            matrix = master.matrix()
+            build_seconds = time.perf_counter() - phase_started
+            timings["qubo"] += build_seconds
+            if time.perf_counter() >= deadline:
+                break
+            phase_started = time.perf_counter()
+            binaries = solve_qubo(matrix, config.quantum, energy_unit=master.energy_unit)
+            sampling_seconds = time.perf_counter() - phase_started
+            timings["annealing"] += sampling_seconds
             quantum_candidates = [master.decode(binary) for binary in binaries]
+            if config.collect_diagnostics:
+                diagnostics["sampling"].append({
+                    "iteration": iteration, "cuts": len(cuts), "bits": int(matrix.shape[0]),
+                    "decision_bits": master.variable_count(),
+                    "auxiliary_bits": int(matrix.shape[0])-master.variable_count(),
+                    "density": float(np.count_nonzero(matrix)/matrix.size) if matrix.size else 0.,
+                    "max_abs_coefficient": float(np.max(np.abs(matrix))),
+                    "energy_unit": master.energy_unit, "build_seconds": build_seconds,
+                    "sampling_seconds": sampling_seconds, "raw_candidates": len(quantum_candidates),
+                    "unique_u": len({tuple(candidate.u.ravel()) for candidate in quantum_candidates}),
+                    "unique_uvw": len({commitment_key(candidate.u, candidate.v, candidate.w) for candidate in quantum_candidates}),
+                    "raw_discrete_feasible": sum(commitment_is_feasible(data, scenarios, c.u, c.v, c.w) for c in quantum_candidates),
+                })
+        if random_generator is not None:
+            phase_started = time.perf_counter()
+            quantum_candidates = [make_candidate(
+                data, scenarios, random_generator.integers(0, 2, size=(data.n_units, data.horizon)),
+                source="random",
+            ) for _ in range(config.random_candidate_pool_size)]
+            timings["random"] += time.perf_counter() - phase_started
 
         fallback = _construct_feasible_candidate(data, scenarios)
 
         raw_candidates = len(quantum_candidates) + int(fallback is not None)
         repaired_count = 0
         base_candidates: list[MasterCandidate] = []
-        for candidate in quantum_candidates:
+        for index, candidate in enumerate(quantum_candidates):
+            origin = candidate.source
             if config.repair_candidates:
+                phase_started = time.perf_counter()
                 repaired = repair_commitment(data, scenarios, candidate.u)
+                timings["repair"] += time.perf_counter() - phase_started
+                record_proposal(candidate, repaired, origin, index, True)
                 if repaired is None:
                     current_infeasible_diagnostics.append({
-                        "source": "quantum",
+                        "source": origin,
                         "type": "repair_failed",
                         "unit": None,
                         "period": None,
@@ -263,7 +398,10 @@ def solve_benders(
                     repaired_count += 1
                 base_candidates.append(repaired)
             elif commitment_is_feasible(data, scenarios, candidate.u, candidate.v, candidate.w):
+                record_proposal(candidate, candidate, origin, index)
                 base_candidates.append(candidate)
+            else:
+                record_proposal(candidate, None, origin, index)
         if fallback is not None:
             base_candidates.append(fallback)
         if best_u is not None:
@@ -278,6 +416,12 @@ def solve_benders(
             if key not in base_seen:
                 base_seen.add(key)
                 unique_base.append(candidate)
+            elif config.collect_diagnostics:
+                diagnostics["proposals"].append({
+                    "iteration": iteration, "origin": candidate.provenance.get("origin", candidate.source),
+                    "proposal_id": candidate.provenance.get("proposal_id"),
+                    "commitment_id": commitment_hash(candidate), "outcome": "duplicate_in_base",
+                })
 
         # Evaluate base candidates first so decommitment and LLM context use
         # the best currently available incumbent.
@@ -285,14 +429,18 @@ def solve_benders(
         cuts_size_at_iteration_start = len(cuts)
         base_evaluations: list[CandidateEvaluation] = []
         for candidate in unique_base:
-            base_evaluations.append(evaluate_candidate(candidate, candidate.source))
+            evaluation = evaluate_candidate(candidate, candidate.source)
+            if evaluation is None:
+                break
+            base_evaluations.append(evaluation)
 
         # Decommitment-first search: start from the incumbent and greedily turn
         # OFF on-hours, scored by the same per-(unit, hour) gradient the LLM
         # sees.
         decommit_evaluations: list[CandidateEvaluation] = []
         decommit_generated: list[MasterCandidate] = []
-        if config.decommit_candidates and best_u is not None:
+        if config.decommit_candidates and best_u is not None and budget_available():
+            phase_started = time.perf_counter()
             seed_candidate = make_candidate(data, scenarios, best_u, source="incumbent")
             gradient = decommit_gradient_map(
                 data, scenarios, seed_candidate, best_scenario_results
@@ -304,9 +452,14 @@ def solve_benders(
                 limit=int(config.decommit_ladder_size),
                 gradient=gradient,
             )
-            for candidate in decommit_generated:
+            timings["decommit"] += time.perf_counter() - phase_started
+            for index, candidate in enumerate(decommit_generated):
+                record_proposal(candidate, candidate, "decommit", index)
+                candidate.provenance["parent_id"] = commitment_hash(seed_candidate)
                 previous_incumbent = incumbent
                 evaluation = evaluate_candidate(candidate, "decommit")
+                if evaluation is None:
+                    break
                 decommit_evaluations.append(evaluation)
                 if candidate.move is not None:
                     move = candidate.move
@@ -325,7 +478,8 @@ def solve_benders(
 
         # Build the compact P0/P1 context before asking the LLM for advice.
         llm_context = None
-        if config.llm.enabled:
+        if config.llm.enabled and budget_available():
+            phase_started = time.perf_counter()
             incumbent_candidate = None
             if best_u is not None:
                 incumbent_candidate = make_candidate(data, scenarios, best_u, source="incumbent")
@@ -341,27 +495,41 @@ def solve_benders(
                 decommit_ladder=decommit_evaluations,
             )
             llm_context = build_llm_context(data, scenarios, context_input)
+            timings["context"] += time.perf_counter() - phase_started
 
         llm_result = None
         llm_candidates: list[MasterCandidate] = []
-        if config.llm.enabled:
+        if config.llm.enabled and budget_available():
             incumbent_candidate = None
             if best_u is not None:
                 incumbent_candidate = make_candidate(data, scenarios, best_u, source="incumbent")
+            phase_started = time.perf_counter()
             llm_result = ask_llm_for_candidates(
                 data,
                 scenarios,
                 iteration,
                 unique_base,
                 incumbent_candidate,
-                config.llm,
+                replace(config.llm, collect_diagnostics=True) if config.collect_diagnostics else config.llm,
                 context=llm_context,
             )
+            llm_seconds = time.perf_counter() - phase_started
+            llm_repair_seconds = llm_result.diagnostics.get("repair_seconds", 0.0)
+            timings["llm"] += max(0.0, llm_seconds - llm_repair_seconds)
+            timings["repair"] += llm_repair_seconds
+            if config.collect_diagnostics:
+                call = dict(llm_result.diagnostics)
+                call.update(iteration=iteration, start_seconds=phase_started - started,
+                            end_seconds=time.perf_counter() - started, failed=llm_result.failed)
+                diagnostics["llm_calls"].append(call)
+                diagnostics["proposals"].extend({"iteration": iteration, **row} for row in call.get("proposals", []))
             llm_candidates = llm_result.candidates
 
         llm_evaluations: list[CandidateEvaluation] = []
         for candidate in llm_candidates:
             evaluation = evaluate_candidate(candidate, "llm")
+            if evaluation is None:
+                break
             llm_evaluations.append(evaluation)
 
         new_candidates = len(evaluation_cache) - cache_size_at_iteration_start
@@ -400,6 +568,17 @@ def solve_benders(
             )
         )
 
+        if config.collect_diagnostics:
+            diagnostics["iterations"].append({
+                "iteration": iteration, "elapsed_seconds": time.perf_counter() - started,
+                "iteration_seconds": time.perf_counter() - iteration_started,
+                "evaluation_count": len(evaluation_cache), "incumbent": incumbent,
+                "timings": dict(timings),
+            })
+        if not budget_available():
+            status = "TIME_LIMIT" if time.perf_counter() >= deadline else "EVALUATION_LIMIT"
+            message = "unique candidate evaluation budget exhausted"
+            break
         if new_candidates == 0:
             # A failed LLM call is a transient infrastructure event, not
             # evidence that candidate generation has genuinely stalled. Only
@@ -413,10 +592,16 @@ def solve_benders(
         if iteration < config.max_iterations:
             theta_cap = min(theta_cap, max(incumbent, 1.0))
 
+    if time.perf_counter() >= deadline:
+        status = "TIME_LIMIT"
     optimality_count = sum(cut.kind == "optimality" for cut in cuts)
     feasibility_count = sum(cut.kind == "feasibility" for cut in cuts)
+    if config.collect_diagnostics:
+        diagnostics["evaluation_count"] = len(evaluation_cache)
+        diagnostics["elapsed_seconds"] = time.perf_counter() - started
+        diagnostics["timings"]["other"] = max(0.0, diagnostics["elapsed_seconds"] - sum(timings.values()))
     if best_u is None:
-        status = "NO_FEASIBLE_SOLUTION"
+        status = status if status == "EVALUATION_LIMIT" else "NO_FEASIBLE_SOLUTION"
         message = "no candidate was feasible in every scenario"
         return BendersResult(
             status=status,
@@ -430,6 +615,7 @@ def solve_benders(
             feasibility_cuts=feasibility_count,
             runtime=time.perf_counter() - started,
             message=message,
+            diagnostics=diagnostics,
         )
     return BendersResult(
         status=status,
@@ -443,6 +629,7 @@ def solve_benders(
         feasibility_cuts=feasibility_count,
         runtime=time.perf_counter() - started,
         message=message,
+        diagnostics=diagnostics,
     )
 
 

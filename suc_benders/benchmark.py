@@ -36,6 +36,12 @@ def _config(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark SUC Benders candidate strategies on the 10x24 instance")
+    parser.add_argument("--suite", choices=("legacy", "attribution"), default="legacy")
+    parser.add_argument("--output-dir", default="results/attribution-20260930")
+    parser.add_argument("--resume", action="store_true", help="Resume completed attribution runs with matching code and settings")
+    parser.add_argument("--pilot", action="store_true", help="Run only the first 10-strategy attribution block")
+    parser.add_argument("--llm-base-url", default=None)
+    parser.add_argument("--llm-model", default=None)
     parser.add_argument("--data", default="data/suc_10x24.json")
     parser.add_argument("--scenario-file", default=None)
     parser.add_argument("--max-iterations", type=int, default=5)
@@ -50,6 +56,14 @@ def main() -> None:
     )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
+
+    if args.suite == "attribution":
+        if args.scenario_file or args.strategies:
+            parser.error("the attribution suite uses its fixed scenario and strategy matrix")
+        from .attribution import run_attribution
+        run_attribution(args.data, args.output_dir, resume=args.resume, pilot=args.pilot,
+                        base_url=args.llm_base_url, model=args.llm_model)
+        return
 
     units, scenarios = load_suc_data(args.data, args.scenario_file)
 

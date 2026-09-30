@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
+import logging
 import os
 import time
 from typing import Any, Sequence
@@ -10,10 +11,13 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 import numpy as np
 
-from .candidates import repair_commitment
-from .common import Scenario
+from .candidates import commitment_hash, commitment_key, make_candidate, repair_commitment
+from .common import Scenario, commitment_is_feasible
 from .data import UCData
 from .master import MasterCandidate
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,6 +32,10 @@ class LLMConfig:
     max_tokens: int = 32000
     max_retries: int = 3
     retry_backoff_seconds: float = 30.0
+    api_format: str = "messages"
+    base_url: str | None = None
+    model: str | None = None
+    collect_diagnostics: bool = False
 
 
 @dataclass
@@ -37,6 +45,7 @@ class LLMAdviceResult:
     valid_count: int = 0
     failed: bool = False
     message: str = ""
+    diagnostics: dict = field(default_factory=dict)
 
 
 def _finite(value: Any) -> float | None:
@@ -122,6 +131,20 @@ def _prompt(
     return system, json.dumps(body, separators=(",", ":"), allow_nan=False)
 
 
+def llm_settings(config: LLMConfig) -> tuple[str, str]:
+    """Resolve non-secret settings for both the client and experiment manifest."""
+    if config.api_format == "chat_completions":
+        base = os.getenv("LLM_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
+        model = os.getenv("LLM_MODEL") or os.getenv("ANTHROPIC_MODEL")
+    else:
+        base = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("LLM_BASE_URL")
+        model = os.getenv("ANTHROPIC_MODEL") or os.getenv("LLM_MODEL")
+    return (
+        (config.base_url or base or "https://models.sjtu.edu.cn/api/v1").rstrip("/"),
+        (config.model or model or "qwen3.8-27b").strip(),
+    )
+
+
 def ask_llm_for_candidates(
     data: UCData,
     scenarios: Sequence[Scenario],
@@ -131,88 +154,144 @@ def ask_llm_for_candidates(
     config: LLMConfig,
     context: dict | None = None,
 ) -> LLMAdviceResult:
-    api_key = (os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("LLM_API_KEY") or "").strip()
-    if not api_key:
-        return LLMAdviceResult([], message="LLM_API_KEY is not set")
+    started = time.perf_counter()
+    if config.api_format == "chat_completions":
+        api_key = (os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or "").strip()
+    else:
+        api_key = (os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("LLM_API_KEY") or "").strip()
+    record = {
+        "iteration": iteration, "api_format": config.api_format,
+        "attempts": [], "proposals": [], "repair_seconds": 0.0,
+    }
 
-    base_url = (
-        os.getenv("ANTHROPIC_BASE_URL")
-        or os.getenv("LLM_BASE_URL")
-        or "https://models.sjtu.edu.cn/api/v1"
-    ).rstrip("/")
-    model = (os.getenv("ANTHROPIC_MODEL") or os.getenv("LLM_MODEL") or "qwen3.8-27b").strip()
+    def scrub(value):
+        if isinstance(value, str):
+            return value.replace(api_key, "[REDACTED]") if api_key else value
+        if isinstance(value, dict):
+            return {key: scrub(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    def finish(candidates=None, raw_count=0, *, failed=False, message="ok"):
+        candidates = candidates or []
+        record.update(
+            failed=failed, message=message, raw_count=raw_count,
+            valid_count=len(candidates), elapsed_seconds=time.perf_counter() - started,
+        )
+        LOGGER.info("LLM iteration=%s attempts=%s valid=%s failed=%s elapsed=%.2fs message=%s",
+                    iteration, len(record["attempts"]), len(candidates), failed,
+                    record["elapsed_seconds"], scrub(message))
+        return LLMAdviceResult(
+            candidates, raw_count, len(candidates), failed, scrub(message),
+            scrub(record) if config.collect_diagnostics else {},
+        )
+
+    if not api_key:
+        return finish(message="LLM_API_KEY is not set")
+    if config.api_format not in {"messages", "chat_completions"}:
+        return finish(failed=True, message="unsupported api_format")
+
+    base_url, model = llm_settings(config)
     try:
         system, user = _prompt(
-            data,
-            scenarios,
-            iteration,
-            incumbent,
-            base_candidates,
-            int(config.max_candidates),
-            context,
+            data, scenarios, iteration, incumbent, base_candidates,
+            int(config.max_candidates), context,
         )
     except (TypeError, ValueError, OverflowError) as exc:
-        return LLMAdviceResult([], failed=True, message=type(exc).__name__)
+        return finish(failed=True, message=type(exc).__name__)
 
-    payload = {
-        "model": model,
-        "max_tokens": int(config.max_tokens),
-        "temperature": float(config.temperature),
-        "system": system,
-        "messages": [{"role": "user", "content": user}],
-    }
+    if config.api_format == "chat_completions":
+        endpoint = base_url + "/chat/completions"
+        payload = {
+            "model": model, "max_tokens": int(config.max_tokens),
+            "temperature": float(config.temperature), "stream": False,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        headers = {"Authorization": "Bearer " + api_key}
+    else:
+        endpoint = base_url + "/messages"
+        payload = {
+            "model": model, "max_tokens": int(config.max_tokens),
+            "temperature": float(config.temperature), "system": system,
+            "messages": [{"role": "user", "content": user}],
+        }
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    headers.update({"Content-Type": "application/json", "Accept": "application/json"})
     request = Request(
-        base_url + "/messages",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
+        endpoint, data=json.dumps(payload).encode("utf-8"),
+        headers=headers, method="POST",
     )
+    if config.collect_diagnostics:
+        record.update(endpoint=endpoint, requested_model=model, request=payload)
     direct_opener = build_opener(ProxyHandler({}))
     attempts = max(1, int(config.max_retries))
-    backoff = float(config.retry_backoff_seconds)
-    last_error = "unknown"
     raw = None
     for attempt in range(attempts):
+        LOGGER.info("LLM request iteration=%s attempt=%s model=%s", iteration, attempt + 1, model)
+        attempt_started = time.perf_counter()
+        attempt_record = {"attempt": attempt + 1}
+        record["attempts"].append(attempt_record)
         try:
-            with direct_opener.open(
-                request, timeout=float(config.timeout_seconds)
-            ) as response:
+            with direct_opener.open(request, timeout=float(config.timeout_seconds)) as response:
+                attempt_record["status_code"] = getattr(response, "status", 200)
                 raw = json.loads(response.read().decode("utf-8"))
+            attempt_record["elapsed_seconds"] = time.perf_counter() - attempt_started
             break
         except HTTPError as exc:
-            last_error = f"HTTP {exc.code}"
-            if exc.code == 429 and attempt + 1 < attempts:
-                time.sleep(backoff * (attempt + 1))
+            attempt_record.update(
+                status_code=exc.code, elapsed_seconds=time.perf_counter() - attempt_started,
+            )
+            if config.collect_diagnostics:
+                try:
+                    attempt_record["error_body"] = exc.read(4096).decode("utf-8", errors="replace")
+                except OSError:
+                    pass
+            if (exc.code == 429 or 500 <= exc.code < 600) and attempt + 1 < attempts:
+                time.sleep(float(config.retry_backoff_seconds) * (attempt + 1))
                 continue
-            return LLMAdviceResult([], failed=True, message=last_error)
+            return finish(failed=True, message=f"HTTP {exc.code}")
         except (URLError, TimeoutError, ConnectionError, OSError) as exc:
-            last_error = type(exc).__name__
+            attempt_record.update(
+                error_type=type(exc).__name__,
+                elapsed_seconds=time.perf_counter() - attempt_started,
+            )
             if attempt + 1 < attempts:
-                time.sleep(backoff * (attempt + 1))
+                time.sleep(float(config.retry_backoff_seconds) * (attempt + 1))
                 continue
-            return LLMAdviceResult([], failed=True, message=last_error)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            return LLMAdviceResult([], failed=True, message=type(exc).__name__)
+            return finish(failed=True, message=type(exc).__name__)
+        except (KeyError, TypeError, ValueError) as exc:
+            attempt_record.update(
+                error_type=type(exc).__name__,
+                elapsed_seconds=time.perf_counter() - attempt_started,
+            )
+            return finish(failed=True, message="invalid_response_json")
 
-    if raw is None:
-        return LLMAdviceResult([], failed=True, message=last_error)
-
+    if config.collect_diagnostics:
+        record["response"] = raw
     try:
-        blocks = raw.get("content", []) if isinstance(raw, dict) else []
-        content = "".join(
-            block.get("text", "") for block in blocks if block.get("type") == "text"
-        )
-        if not content:
-            # Reasoning models can consume the whole budget on hidden
-            # reasoning and return no text; report that distinctly.
-            stop = raw.get("stop_reason") if isinstance(raw, dict) else None
-            usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
-            raise ValueError(f"empty content (stop_reason={stop}, usage={usage})")
+        if not isinstance(raw, dict):
+            raise ValueError("response root must be an object")
+        record["usage"] = raw.get("usage")
+        record["returned_model"] = raw.get("model")
+        if config.api_format == "chat_completions":
+            choice = raw["choices"][0]
+            content = choice["message"].get("content") or ""
+            stop = choice.get("finish_reason")
+        else:
+            content = "".join(
+                block.get("text", "") for block in raw.get("content", [])
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+            stop = raw.get("stop_reason")
+        record["stop_reason"] = stop
+        if stop in {"length", "max_tokens"}:
+            return finish(failed=True, message="truncated")
+        if not isinstance(content, str) or not content.strip():
+            return finish(failed=True, message="empty_content")
         content = content.strip().removeprefix("```json").removesuffix("```").strip()
         parsed = json.loads(content)
         if isinstance(parsed, list):
@@ -223,35 +302,63 @@ def ask_llm_for_candidates(
             raise ValueError("response root must be an object or list")
         if not isinstance(entries, list):
             raise ValueError("candidates is not a list")
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        return LLMAdviceResult([], failed=True, message=str(exc)[:200])
+    except json.JSONDecodeError:
+        return finish(failed=True, message="invalid_candidate_json")
+    except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
+        return finish(failed=True, message=str(exc)[:200])
 
     output: list[MasterCandidate] = []
-    seen = {
-        tuple(np.r_[candidate.u.reshape(-1), candidate.v.reshape(-1), candidate.w.reshape(-1)].astype(int).tolist())
-        for candidate in base_candidates
-    }
-    for entry in entries[: int(config.max_candidates)]:
+    seen = {commitment_key(candidate.u, candidate.v, candidate.w) for candidate in base_candidates}
+    for index, entry in enumerate(entries[: int(config.max_candidates)]):
+        proposal = {"proposal_id": f"llm:{iteration}:{index}", "origin": "llm"}
+        if config.collect_diagnostics:
+            record["proposals"].append(proposal)
         if not isinstance(entry, dict):
+            proposal["outcome"] = "invalid_entry"
             continue
         try:
             raw_u = np.asarray(entry.get("u"), dtype=float)
         except (TypeError, ValueError):
-            # Ragged or non-numeric matrices are malformed proposals, not a
-            # reason to abort the whole Benders run.
+            proposal["outcome"] = "invalid_matrix"
             continue
         if raw_u.shape != (data.n_units, data.horizon):
+            proposal["outcome"] = "invalid_shape"
             continue
+        if config.collect_diagnostics:
+            proposal["raw_u"] = raw_u.tolist()
+            binary = bool(np.all(np.isfinite(raw_u)) and np.all((raw_u == 0) | (raw_u == 1)))
+            proposal["raw_binary"] = binary
+            raw_candidate = make_candidate(data, scenarios, raw_u) if binary else None
+            proposal["raw_discrete_feasible"] = bool(
+                raw_candidate is not None and commitment_is_feasible(
+                    data, scenarios, raw_candidate.u, raw_candidate.v, raw_candidate.w,
+                )
+            )
+        repair_started = time.perf_counter()
         repaired = repair_commitment(data, scenarios, raw_u)
+        record["repair_seconds"] += time.perf_counter() - repair_started
+        proposal["repair_attempted"] = True
         if repaired is None:
+            proposal["outcome"] = "repair_failed"
             continue
         repaired.source = "llm"
-        key = tuple(
-            np.r_[
-                repaired.u.reshape(-1), repaired.v.reshape(-1), repaired.w.reshape(-1)
-            ].astype(int).tolist()
-        )
-        if key not in seen:
-            seen.add(key)
-            output.append(repaired)
-    return LLMAdviceResult(output, len(entries), len(output), message="ok")
+        repaired.provenance = {
+            "origin": "llm", "proposal_id": proposal["proposal_id"],
+            "repair_attempted": True,
+            "repair_changed": bool(np.any(repaired.u != raw_u)),
+        }
+        if config.collect_diagnostics:
+            proposal.update(
+                commitment_id=commitment_hash(repaired),
+                repaired_u=repaired.u.tolist(), repaired_discrete_feasible=True,
+                hamming_u=int(np.count_nonzero(repaired.u != raw_u)),
+                repair_changed=repaired.provenance["repair_changed"],
+            )
+        key = commitment_key(repaired.u, repaired.v, repaired.w)
+        if key in seen:
+            proposal["outcome"] = "duplicate"
+            continue
+        seen.add(key)
+        output.append(repaired)
+        proposal["outcome"] = "accepted"
+    return finish(output, len(entries))

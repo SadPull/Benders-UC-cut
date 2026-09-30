@@ -87,10 +87,12 @@ def solve_full(data: UCData, scenarios: Sequence[Scenario], config: FullConfig |
         for i in range(n):
             for t in range(horizon):
                 model.addConstr(p[i, t] >= data.pmin[i] * u[i, t])
-                capacity = data.pmax[i] * u[i, t] - (data.pmax[i] - data.pstart[i]) * v[i, t]
+                startup_capacity = data.pmax[i] * u[i, t] - (data.pmax[i] - data.pstart[i]) * v[i, t]
+                shutdown_capacity = data.pmax[i] * u[i, t]
                 if t + 1 < horizon:
-                    capacity -= (data.pmax[i] - data.pshut[i]) * w[i, t + 1]
-                model.addConstr(p[i, t] + r[i, t] <= capacity)
+                    shutdown_capacity -= (data.pmax[i] - data.pshut[i]) * w[i, t + 1]
+                model.addConstr(p[i, t] + r[i, t] <= startup_capacity)
+                model.addConstr(p[i, t] + r[i, t] <= shutdown_capacity)
                 if t == 0:
                     model.addConstr(p[i, t] - data.initial_output[i] <= data.ramp_up[i])
                     model.addConstr(data.initial_output[i] - p[i, t] <= data.ramp_down[i])
@@ -100,13 +102,6 @@ def solve_full(data: UCData, scenarios: Sequence[Scenario], config: FullConfig |
         for t in range(horizon):
             model.addConstr(sum(p[i, t] for i in range(n)) == scenario.load[t])
             model.addConstr(sum(r[i, t] for i in range(n)) >= data.reserve_fraction * scenario.load[t])
-            capacity_terms = []
-            for i in range(n):
-                capacity = data.pmax[i] * u[i, t] - (data.pmax[i] - data.pstart[i]) * v[i, t]
-                if t + 1 < horizon:
-                    capacity -= (data.pmax[i] - data.pshut[i]) * w[i, t + 1]
-                capacity_terms.append(capacity)
-            model.addConstr(sum(capacity_terms) >= (1.0 + data.reserve_fraction) * scenario.load[t])
 
     fixed = sum(
         data.cost_c[i] * u[i, t]
