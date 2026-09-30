@@ -1,0 +1,19 @@
+{
+  "runs": 30,
+  "feasible_validated": 30,
+  "llm_calls": 0,
+  "decommit_candidates": 0,
+  "max_full_evaluations": 40,
+  "max_physical_residual": 1.5916157281026244e-12,
+  "max_cost_residual": 1.1641532182693481e-09,
+  "max_runtime": 226.52807339999708,
+  "bound_checks": 197,
+  "solver_fingerprint_matches": true,
+  "reference_objective": 571014.0518951993,
+  "reference_lower_bound": 570961.8901594762,
+  "unit_tests_passed": 109,
+  "unit_test_command": "python -m unittest discover -s tests -q",
+  "targeted_tests_passed": 9,
+  "whitespace_check_passed": true,
+  "final_paper_tests_sha256": "627817ca85e91aaabd4ff4e140ea3989195b1208d5086c95f5028b9bb1be5617"
+}
