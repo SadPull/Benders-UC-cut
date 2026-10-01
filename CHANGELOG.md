@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased - LLM / SA efficiency
+## v0.14.0 - 2026-10-01
 
 - Add dynamic whole-horizon LLM candidates sharing continuous Benders feedback,
   cache, repair and full physical validation; keep temporal LLM unsupported.
@@ -9,6 +9,15 @@
 - Add paired 600-second process-supervised experiments, durable event traces,
   fixed quality thresholds and input/source-checked resume without rerunning
   interrupted trials. Independent decommitment stays disabled in this study.
+- Complete eight 600-second runs (four seed pairs); preserve both interrupted
+  seed-7 traces without rerunning them. The configured LLM produced no usable
+  candidates: all 16 returned responses in complete runs truncated at 32000
+  reported reasoning tokens. Four requests remained unfinished at deadline.
+- Find zero first-passage SA-call savings at jointly reached targets and a mean
+  final-cost increase of 6503.98 for SA+LLM. This evaluates the deployed
+  configuration, not the potential benefit of valid LLM advice.
+- Pass 132 regression tests, the expanded 10-test efficiency module, and physical
+  validation of all 175 complete candidates; verify resume preserves raw traces.
 
 ## v0.13.0 - 2026-10-01
 

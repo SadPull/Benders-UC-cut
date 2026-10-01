@@ -1,5 +1,19 @@
 # SUC + Benders (10×24)
 
+## Current research: LLM / SA efficiency
+
+The current question is whether LLM-generated schedules reduce SA calls to a
+fixed feasible-cost target, or improve feasible cost at an equal end-to-end
+time budget. Use `python -m suc_benders.efficiency_experiment`; see
+[experiment protocol](#llm--sa-efficiency-study) below. The independent
+decommitment search is disabled in this study; its scheduling ideas are supplied
+to the LLM as heuristics, with all proposals independently validated.
+
+The [2026-10-01 audited results](experiments/llm-sa-efficiency-20261001/findings.md)
+contain four complete seed pairs and two preserved interrupted traces. The
+selected deployment returned no usable LLM candidates; see the report for the
+observed 32000-token truncation and the limits of this configuration comparison.
+
 ## Independent exact-block control
 
 `python -m suc_benders.exact_experiment` runs an independent original-block
