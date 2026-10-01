@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased - Farluna efficiency rerun
+
+- Switch the active LLM endpoint to Farluna and retain max reasoning / 65536 tokens.
+- Honor the configured request timeout inside dynamic Benders: the rerun uses
+  300 seconds per request, capped by the remaining 600-second run budget.
+- Preserve v0.14.0 results and start a separate five-seed paired study.
+
 ## v0.14.0 - 2026-10-01
 
 - Add dynamic whole-horizon LLM candidates sharing continuous Benders feedback,

@@ -143,8 +143,8 @@ def llm_settings(config: LLMConfig) -> tuple[str, str]:
         base = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("LLM_BASE_URL")
         model = os.getenv("ANTHROPIC_MODEL") or os.getenv("LLM_MODEL")
     return (
-        (config.base_url or base or "http://47.101.31.14:8300/v1").rstrip("/"),
-        (config.model or model or "deepseek-v4.1-flash").strip(),
+        (config.base_url or base or "https://api.farluna.tech/v1").rstrip("/"),
+        (config.model or model or "farluna/deepseek-v4.1-flash").strip(),
     )
 
 

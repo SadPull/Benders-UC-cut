@@ -11,7 +11,7 @@ to the LLM as heuristics, with all proposals independently validated.
 
 The [2026-10-01 audited results](experiments/llm-sa-efficiency-20261001/findings.md)
 contain four complete seed pairs and two preserved interrupted traces. The
-selected deployment returned no usable LLM candidates; see the report for the
+previous endpoint returned no usable LLM candidates; see the report for the
 observed 32000-token truncation and the limits of this configuration comparison.
 
 ## Independent exact-block control
@@ -415,10 +415,13 @@ following each SA call. Proposals enter the existing continuous Benders
 subproblems, repair, deduplication and complete physical validation.
 
 Set `LLM_API_KEY` in the environment or the ignored local `.env` file. The new
-entry point uses `http://47.101.31.14:8300/v1`, `deepseek-v4.1-flash`,
+entry point uses `https://api.farluna.tech/v1`, `farluna/deepseek-v4.1-flash`,
 `reasoning_effort=max`, and `max_tokens=65536`; keys are excluded from artifacts.
 An API preflight must pass before formal runs. Parameter acceptance does not
 independently prove the provider's reasoning mode.
+The Farluna study allows up to 300 seconds per LLM request, further capped by
+the run's remaining time, with no retry. Its single-request check completed in
+268.73 seconds with a normal JSON response; the total run budget remains 600 seconds.
 
 ```powershell
 python -m suc_benders.efficiency_experiment

@@ -118,9 +118,11 @@ class EfficiencyTests(unittest.TestCase):
         events, contexts = [], []
         def advise(*args, **kwargs):
             contexts.append(kwargs["context"])
+            self.assertGreater(args[5].timeout_seconds, 180)
+            self.assertLessEqual(args[5].timeout_seconds, 300)
             return LLMAdviceResult([proposal, proposal])
         config = replace(configuration(7,"sa_llm"), run_to_deadline=False, max_iterations=2,
-                         time_limit_seconds=10, event_sink=events.append)
+                         time_limit_seconds=400, event_sink=events.append)
         optimize = gp.Model.optimize
         def continuous(model, *args, **kwargs):
             model.update()

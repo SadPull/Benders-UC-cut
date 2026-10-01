@@ -41,8 +41,8 @@ def load_credentials():
 
 def llm_config(enabled=True):
     return LLMConfig(enabled=enabled, api_format="chat_completions",
-        base_url="http://47.101.31.14:8300/v1", model="deepseek-v4.1-flash",
-        reasoning_effort="max", max_tokens=65536, timeout_seconds=180.,
+        base_url="https://api.farluna.tech/v1", model="farluna/deepseek-v4.1-flash",
+        reasoning_effort="max", max_tokens=65536, timeout_seconds=300.,
         max_retries=1, collect_diagnostics=True)
 
 
@@ -59,7 +59,7 @@ def preflight():
     try:
         request = Request(config.base_url + "/chat/completions", data=json.dumps(payload).encode(),
                           headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
-        with build_opener(ProxyHandler({})).open(request, timeout=180) as response:
+        with build_opener(ProxyHandler({})).open(request, timeout=config.timeout_seconds) as response:
             result.update(status=response.status, response=json.load(response))
         choice = result["response"]["choices"][0]
         result["accepted"] = choice.get("finish_reason") != "length" and json.loads(choice["message"]["content"]) == {"candidates": []}

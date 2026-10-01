@@ -271,7 +271,7 @@ def solve_paper(data, scenarios, config):
                     phase = time.perf_counter()
                     emit("llm_start", iteration=outer)
                     advice = ask_llm_for_candidates(data, scenarios, outer, base_for_llm, best,
-                        replace(config.llm, timeout_seconds=max(.001, min(180., deadline-time.perf_counter())),
+                        replace(config.llm, timeout_seconds=max(.001, min(config.llm.timeout_seconds, deadline-time.perf_counter())),
                                 max_retries=1, collect_diagnostics=True), context=context)
                     timings["llm"] += time.perf_counter()-phase-advice.diagnostics.get("repair_seconds", 0.)
                     timings["repair"] += advice.diagnostics.get("repair_seconds", 0.)
