@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.13.0 - 2026-10-01
+
+- Add an independent original-block MIQP control without changing the default
+  SA backend: offline same-price diagnostics and bounded exact-block closed loops.
+- Preserve 30-second block limits, an 1800-second offline budget, and 300-second /
+  10-round closed loops, with fingerprinted resume and conservative interrupted
+  time accounting. Keep solver bounds separate from time-limited incumbents.
+- Complete 45 offline snapshots and three 10-round closed loops: all 924 block
+  solves certified within numerical tolerances; 33 complete schedules validated.
+- Obtain lower-bound gaps of 2.8605%, 1.5049% and 1.1225% for 1/2/3-hour blocks.
+  All best bounds occur at zero initial prices; later rounds do not improve them.
+  Feasible-cost differences remain 6.3348%, 5.0938% and 4.7453%, respectively.
+- Preserve reports, audit and checksummed reproducibility archive under
+  `experiments/exact-block-control-20261001/`. Timing overlaps with regression
+  tests are disclosed; these results do not establish a speedup.
+- Pass the 121-test full suite and the subsequently expanded 15-test control
+  module, including timeout, budget recovery, partial-round and source checks.
+
 ## v0.12.0 - 2026-10-01
 
 ### Paper transfer

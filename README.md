@@ -1,6 +1,35 @@
 # SUC + Benders (10×24)
 
-Current release: [v0.12.0](CHANGELOG.md).
+## Independent exact-block control
+
+`python -m suc_benders.exact_experiment` runs an independent original-block
+MIQP control against `results/paper-transfer-20260930-v2`. It leaves the SA
+research backend and archived results unchanged. `--mode offline|closed|both`
+selects the experiment (default: both); `--output-dir PATH` chooses a fresh
+directory. Resume with the same arguments and `--resume`; inputs, software and
+source fingerprints must match. The archived source directory must be available
+locally as described in the paper-transfer experiment README.
+
+Offline control selects the first/middle/last complete multiplier snapshots of
+all five seeds for 1/2/3-hour blocks, with a shared 1800-second budget. Each
+original block has at most 30 seconds. Independent closed loops have 300 seconds
+and 10 outer rounds each. Gurobi uses one thread, seed 7, relative gap 1e-8 and
+absolute gap 1e-4. Time-limited incumbents are not certified optima. No QUBO,
+SA, LLM or hardware calls occur in this control.
+
+Atomic state files preserve block certificates, elapsed budgets and completed
+work. After an interruption, wall time since the last active checkpoint,
+including downtime, is conservatively charged to the remaining stage budget.
+Budgets are checked at stage/call boundaries; solver or I/O overhead can finish
+late. Checkpoints exclude late results. `report.md` and `summary.json` separate
+the lower-bound gap, feasible-cost difference, same-price sampling error and
+uncertified/incomplete results. Box-dual convergence is not a certificate of
+global SUC optimality.
+
+Current release: [v0.13.0](CHANGELOG.md).
+
+The completed exact-block control, findings and checksummed raw records are
+published under [experiments/exact-block-control-20261001](experiments/exact-block-control-20261001/README.md).
 
 This repository contains a small, reproducible two-stage stochastic unit commitment model. The research Benders algorithm generates binary commitment candidates using Kaiwu local simulated annealing, decommitment search, and an optional LLM. Gurobi solves only the continuous dispatch subproblems within that algorithm. A separate full deterministic equivalent Gurobi model supplies an external reference solution and proven lower bound for post-run comparisons.
 

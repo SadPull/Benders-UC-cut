@@ -1,0 +1,119 @@
+{
+  "reference": {
+    "objective": 571014.0518951993,
+    "lower_bound": 570961.8901594762,
+    "mip_gap": 9.134930313808149e-05
+  },
+  "offline": {
+    "snapshots": 45,
+    "complete": 45,
+    "certified_snapshots": 45,
+    "unique_blocks": 484,
+    "certified_blocks": 484,
+    "used_seconds": 201.2208756
+  },
+  "closed": {
+    "D_block1": {
+      "status": "MAX_ITERATIONS",
+      "checkpoints": [
+        {
+          "seconds": 30,
+          "objective": 609203.9653615498,
+          "lower": 554680.03785125,
+          "sa_seed7_objective": 620550.8478142321,
+          "objective_difference_vs_sa": -11346.88245268236
+        },
+        {
+          "seconds": 60,
+          "objective": 607186.7594497913,
+          "lower": 554680.03785125,
+          "sa_seed7_objective": 620438.5441031103,
+          "objective_difference_vs_sa": -13251.784653319046
+        },
+        {
+          "seconds": 120,
+          "objective": 607186.7594497913,
+          "lower": 554680.03785125,
+          "sa_seed7_objective": 615428.3122593455,
+          "objective_difference_vs_sa": -8241.552809554269
+        },
+        {
+          "seconds": 300,
+          "objective": 607186.7594497913,
+          "lower": 554680.03785125,
+          "sa_seed7_objective": 615428.3122593455,
+          "objective_difference_vs_sa": -8241.552809554269
+        }
+      ],
+      "used_seconds": 57.298779199998535
+    },
+    "E_block2": {
+      "status": "MAX_ITERATIONS",
+      "checkpoints": [
+        {
+          "seconds": 30,
+          "objective": 605681.2444478893,
+          "lower": 562420.7172396792,
+          "sa_seed7_objective": 624361.2264726332,
+          "objective_difference_vs_sa": -18679.98202474392
+        },
+        {
+          "seconds": 60,
+          "objective": 600100.2644208887,
+          "lower": 562420.7172396792,
+          "sa_seed7_objective": 619303.519463114,
+          "objective_difference_vs_sa": -19203.25504222524
+        },
+        {
+          "seconds": 120,
+          "objective": 600100.2644208887,
+          "lower": 562420.7172396792,
+          "sa_seed7_objective": 615257.6209051261,
+          "objective_difference_vs_sa": -15157.35648423736
+        },
+        {
+          "seconds": 300,
+          "objective": 600100.2644208887,
+          "lower": 562420.7172396792,
+          "sa_seed7_objective": 615257.6209051261,
+          "objective_difference_vs_sa": -15157.35648423736
+        }
+      ],
+      "used_seconds": 40.862762900000234
+    },
+    "F_block3": {
+      "status": "MAX_ITERATIONS",
+      "checkpoints": [
+        {
+          "seconds": 30,
+          "objective": 598110.1277247663,
+          "lower": 564604.5513575202,
+          "sa_seed7_objective": 624183.5235892459,
+          "objective_difference_vs_sa": -26073.395864479593
+        },
+        {
+          "seconds": 60,
+          "objective": 598110.1277247663,
+          "lower": 564604.5513575202,
+          "sa_seed7_objective": 622978.4191149066,
+          "objective_difference_vs_sa": -24868.291390140308
+        },
+        {
+          "seconds": 120,
+          "objective": 598110.1277247663,
+          "lower": 564604.5513575202,
+          "sa_seed7_objective": 619592.8834224849,
+          "objective_difference_vs_sa": -21482.75569771859
+        },
+        {
+          "seconds": 300,
+          "objective": 598110.1277247663,
+          "lower": 564604.5513575202,
+          "sa_seed7_objective": 619592.8834224849,
+          "objective_difference_vs_sa": -21482.75569771859
+        }
+      ],
+      "used_seconds": 34.22745799999939
+    }
+  }
+}
