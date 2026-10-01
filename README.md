@@ -335,8 +335,10 @@ python -m suc_benders.run --master-encoding dynamic --decomposition temporal --b
 `--master-encoding compact` selects a static total-cost QUBO;
 `--master-encoding dynamic` enables continuous master relaxation and local
 objective bounds. Omit `--decomposition temporal` for the whole-horizon
-versions. These experimental modes require repair and reject LLM, decommitment,
-random-candidate, or disabled-SA configurations. The default remains legacy.
+versions. These experimental modes require repair and reject decommitment,
+random-candidate, or disabled-SA configurations. LLM candidates are supported
+only in dynamic whole-horizon mode; temporal and compact modes reject LLM.
+The default remains legacy.
 `theta` continues to mean recourse cost; the new internal total-cost variable
 can be negative under Lagrangian prices. Fixed variables, bounded objective
 bits, exact capacity lattices and one-sided cut quantization are retained.
@@ -389,3 +391,38 @@ python -m unittest discover -s tests -v
 - The feasibility cut is a generic total-shortfall cut derived from Gurobi duals; it is not a specialized strong cut.
 - Attribution results concern three related 10x24 cases, not general scaling
   behavior or quantum hardware advantage.
+
+## LLM / SA efficiency study
+
+The new study compares dynamic whole-horizon SA against SA+LLM on the same
+10-unit, 24-hour, three-scenario input. Independent decommitment is disabled;
+the LLM receives marginal-cost feedback and proposes at most four schedules
+following each SA call. Proposals enter the existing continuous Benders
+subproblems, repair, deduplication and complete physical validation.
+
+Set `LLM_API_KEY` in the environment or the ignored local `.env` file. The new
+entry point uses `http://47.101.31.14:8300/v1`, `deepseek-v4.1-flash`,
+`reasoning_effort=max`, and `max_tokens=65536`; keys are excluded from artifacts.
+An API preflight must pass before formal runs. Parameter acceptance does not
+independently prove the provider's reasoning mode.
+
+```powershell
+python -m suc_benders.efficiency_experiment
+python -m suc_benders.efficiency_experiment --output-dir results/llm-sa-efficiency-<timestamp> --resume
+python -m suc_benders.efficiency_experiment --output-dir results/llm-sa-efficiency-<timestamp> --report-only
+```
+
+The two groups use seeds 7/17/27/37/47 with 600 seconds per run, interleaved
+serially. An external process supervisor enforces the deadline. All optimization,
+LLM latency, repair and validation count against it; imports and license startup
+precede timing. Calls begun but interrupted still count. Only fully validated
+results completed before the deadline count toward cost checkpoints or targets.
+There is no candidate/iteration cap and no stop after a repeated-candidate round.
+
+Reports include 60/120/300/600-second costs and first passage to fixed reference
+cost thresholds (+10/8/6/5/4/3/2/1 percent), with elapsed time and cumulative SA
+calls. Unreached targets remain unreached. SA-call savings do not imply savings
+in total compute. The existing Gurobi reference is used only for reporting.
+Resume verifies source/input/configuration fingerprints and skips every existing
+run; interrupted runs are retained as incomplete and are not automatically rerun.
+The old SA experiments and standalone decommitment implementation are preserved.

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased - LLM / SA efficiency
+
+- Add dynamic whole-horizon LLM candidates sharing continuous Benders feedback,
+  cache, repair and full physical validation; keep temporal LLM unsupported.
+- Configure the requested DeepSeek endpoint, max reasoning and 65536-token
+  output budget; retain secrets outside version control.
+- Add paired 600-second process-supervised experiments, durable event traces,
+  fixed quality thresholds and input/source-checked resume without rerunning
+  interrupted trials. Independent decommitment stays disabled in this study.
+
 ## v0.13.0 - 2026-10-01
 
 - Add an independent original-block MIQP control without changing the default
