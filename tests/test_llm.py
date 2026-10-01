@@ -34,7 +34,7 @@ class LLMAdvisorTests(unittest.TestCase):
                 1,
                 self.base,
                 None,
-                LLMConfig(enabled=True),
+                LLMConfig(enabled=True, api_format="messages"),
             )
         self.assertEqual(result.candidates, [])
         self.assertFalse(result.failed)
@@ -64,7 +64,7 @@ class LLMAdvisorTests(unittest.TestCase):
                 1,
                 self.base,
                 None,
-                LLMConfig(enabled=True),
+                LLMConfig(enabled=True, api_format="messages"),
             )
         self.assertTrue(result.failed)
         self.assertEqual(result.candidates, [])
@@ -95,7 +95,7 @@ class LLMAdvisorTests(unittest.TestCase):
                 1,
                 self.base,
                 None,
-                LLMConfig(enabled=True),
+                LLMConfig(enabled=True, api_format="messages"),
             )
         self.assertFalse(result.failed)
         self.assertEqual(result.raw_count, 1)
@@ -126,7 +126,7 @@ class LLMAdvisorTests(unittest.TestCase):
                 1,
                 self.base,
                 None,
-                LLMConfig(enabled=True),
+                LLMConfig(enabled=True, api_format="messages"),
             )
         # Malformed proposal is dropped; the call itself is not a failure.
         self.assertFalse(result.failed)
@@ -157,7 +157,7 @@ class LLMAdvisorTests(unittest.TestCase):
                 1,
                 self.base,
                 None,
-                LLMConfig(enabled=True),
+                LLMConfig(enabled=True, api_format="messages"),
             )
         self.assertFalse(result.failed)
         self.assertEqual(result.candidates, [])

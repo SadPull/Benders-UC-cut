@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 import math
 import time
-from typing import List, Sequence
+from typing import Callable, List, Sequence
 
 import numpy as np
 
@@ -54,6 +54,9 @@ class BendersConfig:
     block_hours: int = 2
     block_inner_iterations: int = 3
     time_limit_seconds: float | None = None
+    # Used by the time-budget experiment; existing runs keep their stopping rules.
+    run_to_deadline: bool = False
+    event_sink: Callable[[dict], None] | None = field(default=None, repr=False)
 
 
 @dataclass

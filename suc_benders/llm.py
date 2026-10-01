@@ -29,10 +29,11 @@ class LLMConfig:
     # Reasoning models (e.g. deepseek-reasoner) spend part of this budget on
     # hidden reasoning tokens before emitting any text, so the default is sized
     # for those models rather than for a plain chat completion.
-    max_tokens: int = 32000
+    max_tokens: int = 65536
+    reasoning_effort: str | None = "max"
     max_retries: int = 3
     retry_backoff_seconds: float = 30.0
-    api_format: str = "messages"
+    api_format: str = "chat_completions"
     base_url: str | None = None
     model: str | None = None
     collect_diagnostics: bool = False
@@ -66,14 +67,13 @@ def _prompt(
         "on/off schedules only; you are not the optimizer. Never invent dispatch, "
         "theta, dual cuts, load, costs, or constraints. Return JSON only with a "
         "candidates array. Every proposal will be independently validated. "
-        "The dominant source of cost error is OVER-COMMITMENT: expensive small "
-        "units are kept online longer than needed. Your primary job is to find "
-        "unit-hours that can be turned OFF. Use context.unit_hour_decommit_gradient "
-        "and context.top_decommit_opportunities (negative estimated_total_change "
-        "means switching that unit-hour off reduces total cost) and "
-        "context.decommit_ladder (actual measured cost of progressively turning "
-        "hours off). Only keep a unit-hour ON when reserve or minimum up/down "
-        "constraints require it."
+        "Use context.unit_hour_decommit_gradient and context.top_decommit_opportunities "
+        "to identify possible savings. These gradients are local estimates, NOT measured "
+        "savings or feasibility certificates. Consider removing entire ON blocks or "
+        "trimming their ends, accounting for startup/shutdown costs, minimum up/down "
+        "times, initial conditions, ramping and all scenarios. Turning units ON or "
+        "substituting units is allowed when beneficial. No measured decommitment ladder "
+        "is required. Minimize total expected cost, not the number of ON hours."
     )
     body = {
         "task": "Suggest diverse feasible-looking first-stage commitment schedules.",
@@ -93,6 +93,9 @@ def _prompt(
         "pmax": data.pmax.tolist(),
         "pstart": data.pstart.tolist(),
         "pshut": data.pshut.tolist(),
+        "ramp_up": data.ramp_up.tolist(),
+        "ramp_down": data.ramp_down.tolist(),
+        "initial_output": data.initial_output.tolist(),
         "min_up": data.min_up.tolist(),
         "min_down": data.min_down.tolist(),
         "initial_on": data.initial_on.astype(int).tolist(),
@@ -116,7 +119,7 @@ def _prompt(
         "rules": [
             "Do not repeat base schedules",
             "Use only 0/1 values",
-            "Prefer turning unit-hours OFF over turning them ON",
+            "Consider turning OFF redundant unit-hours or substituting cheaper units",
             "Target shoulder hours and the low-load tail of the horizon, where "
             "peaking units are commonly over-committed",
             "Trim the ends of an ON block before removing its middle",
@@ -140,8 +143,8 @@ def llm_settings(config: LLMConfig) -> tuple[str, str]:
         base = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("LLM_BASE_URL")
         model = os.getenv("ANTHROPIC_MODEL") or os.getenv("LLM_MODEL")
     return (
-        (config.base_url or base or "https://models.sjtu.edu.cn/api/v1").rstrip("/"),
-        (config.model or model or "qwen3.8-27b").strip(),
+        (config.base_url or base or "http://47.101.31.14:8300/v1").rstrip("/"),
+        (config.model or model or "deepseek-v4.1-flash").strip(),
     )
 
 
@@ -212,6 +215,8 @@ def ask_llm_for_candidates(
             ],
         }
         headers = {"Authorization": "Bearer " + api_key}
+        if config.reasoning_effort is not None:
+            payload["reasoning_effort"] = config.reasoning_effort
     else:
         endpoint = base_url + "/messages"
         payload = {

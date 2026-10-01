@@ -18,7 +18,7 @@ def _config(
     repair: bool,
     llm: bool = False,
     llm_timeout: float = 180.0,
-    llm_max_tokens: int = 6144,
+    llm_max_tokens: int = 65536,
     decommit: bool = False,
 ) -> BendersConfig:
     return BendersConfig(
@@ -48,7 +48,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--llm", action="store_true")
     parser.add_argument("--llm-timeout", type=float, default=180.0)
-    parser.add_argument("--llm-max-tokens", type=int, default=6144)
+    parser.add_argument("--llm-max-tokens", type=int, default=65536)
     parser.add_argument(
         "--strategies",
         default=None,

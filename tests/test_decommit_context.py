@@ -189,7 +189,8 @@ class DecommitGradientTests(unittest.TestCase):
             "decommit_ladder",
         ):
             self.assertIn(field, user)
-        self.assertIn("turned OFF", _system)
+        self.assertIn("removing entire ON blocks", _system)
+        self.assertIn("NOT measured", _system)
 
     def test_cost_decomposition_conserves_scenario_and_shutdown_costs(self):
         from suc_benders.context import _hourly_commitment_profile, _unit_cost_decomposition

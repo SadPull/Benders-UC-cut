@@ -102,6 +102,11 @@ def validate_result(data, scenarios, result):
         raise AssertionError("cache hit received improvement credit")
     if any(b["incumbent"] > a["incumbent"] + 1e-7 for a, b in zip(fresh, fresh[1:])):
         raise AssertionError("incumbent is not monotone")
+    return validate_schedule(data, scenarios, result)
+
+
+def validate_schedule(data, scenarios, result):
+    """Validate a complete physical schedule independently of experiment budgets."""
     if not np.isfinite(result.objective):
         return {"feasible_solution": False, "trace_valid": True}
     if not commitment_is_feasible(data, scenarios, result.u, result.v, result.w):
