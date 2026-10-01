@@ -9,10 +9,14 @@ time budget. Use `python -m suc_benders.efficiency_experiment`; see
 decommitment search is disabled in this study; its scheduling ideas are supplied
 to the LLM as heuristics, with all proposals independently validated.
 
-The [2026-10-01 audited results](experiments/llm-sa-efficiency-20261001/findings.md)
-contain four complete seed pairs and two preserved interrupted traces. The
-previous endpoint returned no usable LLM candidates; see the report for the
-observed 32000-token truncation and the limits of this configuration comparison.
+The [Farluna rerun results](experiments/llm-sa-efficiency-farluna-20261001/findings.md)
+contain five complete seed pairs. SA+LLM had a higher final feasible cost in all
+five pairs (mean increase 8236.76), and zero SA-call savings at jointly reached
+quality targets. One response produced two repaired, feasible candidates;
+four requests timed out and five were unfinished at the overall deadline.
+The [v0.14.0 results](experiments/llm-sa-efficiency-20261001/findings.md),
+which used the previous provider and observed 32000-token truncation, remain
+available separately.
 
 ## Independent exact-block control
 
@@ -40,7 +44,7 @@ the lower-bound gap, feasible-cost difference, same-price sampling error and
 uncertified/incomplete results. Box-dual convergence is not a certificate of
 global SUC optimality.
 
-Current release: [v0.13.0](CHANGELOG.md).
+Current release: [v0.14.1](CHANGELOG.md).
 
 The completed exact-block control, findings and checksummed raw records are
 published under [experiments/exact-block-control-20261001](experiments/exact-block-control-20261001/README.md).

@@ -1,0 +1,80 @@
+{
+  "validated_candidates": 185,
+  "maximum_physical_residual_mw": 1.5916157281026244e-12,
+  "sa_counter_and_cutoff_checks": true,
+  "no_duplicate_evaluation": true,
+  "secret_scan_passed": true,
+  "runs": [
+    {
+      "run": "sa__s17",
+      "status": "budget_complete",
+      "sa_calls": 42,
+      "evaluations": 32,
+      "events_sha256": "5e459bc4baf9dbba0afbaf1d7e72abd8398fcf00e0503dcda22095566ecb9d33"
+    },
+    {
+      "run": "sa__s27",
+      "status": "budget_complete",
+      "sa_calls": 43,
+      "evaluations": 37,
+      "events_sha256": "87b3a2ec999daff40bc5097b9e05f250a7601c1efed7ade8a77a01d9a71b2946"
+    },
+    {
+      "run": "sa__s37",
+      "status": "budget_complete",
+      "sa_calls": 43,
+      "evaluations": 31,
+      "events_sha256": "1e1ebdbb9fe54d31e4756d465cc939beb86d64663bd5b4745d8be64dab16aa2f"
+    },
+    {
+      "run": "sa__s47",
+      "status": "budget_complete",
+      "sa_calls": 42,
+      "evaluations": 36,
+      "events_sha256": "548c4c2a695076e97f34cf7800316b3a59b0120b010c9148d000374a8c7db177"
+    },
+    {
+      "run": "sa__s7",
+      "status": "budget_complete",
+      "sa_calls": 42,
+      "evaluations": 32,
+      "events_sha256": "0e0720715ae6e7140c1356572bed529c3914ae39b1ba7844ba05596fd4580054"
+    },
+    {
+      "run": "sa_llm__s17",
+      "status": "budget_complete",
+      "sa_calls": 2,
+      "evaluations": 3,
+      "events_sha256": "574260b0e0a4fa3fea20ecebee703fd1619261c3790f147bcaaaca1bf5d47a3b"
+    },
+    {
+      "run": "sa_llm__s27",
+      "status": "budget_complete",
+      "sa_calls": 2,
+      "evaluations": 3,
+      "events_sha256": "4576dfe5fbc5ec5a9f76f3f0faaf6027284407fd23b57d04af94a23df65e5197"
+    },
+    {
+      "run": "sa_llm__s37",
+      "status": "budget_complete",
+      "sa_calls": 2,
+      "evaluations": 3,
+      "events_sha256": "9c79012d2e49d9545b5994796a90fc76504bb95ee266e35ae6d51baff61ccc4f"
+    },
+    {
+      "run": "sa_llm__s47",
+      "status": "budget_complete",
+      "sa_calls": 2,
+      "evaluations": 3,
+      "events_sha256": "192fd8c449316fe1adfe7f9ef7af4c7b2c1133bbb365c13d03970f523c5e39a0"
+    },
+    {
+      "run": "sa_llm__s7",
+      "status": "budget_complete",
+      "sa_calls": 2,
+      "evaluations": 5,
+      "events_sha256": "5b7f48fa36dc688b24de96dcf355aeb81376cf4d9a2c78b504e88d68afa5af42"
+    }
+  ],
+  "resume_preserved_event_hashes": true
+}

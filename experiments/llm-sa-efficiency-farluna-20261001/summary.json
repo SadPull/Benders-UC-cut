@@ -1,0 +1,641 @@
+{
+  "reference": 571014.0518951993,
+  "runs": [
+    {
+      "status": "budget_complete",
+      "seed": 17,
+      "strategy": "sa",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 611310.1767567801,
+      "relative_difference": 0.07056941020599705,
+      "sa_calls": 42,
+      "sa_completed": 42,
+      "llm_calls": 0,
+      "llm_completed": 0,
+      "dispatch_calls": 141,
+      "llm_failed": 0,
+      "llm_seconds_completed": 0,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [],
+      "last_complete_iteration_timings": {
+        "qubo": 498.62301770000704,
+        "annealing": 18.521122600004674,
+        "relaxation": 2.096613799996703,
+        "local_dispatch": 5.107802999997148,
+        "coordination": 0.0,
+        "repair": 3.9104001000541757,
+        "subproblems": 63.35497650000252,
+        "llm": 0.0,
+        "context": 0.0
+      },
+      "reliable_lower": 564971.2783386443,
+      "validated_candidates": 32,
+      "checkpoints": {
+        "60": 613255.8296648392,
+        "120": 613255.8296648392,
+        "300": 612037.0003321449,
+        "600": 611310.1767567801
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 6.11631750000015,
+          "sa_calls": 1
+        },
+        "0.08": {
+          "seconds": 25.43616640000073,
+          "sa_calls": 5
+        },
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 27,
+      "strategy": "sa",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 608825.9442716603,
+      "relative_difference": 0.06621884741883854,
+      "sa_calls": 43,
+      "sa_completed": 43,
+      "llm_calls": 0,
+      "llm_completed": 0,
+      "dispatch_calls": 156,
+      "llm_failed": 0,
+      "llm_seconds_completed": 0,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [],
+      "last_complete_iteration_timings": {
+        "qubo": 489.4505812000025,
+        "annealing": 18.838712499993562,
+        "relaxation": 3.9926090000080876,
+        "local_dispatch": 6.488229699998556,
+        "coordination": 0.0,
+        "repair": 4.255946600022071,
+        "subproblems": 70.48060130000704,
+        "llm": 0.0,
+        "context": 0.0
+      },
+      "reliable_lower": 564840.0300387372,
+      "validated_candidates": 37,
+      "checkpoints": {
+        "60": 608825.9442716603,
+        "120": 608825.9442716603,
+        "300": 608825.9442716603,
+        "600": 608825.9442716603
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 5.940030399999159,
+          "sa_calls": 1
+        },
+        "0.08": {
+          "seconds": 31.54752489999919,
+          "sa_calls": 6
+        },
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 37,
+      "strategy": "sa",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 611205.6089139804,
+      "relative_difference": 0.07038628363940447,
+      "sa_calls": 43,
+      "sa_completed": 43,
+      "llm_calls": 0,
+      "llm_completed": 0,
+      "dispatch_calls": 137,
+      "llm_failed": 0,
+      "llm_seconds_completed": 0,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [],
+      "last_complete_iteration_timings": {
+        "qubo": 487.19630209999923,
+        "annealing": 18.48707060000197,
+        "relaxation": 3.1683050000010553,
+        "local_dispatch": 6.077532400006021,
+        "coordination": 0.0,
+        "repair": 4.265161100027399,
+        "subproblems": 59.942553900003986,
+        "llm": 0.0,
+        "context": 0.0
+      },
+      "reliable_lower": 565276.9373138556,
+      "validated_candidates": 31,
+      "checkpoints": {
+        "60": 611578.7826996066,
+        "120": 611205.6089139804,
+        "300": 611205.6089139804,
+        "600": 611205.6089139804
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 6.045870599999034,
+          "sa_calls": 1
+        },
+        "0.08": {
+          "seconds": 31.2075760000007,
+          "sa_calls": 6
+        },
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 47,
+      "strategy": "sa",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 611204.6152566771,
+      "relative_difference": 0.07038454347679379,
+      "sa_calls": 42,
+      "sa_completed": 42,
+      "llm_calls": 0,
+      "llm_completed": 0,
+      "dispatch_calls": 154,
+      "llm_failed": 0,
+      "llm_seconds_completed": 0,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [],
+      "last_complete_iteration_timings": {
+        "qubo": 497.56292449999637,
+        "annealing": 18.527582599994275,
+        "relaxation": 2.5973945000005187,
+        "local_dispatch": 5.434020099992267,
+        "coordination": 0.0,
+        "repair": 4.000518999986525,
+        "subproblems": 68.39491829999861,
+        "llm": 0.0,
+        "context": 0.0
+      },
+      "reliable_lower": 565292.707114112,
+      "validated_candidates": 36,
+      "checkpoints": {
+        "60": 614036.6822026276,
+        "120": 614036.6822026276,
+        "300": 611204.6152566771,
+        "600": 611204.6152566771
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 5.854717000000164,
+          "sa_calls": 1
+        },
+        "0.08": {
+          "seconds": 43.81696399999964,
+          "sa_calls": 8
+        },
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 7,
+      "strategy": "sa",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 611910.9275780953,
+      "relative_difference": 0.07162148732970586,
+      "sa_calls": 42,
+      "sa_completed": 42,
+      "llm_calls": 0,
+      "llm_completed": 0,
+      "dispatch_calls": 143,
+      "llm_failed": 0,
+      "llm_seconds_completed": 0,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [],
+      "last_complete_iteration_timings": {
+        "qubo": 490.9336081000047,
+        "annealing": 18.384804199996324,
+        "relaxation": 3.135033300000032,
+        "local_dispatch": 6.291126600001007,
+        "coordination": 0.0,
+        "repair": 4.260572399983175,
+        "subproblems": 61.200611400001435,
+        "llm": 0.0,
+        "context": 0.0
+      },
+      "reliable_lower": 565218.631573408,
+      "validated_candidates": 32,
+      "checkpoints": {
+        "60": 615744.9849054033,
+        "120": 614723.9762939061,
+        "300": 611910.9275780953,
+        "600": 611910.9275780953
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 5.986689399999705,
+          "sa_calls": 1
+        },
+        "0.08": {
+          "seconds": 37.46952710000005,
+          "sa_calls": 7
+        },
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 17,
+      "strategy": "sa_llm",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 619501.6435717036,
+      "relative_difference": 0.08491488347015919,
+      "sa_calls": 2,
+      "sa_completed": 2,
+      "llm_calls": 2,
+      "llm_completed": 1,
+      "dispatch_calls": 12,
+      "llm_failed": 1,
+      "llm_seconds_completed": 300.3123197999994,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [
+        null
+      ],
+      "last_complete_iteration_timings": {
+        "qubo": 1.46390749999955,
+        "annealing": 0.23545839999860618,
+        "relaxation": 0.036970899998777895,
+        "local_dispatch": 0.13817139999810024,
+        "coordination": 0.0,
+        "repair": 0.11430380000092555,
+        "subproblems": 4.033547099999851,
+        "llm": 300.31296589999874,
+        "context": 0.0030007000004843576
+      },
+      "reliable_lower": 564420.0530900457,
+      "validated_candidates": 3,
+      "checkpoints": {
+        "60": 621873.8786230511,
+        "120": 621873.8786230511,
+        "300": 621873.8786230511,
+        "600": 619501.6435717036
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 6.094138999998904,
+          "sa_calls": 1
+        },
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 27,
+      "strategy": "sa_llm",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 619235.5413539885,
+      "relative_difference": 0.08444886653619421,
+      "sa_calls": 2,
+      "sa_completed": 2,
+      "llm_calls": 2,
+      "llm_completed": 1,
+      "dispatch_calls": 12,
+      "llm_failed": 1,
+      "llm_seconds_completed": 300.34478560000025,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [
+        null
+      ],
+      "last_complete_iteration_timings": {
+        "qubo": 1.3719865000002756,
+        "annealing": 0.235349500000666,
+        "relaxation": 0.035468299998683506,
+        "local_dispatch": 0.13322030000199447,
+        "coordination": 0.0,
+        "repair": 0.07162670000070648,
+        "subproblems": 3.910891100002118,
+        "llm": 300.3454880999998,
+        "context": 0.002936299999419134
+      },
+      "reliable_lower": 564420.0530900457,
+      "validated_candidates": 3,
+      "checkpoints": {
+        "60": 619235.5413539885,
+        "120": 619235.5413539885,
+        "300": 619235.5413539885,
+        "600": 619235.5413539885
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 5.829085999999734,
+          "sa_calls": 1
+        },
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 37,
+      "strategy": "sa_llm",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 618261.1855204942,
+      "relative_difference": 0.08274250601798916,
+      "sa_calls": 2,
+      "sa_completed": 2,
+      "llm_calls": 2,
+      "llm_completed": 1,
+      "dispatch_calls": 12,
+      "llm_failed": 1,
+      "llm_seconds_completed": 300.15376110000034,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [
+        null
+      ],
+      "last_complete_iteration_timings": {
+        "qubo": 1.4087220000001253,
+        "annealing": 0.22541610000007495,
+        "relaxation": 0.03647449999880337,
+        "local_dispatch": 0.13453470000058587,
+        "coordination": 0.0,
+        "repair": 0.095679600000949,
+        "subproblems": 3.982114799999181,
+        "llm": 300.1544068000003,
+        "context": 0.00302430000010645
+      },
+      "reliable_lower": 564420.0530900457,
+      "validated_candidates": 3,
+      "checkpoints": {
+        "60": 628073.2383338255,
+        "120": 628073.2383338255,
+        "300": 628073.2383338255,
+        "600": 618261.1855204942
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 5.954524999999194,
+          "sa_calls": 1
+        },
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 47,
+      "strategy": "sa_llm",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 619356.6924045965,
+      "relative_difference": 0.08466103478355325,
+      "sa_calls": 2,
+      "sa_completed": 2,
+      "llm_calls": 2,
+      "llm_completed": 1,
+      "dispatch_calls": 12,
+      "llm_failed": 1,
+      "llm_seconds_completed": 300.21805590000076,
+      "llm_proposals": 0,
+      "llm_duplicate": 0,
+      "llm_accepted": 0,
+      "llm_usage": [
+        null
+      ],
+      "last_complete_iteration_timings": {
+        "qubo": 1.430870700000014,
+        "annealing": 0.22716250000121363,
+        "relaxation": 0.035949900000559865,
+        "local_dispatch": 0.13456519999999728,
+        "coordination": 0.0,
+        "repair": 0.09370630000194069,
+        "subproblems": 3.9434965000000375,
+        "llm": 300.2187106000001,
+        "context": 0.003034700001080637
+      },
+      "reliable_lower": 564420.0530900457,
+      "validated_candidates": 3,
+      "checkpoints": {
+        "60": 619356.6924045965,
+        "120": 619356.6924045965,
+        "300": 619356.6924045965,
+        "600": 619356.6924045965
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 5.936740200000713,
+          "sa_calls": 1
+        },
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "status": "budget_complete",
+      "seed": 7,
+      "strategy": "sa_llm",
+      "budget": 600.0,
+      "exitcode": -15,
+      "objective": 619286.0195899516,
+      "relative_difference": 0.08453726757605584,
+      "sa_calls": 2,
+      "sa_completed": 2,
+      "llm_calls": 2,
+      "llm_completed": 1,
+      "dispatch_calls": 20,
+      "llm_failed": 0,
+      "llm_seconds_completed": 295.0669770000004,
+      "llm_proposals": 4,
+      "llm_duplicate": 2,
+      "llm_accepted": 2,
+      "llm_usage": [
+        {
+          "completion_tokens": 50083,
+          "completion_tokens_details": {
+            "reasoning_tokens": 47834,
+            "text_tokens": 2248
+          },
+          "prompt_tokens": 11632,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 11632
+          },
+          "total_tokens": 61715
+        }
+      ],
+      "last_complete_iteration_timings": {
+        "qubo": 1.4161827000007179,
+        "annealing": 0.2281511999990471,
+        "relaxation": 0.03507490000083635,
+        "local_dispatch": 0.2975787000013952,
+        "coordination": 0.0,
+        "repair": 0.09936730000481475,
+        "subproblems": 7.637111199999708,
+        "llm": 295.05709939999906,
+        "context": 0.0030270999995991588
+      },
+      "reliable_lower": 564420.0530900457,
+      "validated_candidates": 5,
+      "checkpoints": {
+        "60": 620544.4744084139,
+        "120": 620544.4744084139,
+        "300": 620544.4744084139,
+        "600": 619286.0195899516
+      },
+      "targets": {
+        "0.1": {
+          "seconds": 5.847547199999099,
+          "sa_calls": 1
+        },
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "seed": 7,
+      "cost_delta_llm_minus_sa": 7375.092011856264,
+      "sa_savings": {
+        "0.1": 0.0,
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "seed": 17,
+      "cost_delta_llm_minus_sa": 8191.466814923449,
+      "sa_savings": {
+        "0.1": 0.0,
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "seed": 27,
+      "cost_delta_llm_minus_sa": 10409.597082328168,
+      "sa_savings": {
+        "0.1": 0.0,
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "seed": 37,
+      "cost_delta_llm_minus_sa": 7055.576606513816,
+      "sa_savings": {
+        "0.1": 0.0,
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    },
+    {
+      "seed": 47,
+      "cost_delta_llm_minus_sa": 8152.077147919335,
+      "sa_savings": {
+        "0.1": 0.0,
+        "0.08": null,
+        "0.06": null,
+        "0.05": null,
+        "0.04": null,
+        "0.03": null,
+        "0.02": null,
+        "0.01": null
+      }
+    }
+  ],
+  "statistics": {
+    "mean_delta": 8236.761932708207,
+    "median_delta": 8152.077147919335,
+    "wins": 0,
+    "ties": 0,
+    "losses": 5
+  }
+}
