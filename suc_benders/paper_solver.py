@@ -270,8 +270,12 @@ def solve_paper(data, scenarios, config):
                     timings["context"] += time.perf_counter()-phase
                     phase = time.perf_counter()
                     emit("llm_start", iteration=outer)
+                    timeout = config.llm.timeout_seconds
+                    if math.isfinite(deadline):
+                        remaining = max(.001, deadline-time.perf_counter())
+                        timeout = remaining if timeout is None else min(timeout, remaining)
                     advice = ask_llm_for_candidates(data, scenarios, outer, base_for_llm, best,
-                        replace(config.llm, timeout_seconds=max(.001, min(config.llm.timeout_seconds, deadline-time.perf_counter())),
+                        replace(config.llm, timeout_seconds=timeout,
                                 max_retries=1, collect_diagnostics=True), context=context)
                     timings["llm"] += time.perf_counter()-phase-advice.diagnostics.get("repair_seconds", 0.)
                     timings["repair"] += advice.diagnostics.get("repair_seconds", 0.)
@@ -341,7 +345,7 @@ def solve_paper(data, scenarios, config):
         history.append(IterationRecord(outer, sum(len(p) for p in pools), 0, len(evaluated)-before_count,
             len(evaluated)-before_count, 0, optimality_count-before_opt, feasibility_count-before_feas, incumbent))
         emit("iteration", iteration=outer, incumbent=incumbent, reliable_lower=reliable_lower, timings=dict(timings))
-        if not temporal and len(evaluated) == before_count and not config.run_to_deadline:
+        if not temporal and len(evaluated) == before_count and not config.run_to_deadline and config.stop_on_no_new_candidates:
             status = "NO_NEW_CANDIDATES"
             break
     if time.perf_counter() >= deadline:

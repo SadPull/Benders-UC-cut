@@ -18,6 +18,21 @@ The [v0.14.0 results](experiments/llm-sa-efficiency-20261001/findings.md),
 which used the previous provider and observed 32000-token truncation, remain
 available separately.
 
+## Fixed-round Farluna rerun
+
+`python -m suc_benders.efficiency_experiment --rounds 50` runs the same five
+seeds and two strategies for 50 rounds each, without an overall time limit or
+a client-side LLM request timeout. It retains max reasoning, 65536 tokens,
+one SA call per round, and all existing candidate checks. Failed requests are
+recorded without retry; duplicate candidates do not end the run early.
+Server-side failures can still occur. Runs remain serial and use fresh output
+directories; resume skips existing runs and requires matching fingerprints.
+
+The final cost compares equal round counts, not equal elapsed time. The
+60/120/300/600-second checkpoints and fixed quality thresholds remain available
+for time and first-passage comparisons. The default command without `--rounds`
+still uses the v0.14.1 600-second / 300-second request protocol.
+
 ## Independent exact-block control
 
 `python -m suc_benders.exact_experiment` runs an independent original-block

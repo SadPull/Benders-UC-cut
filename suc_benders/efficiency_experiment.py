@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 import hashlib
 import importlib.metadata
@@ -46,10 +46,10 @@ def llm_config(enabled=True):
         max_retries=1, collect_diagnostics=True)
 
 
-def preflight():
+def preflight(config=None):
     """Fail closed on incompatible parameters; HTTP success is not reasoning proof."""
     load_credentials()
-    config = llm_config()
+    config = config or llm_config()
     payload = {"model": config.model, "reasoning_effort": config.reasoning_effort,
                "max_tokens": config.max_tokens, "temperature": config.temperature, "stream": False,
                "messages": [{"role": "user", "content": 'Return exactly {"candidates":[]} without markdown.'}]}
@@ -71,15 +71,22 @@ def preflight():
     return json.loads(json.dumps(result).replace(token, "[REDACTED]"))
 
 
-def configuration(seed, strategy, budget=BUDGET):
-    return BendersConfig(master_encoding="dynamic", decomposition="none",
+def configuration(seed, strategy, budget=BUDGET, rounds=None):
+    config = BendersConfig(master_encoding="dynamic", decomposition="none",
         decommit_candidates=False, random_candidates=False, run_to_deadline=True,
         time_limit_seconds=budget, max_candidate_evaluations=None, collect_diagnostics=True,
         quantum=QuantumConfig(kaiwu_seed=seed, candidate_pool_size=16),
         llm=llm_config(strategy == "sa_llm"))
+    if rounds is not None:
+        if rounds <= 0:
+            raise ValueError("rounds must be positive")
+        config = replace(config, max_iterations=rounds, run_to_deadline=False,
+            time_limit_seconds=None, stop_on_no_new_candidates=False,
+            llm=replace(config.llm, timeout_seconds=None))
+    return config
 
 
-def worker(directory, seed, strategy, budget, connection):
+def worker(directory, seed, strategy, budget, connection, rounds=None):
     """The supervisor owns the hard deadline, including uninterruptible SDK calls."""
     path = Path(directory)
     for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
@@ -93,7 +100,7 @@ def worker(directory, seed, strategy, budget, connection):
                 connection.send(row["deadline_clock"])
             stream.write(json.dumps(result_to_dict(row), ensure_ascii=False, allow_nan=False)+"\n")
             stream.flush()
-        config = configuration(seed, strategy, budget)
+        config = configuration(seed, strategy, budget, rounds)
         config.event_sink = event
         try:
             result = solve_benders(data, scenarios, config)
@@ -118,18 +125,28 @@ def read_events(path):
     return rows
 
 
-def supervise(path, seed, strategy, budget=BUDGET):
+def supervise(path, seed, strategy, budget=BUDGET, rounds=None):
     path.mkdir(parents=True)
-    write_json(path / "state.json", {"status": "running", "seed": seed, "strategy": strategy, "budget": budget})
+    settings = {"seed": seed, "strategy": strategy, "budget": budget if rounds is None else None}
+    if rounds is not None:
+        settings["rounds"] = rounds
+    write_json(path / "state.json", {"status": "running", **settings})
     ctx = mp.get_context("spawn")
     parent, child = ctx.Pipe(duplex=False)
-    process = ctx.Process(target=worker, args=(str(path), seed, strategy, budget, child))
+    args = (str(path), seed, strategy, budget, child)
+    process = ctx.Process(target=worker, args=args if rounds is None else args+(rounds,))
     process.start()
     child.close()
     status = "failed"
     try:
         # Imports and license initialization precede optimization; guard a hung startup.
-        if not parent.poll(60):
+        if rounds is not None:
+            while process.is_alive():
+                process.join(1)
+            events = read_events(path / "events.jsonl")
+            completed = sum(e["kind"] == "iteration" for e in events)
+            status = "completed" if process.exitcode == 0 and completed == rounds else "incomplete"
+        elif not parent.poll(60):
             status = "startup_failed"
         else:
             deadline = parent.recv()
@@ -138,21 +155,23 @@ def supervise(path, seed, strategy, budget=BUDGET):
             status = "budget_complete" if time.perf_counter() >= deadline else "failed"
             if not process.is_alive() and process.exitcode == 0:
                 status = "completed"
+    except KeyboardInterrupt:
+        status = "interrupted"
+        raise
     finally:
         if process.is_alive():
             process.terminate()
             process.join(5)
         parent.close()
-        write_json(path / "state.json", {"status": status, "seed": seed, "strategy": strategy,
-                                         "budget": budget, "exitcode": process.exitcode})
+        write_json(path / "state.json", {"status": status, **settings, "exitcode": process.exitcode})
 
 
-def prepare(directory, resume):
+def prepare(directory, resume, rounds=None):
     data, scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
     paths = sorted((ROOT / "suc_benders").glob("*.py"))
     sources = {str(p.relative_to(ROOT)).replace("\\", "/"): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
     identity = {"sources": sources, "data": result_to_dict(data), "scenarios": result_to_dict(scenarios),
-                "seeds": SEEDS, "configurations": {s: asdict(configuration(7, s)) for s in ("sa", "sa_llm")},
+                "seeds": SEEDS, "configurations": {s: asdict(configuration(7, s, rounds=rounds)) for s in ("sa", "sa_llm")},
                 "packages": {p: importlib.metadata.version(p) for p in ("numpy", "scipy", "gurobipy", "kaiwu")},
                 "python": sys.version, "thresholds": THRESHOLDS, "checkpoints": CHECKPOINTS}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
@@ -179,6 +198,7 @@ def prepare(directory, resume):
 
 
 def summarize(events, budget, reference):
+    budget = float("inf") if budget is None else budget
     evaluations = [e for e in events if e["kind"] == "evaluation" and e["elapsed_seconds"] <= budget
                    and e["feasible"] and e["objective"] is not None]
     def best_at(seconds):
@@ -193,6 +213,8 @@ def summarize(events, budget, reference):
     return {"objective": best["objective"] if best else None,
             "relative_difference": best["objective"]/reference-1 if best else None,
             "sa_calls": sum(e["kind"] == "sa_start" for e in events),
+            "completed_rounds": len(iterations),
+            "elapsed_seconds": max((e.get("elapsed_seconds", 0.) for e in events), default=0.),
             "sa_completed": sum(e["kind"] == "sa_end" and e["status"] == "completed" for e in events),
             "llm_calls": sum(e["kind"] == "llm_start" for e in events),
             "llm_completed": sum(e["kind"] == "llm_end" for e in events),
@@ -240,14 +262,21 @@ def report(directory):
     stats = {"mean_delta":mean(differences) if differences else None, "median_delta":median(differences) if differences else None,
              "wins":sum(d < -1e-4 for d in differences), "ties":sum(abs(d) <= 1e-4 for d in differences), "losses":sum(d > 1e-4 for d in differences)}
     write_json(directory / "summary.json", {"reference": reference, "runs":rows, "pairs":pairs, "statistics":stats})
-    lines = ["# LLM 辅助 SA 效率实验", "", f"参考目标：{reference:.6f}。每次600秒，包含模型构建、SA、LLM网络与推理、修复和验证。",
+    rounds = next((r["rounds"] for r in rows if "rounds" in r), None)
+    protocol = (f"每次{rounds}轮，不设总时限或客户端LLM请求超时；终点成本是同轮数比较，不是同时间预算比较。"
+                if rounds is not None else "每次600秒，包含模型构建、SA、LLM网络与推理、修复和验证。")
+    lines = ["# LLM 辅助 SA 效率实验", "", f"参考目标：{reference:.6f}。{protocol}",
              "LLM请求max与65536 tokens；接口接受请求，但未能独立确认后端实际推理强度。",
-             "仅采用截止前验证完成的调度；预算终止的未完成SA/LLM计入调用数。独立减开机关闭。", "",
+             "仅采用验证完成的调度；时间检查点只采用该时刻前完成的结果。未完成SA/LLM计入调用数。独立减开机关闭。", "",
              "|种子|组别|状态|成本|相对参考差距|SA调用|LLM调用|验证候选|", "|---|---|---|---:|---:|---:|---:|---:|"]
     for r in rows:
         cost = f"{r['objective']:.4f}" if r['objective'] is not None else "未获得"
         gap = f"{r['relative_difference']:.4%}" if r['relative_difference'] is not None else "—"
         lines.append(f"|{r['seed']}|{r['strategy']}|{r['status']}|{cost}|{gap}|{r['sa_calls']}|{r['llm_calls']}|{r['validated_candidates']}|")
+    if rounds is not None:
+        lines += ["", "|种子/组别|完成轮数|记录耗时（秒）|", "|---|---:|---:|"]
+        for r in rows:
+            lines.append(f"|{r['seed']}/{r['strategy']}|{r['completed_rounds']}|{r['elapsed_seconds']:.3f}|")
     lines += ["", f"完整配对成本差（LLM−SA）：均值 {stats['mean_delta']}，中位数 {stats['median_delta']}；胜/平/负 {stats['wins']}/{stats['ties']}/{stats['losses']}。", "",
               "## 时间检查点", "", "|种子/组别|60秒|120秒|300秒|600秒|", "|---|---:|---:|---:|---:|"]
     for r in rows:
@@ -281,16 +310,19 @@ def main():
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--rounds", type=int, default=None,
+                        help="Use a fixed round count without total or client request timeouts")
     args = parser.parse_args()
-    directory = Path(args.output_dir or f"results/llm-sa-efficiency-{datetime.now():%Y%m%d-%H%M%S}").resolve()
+    suffix = f"-{args.rounds}rounds" if args.rounds is not None else ""
+    directory = Path(args.output_dir or f"results/llm-sa-efficiency{suffix}-{datetime.now():%Y%m%d-%H%M%S}").resolve()
     if args.report_only:
         report(directory)
         return
     load_credentials()
-    prepare(directory, args.resume)
+    prepare(directory, args.resume, args.rounds)
     preflight_path = directory / "preflight.json"
     if not preflight_path.exists():
-        write_json(preflight_path, preflight())
+        write_json(preflight_path, preflight(configuration(7, "sa_llm", rounds=args.rounds).llm))
     if not json.loads(preflight_path.read_text(encoding="utf-8"))["accepted"]:
         raise RuntimeError("preflight failed; formal runs not started")
     for index, seed in enumerate(SEEDS):
@@ -300,7 +332,7 @@ def main():
                 print(f"SKIP existing {path.name}", flush=True)
                 continue
             print(f"START {path.name}", flush=True)
-            supervise(path, seed, strategy)
+            supervise(path, seed, strategy, rounds=args.rounds)
             print(f"DONE {path.name}", flush=True)
             report(directory)
     report(directory)

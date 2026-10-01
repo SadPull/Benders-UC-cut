@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 class LLMConfig:
     enabled: bool = False
     max_candidates: int = 4
-    timeout_seconds: float = 180.0
+    timeout_seconds: float | None = 180.0
     temperature: float = 0.2
     # Reasoning models (e.g. deepseek-reasoner) spend part of this budget on
     # hidden reasoning tokens before emitting any text, so the default is sized
@@ -241,7 +241,8 @@ def ask_llm_for_candidates(
         attempt_record = {"attempt": attempt + 1}
         record["attempts"].append(attempt_record)
         try:
-            with direct_opener.open(request, timeout=float(config.timeout_seconds)) as response:
+            timeout = None if config.timeout_seconds is None else float(config.timeout_seconds)
+            with direct_opener.open(request, timeout=timeout) as response:
                 attempt_record["status_code"] = getattr(response, "status", 200)
                 raw = json.loads(response.read().decode("utf-8"))
             attempt_record["elapsed_seconds"] = time.perf_counter() - attempt_started

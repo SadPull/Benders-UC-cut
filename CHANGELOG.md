@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased - fixed-round Farluna rerun
+
+- Add an opt-in 50-round paired rerun without overall or client request timeouts.
+- Keep duplicate-candidate rounds running to the requested round count and
+  distinguish the final equal-round comparison from timed checkpoints.
+- Preserve the default v0.14.1 timed protocol and all historical results.
+
 ## v0.14.1 - 2026-10-01
 
 - Switch the active LLM endpoint to Farluna and retain max reasoning / 65536 tokens.

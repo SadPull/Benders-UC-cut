@@ -56,6 +56,7 @@ class BendersConfig:
     time_limit_seconds: float | None = None
     # Used by the time-budget experiment; existing runs keep their stopping rules.
     run_to_deadline: bool = False
+    stop_on_no_new_candidates: bool = True
     event_sink: Callable[[dict], None] | None = field(default=None, repr=False)
 
 

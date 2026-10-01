@@ -25,7 +25,66 @@ def stuck_worker(directory, seed, strategy, budget, connection):
     time.sleep(5)
 
 
+def round_worker(directory, seed, strategy, budget, connection, rounds):
+    connection.send(float("inf"))
+    Path(directory, "events.jsonl").write_text(
+        ''.join(json.dumps({"kind":"iteration", "iteration":i+1})+'\n' for i in range(rounds)),
+        encoding="utf-8")
+
+
 class EfficiencyTests(unittest.TestCase):
+    def test_fixed_rounds_do_not_stop_on_duplicates_and_remove_llm_timeout(self):
+        data=replace(one_hour_data(),base_load=np.full(3,30.))
+        ss=[Scenario("tiny",1.,data.base_load)]
+        events=[]
+        config=replace(configuration(7,"sa_llm",rounds=3),event_sink=events.append)
+        def advise(*args, **kwargs):
+            self.assertIsNone(args[5].timeout_seconds)
+            return LLMAdviceResult([])
+        with patch("suc_benders.paper_solver.solve_qubo",return_value=[]) as sa, \
+             patch("suc_benders.paper_solver.ask_llm_for_candidates",side_effect=advise) as llm:
+            solve_benders(data,ss,config)
+        self.assertEqual(sa.call_count,3)
+        self.assertEqual(llm.call_count,3)
+        self.assertEqual(sum(e['kind']=='iteration' for e in events),3)
+        self.assertIsNone(config.time_limit_seconds)
+        self.assertFalse(config.stop_on_no_new_candidates)
+        self.assertEqual(configuration(7,"sa").time_limit_seconds,600.)
+        self.assertEqual(configuration(7,"sa_llm").llm.timeout_seconds,300.)
+
+    def test_unlimited_http_timeout_and_no_retry_on_server_error(self):
+        data=one_hour_data()
+        with patch.dict("os.environ",{"LLM_API_KEY":"SECRET"}), \
+             patch("suc_benders.llm.build_opener") as opener:
+            opener.return_value.open.side_effect=ConnectionError()
+            result=ask_llm_for_candidates(data,[Scenario("tiny",1.,data.base_load)],1,[],None,
+                                         configuration(7,"sa_llm",rounds=50).llm)
+        self.assertTrue(result.failed)
+        self.assertIsNone(opener.return_value.open.call_args.kwargs['timeout'])
+        self.assertEqual(opener.return_value.open.call_count,1)
+
+    def test_round_supervisor_and_resume_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"run"
+            with patch("suc_benders.efficiency_experiment.worker",round_worker):
+                supervise(path,7,"sa",rounds=3)
+            state=json.loads((path/'state.json').read_text())
+            self.assertEqual(state['status'],'completed')
+            self.assertIsNone(state['budget'])
+            study=Path(directory)/"study"
+            prepare(study,False,rounds=50)
+            prepare(study,True,rounds=50)
+            with self.assertRaises(ValueError):prepare(study,True)
+            with self.assertRaises(ValueError):prepare(study,True,rounds=100)
+
+    def test_unlimited_endpoint_and_timed_checkpoints_are_separate(self):
+        events=[{"kind":"evaluation","elapsed_seconds":20,"sa_calls":1,"feasible":True,"objective":108.},
+                {"kind":"evaluation","elapsed_seconds":900,"sa_calls":2,"feasible":True,"objective":101.}]
+        result=summarize(events,None,100.)
+        self.assertEqual(result['objective'],101.)
+        self.assertEqual(result['checkpoints']['600'],108.)
+        self.assertEqual(result['targets']['0.02']['seconds'],900)
+
     def test_resume_fingerprint_and_existing_output(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/"study"
