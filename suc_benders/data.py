@@ -94,7 +94,14 @@ def _load_units(data_path: Path) -> UCData:
         raise DataError("cost coefficients must be non-negative")
 
     initial_on = initial_duration > 0
-    initial_output = np.where(initial_on, pmin, 0.0)
+    if "initial_output" in obj:
+        initial_output = _vector(obj, "initial_output", n)
+        if np.any(initial_output[~initial_on] != 0):
+            raise DataError("offline units must have zero initial_output")
+        if np.any(initial_output[initial_on] < pmin[initial_on]) or np.any(initial_output[initial_on] > pmax[initial_on]):
+            raise DataError("online initial_output must lie between Pmin and Pmax")
+    else:
+        initial_output = np.where(initial_on, pmin, 0.0)
     return UCData(
         n_units=n,
         horizon=horizon,
