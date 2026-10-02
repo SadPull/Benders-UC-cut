@@ -1,0 +1,5 @@
+{
+  "status": "USER_STOPPED",
+  "reason": "user_requested_stop",
+  "native_result_available": false
+}

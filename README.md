@@ -2,6 +2,13 @@
 
 ## Astra advisor module
 
+The [DeepSeek Flash comparison](experiments/rts24-deepseek-burst-20261002/report.md)
+was stopped by the user at **907432.581261**, **2.527027%** above the reference.
+It used 14 SA calls, 10 completed LLM calls and one interrupted request. The
+amended inclusive 1% target was not reached; calls 8–10 hit the provider's
+generation limit. The archive records both stopping-rule changes, all completed
+exchanges, the partial call, known token usage, and independent audits.
+
 The [RTS-24 three-call burst experiment](experiments/rts24-sa-llm-burst-20261002/report.md)
 reached the strict 0.5% reference target after **5 SA calls and 2 Astra calls**.
 Its best validated cost is **889097.785912**, **0.455455%** above the independent

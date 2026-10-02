@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Archive the user-stopped RTS-24 DeepSeek Flash comparison: 14 SA calls,
+  10 completed LLM calls and one interrupted request; best reference difference
+  2.527027%, above the amended inclusive 1% target. Calls 8–10 exhausted the
+  provider generation limit. Preserve unknown usage for the interrupted request.
+- Save HTTP prompt/request artifacts before sending future requests, so local
+  interruption retains inputs. The completed study keeps its original source
+  snapshot and honestly records the missing in-flight request body.
+
 - Allow the same burst/target runner to use an explicit Chat Completions model
   with an environment-only API key, optional token/temperature overrides, and
   saved per-call requests, responses, usage, repair diagnostics and feedback.

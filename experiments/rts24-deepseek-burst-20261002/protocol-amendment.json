@@ -1,0 +1,14 @@
+{
+  "requested_at": "2026-10-02T19:08:08.859943+08:00",
+  "user_request": "Stop when reference difference is at most 1%, summarize and submit to GitHub.",
+  "original_stop": {
+    "reference_difference": 0.005,
+    "comparison": "<"
+  },
+  "amended_stop": {
+    "reference_difference": 0.01,
+    "comparison": "<="
+  },
+  "implementation": "External event supervisor uses the existing cancellation channel after a fully validated candidate reaches the amended target. Preserve native result/status and separately audit the amended stop.",
+  "no_restart": true
+}

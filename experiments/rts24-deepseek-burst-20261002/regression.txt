@@ -1,0 +1,81 @@
+HTTP_LLM_START call=1 round=3
+test_cli_preserves_burst_settings_and_saves_http_calls (tests.test_http_burst.HTTPBurstTests) ... ok
+test_incomplete_http_settings_fail_before_starting (tests.test_http_burst.HTTPBurstTests) ... usage: astra_run [-h] [--data DATA] [--scenario-file SCENARIO_FILE]
+                 [--seed SEED] [--rounds ROUNDS] --output-dir OUTPUT_DIR
+                 [--time-limit-seconds TIME_LIMIT_SECONDS]
+                 [--max-llm-calls MAX_LLM_CALLS] [--original-feedback]
+                 [--http-base-url HTTP_BASE_URL] [--http-model HTTP_MODEL]
+                 [--strategy {sa,fixed,stagnation,stagnation_burst,llm}]
+                 [--target-reference-gap TARGET_REFERENCE_GAP]
+astra_run: error: HTTP base URL and model must be supplied together
+usage: astra_run [-h] [--data DATA] [--scenario-file SCENARIO_FILE]
+                 [--seed SEED] [--rounds ROUNDS] --output-dir OUTPUT_DIR
+                 [--time-limit-seconds TIME_LIMIT_SECONDS]
+                 [--max-llm-calls MAX_LLM_CALLS] [--original-feedback]
+                 [--http-base-url HTTP_BASE_URL] [--http-model HTTP_MODEL]
+                 [--strategy {sa,fixed,stagnation,stagnation_burst,llm}]
+                 [--target-reference-gap TARGET_REFERENCE_GAP]
+astra_run: error: HTTP base URL and model must be supplied together
+usage: astra_run [-h] [--data DATA] [--scenario-file SCENARIO_FILE]
+                 [--seed SEED] [--rounds ROUNDS] --output-dir OUTPUT_DIR
+                 [--time-limit-seconds TIME_LIMIT_SECONDS]
+                 [--max-llm-calls MAX_LLM_CALLS] [--original-feedback]
+                 [--http-base-url HTTP_BASE_URL] [--http-model HTTP_MODEL]
+                 [--strategy {sa,fixed,stagnation,stagnation_burst,llm}]
+                 [--target-reference-gap TARGET_REFERENCE_GAP]
+astra_run: error: HTTP runs require LLM_API_KEY in the environment
+ok
+test_optional_sampling_parameters_and_redacted_diagnostics (tests.test_http_burst.HTTPBurstTests) ... ok
+test_invalid_json_is_rejected (tests.test_llm.LLMAdvisorTests) ... ok
+test_invalid_shape_is_discarded (tests.test_llm.LLMAdvisorTests) ... ok
+test_list_root_response_is_accepted (tests.test_llm.LLMAdvisorTests) ... ok
+test_missing_key_is_safe (tests.test_llm.LLMAdvisorTests) ... ok
+test_ragged_matrix_is_discarded_not_fatal (tests.test_llm.LLMAdvisorTests) ... ok
+test_responses_can_use_provider_output_limit (tests.test_llm.LLMAdvisorTests) ... ok
+test_responses_failure_empty_and_invalid_json (tests.test_llm.LLMAdvisorTests) ... ok
+test_responses_payload_and_output_text (tests.test_llm.LLMAdvisorTests) ... ok
+test_responses_rejects_incomplete_even_with_parseable_text (tests.test_llm.LLMAdvisorTests) ... ok
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+test_advisor_only_has_no_sa_or_integer_optimizer (tests.test_astra_module.AstraModuleTests) ... ok
+test_cancel_preserves_completed_best (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpsa1oso4j\run\calls\001
+test_cancel_rejects_ready_result (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp2rdzn6g4\run\calls\001
+test_deadline_closes_request (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpeb2lj_rl\run\calls\001
+test_dispatch_claim_is_exclusive (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpbh346t36\run\calls\001
+test_failed_receipt_is_consumed (tests.test_astra_module.AstraModuleTests) ... ok
+test_feedback_costs_repair_duplicates_and_unknown (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpitv0fcmk\run\calls\001
+test_input_integrity_stops (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp2jkf5jfb\run\calls\001
+test_output_integrity_stops (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpyj8wimhe\run\calls\001
+test_same_candidate_has_same_repair_in_http_and_subagent (tests.test_astra_module.AstraModuleTests) ... ok
+test_stagnation_failed_calls_reset_and_limit (tests.test_astra_module.AstraModuleTests) ... ok
+test_stagnation_threshold_and_reset (tests.test_astra_module.AstraModuleTests) ... ok
+test_target_is_strict_and_overrides_round_limit (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp1d67pqi_\run\calls\001
+test_transport_success_no_http_and_no_reuse (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpkhk10slm\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpkhk10slm\run\calls\002
+test_two_round_feedback_is_automatic (tests.test_astra_module.AstraModuleTests) ... ok
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmptop__6_6\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmptop__6_6\run\calls\002
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmptop__6_6\run\calls\003
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmptop__6_6\run\calls\004
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmptop__6_6\run\calls\005
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmptop__6_6\run\calls\006
+test_each_burst_input_uses_validated_best_and_previous_feedback (tests.test_burst.BurstTests) ... ok
+test_failed_burst_returns_to_three_sa_rounds_and_respects_call_limit (tests.test_burst.BurstTests) ... ok
+test_first_burst_requires_three_consecutive_insufficient_rounds (tests.test_burst.BurstTests) ... ok
+test_sa_candidate_reaching_target_prevents_llm_dispatch (tests.test_burst.BurstTests) ... ok
+test_target_stops_inside_any_call_without_finishing_batch_or_candidates (tests.test_burst.BurstTests) ... ok
+
+----------------------------------------------------------------------
+Ran 32 tests in 1.810s
+
+OK

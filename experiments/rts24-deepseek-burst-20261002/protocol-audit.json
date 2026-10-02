@@ -1,0 +1,452 @@
+{
+  "passed": true,
+  "status": "USER_STOPPED",
+  "target_reached": false,
+  "calls": [
+    {
+      "call": 1,
+      "sa_round": 5,
+      "completed": true,
+      "failed": false,
+      "message": "ok",
+      "stop_reason": "stop",
+      "elapsed_seconds": 221.4635378999992,
+      "http_seconds": 221.45064490000004,
+      "usage": {
+        "prompt_tokens": 23918,
+        "completion_tokens": 67813,
+        "total_tokens": 91731,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 61108
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 23918
+      },
+      "raw_candidates": 4,
+      "valid_candidates": 3,
+      "validated": 4,
+      "repaired_bits": [
+        0,
+        6,
+        0,
+        0
+      ]
+    },
+    {
+      "call": 2,
+      "sa_round": 5,
+      "completed": true,
+      "failed": false,
+      "message": "ok",
+      "stop_reason": "stop",
+      "elapsed_seconds": 279.24723200000153,
+      "http_seconds": 279.23593489999985,
+      "usage": {
+        "prompt_tokens": 26046,
+        "completion_tokens": 80093,
+        "total_tokens": 106139,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 73455
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 26046
+      },
+      "raw_candidates": 4,
+      "valid_candidates": 4,
+      "validated": 4,
+      "repaired_bits": [
+        0,
+        3,
+        0,
+        0
+      ]
+    },
+    {
+      "call": 3,
+      "sa_round": 5,
+      "completed": true,
+      "failed": false,
+      "message": "ok",
+      "stop_reason": "stop",
+      "elapsed_seconds": 233.13782939999874,
+      "http_seconds": 233.12654320000001,
+      "usage": {
+        "prompt_tokens": 25804,
+        "completion_tokens": 72650,
+        "total_tokens": 98454,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 65873
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 25804
+      },
+      "raw_candidates": 4,
+      "valid_candidates": 4,
+      "validated": 4,
+      "repaired_bits": [
+        0,
+        2,
+        2,
+        0
+      ]
+    },
+    {
+      "call": 4,
+      "sa_round": 8,
+      "completed": true,
+      "failed": false,
+      "message": "ok",
+      "stop_reason": "stop",
+      "elapsed_seconds": 165.9033832999994,
+      "http_seconds": 165.89337630000227,
+      "usage": {
+        "prompt_tokens": 26356,
+        "completion_tokens": 48996,
+        "total_tokens": 75352,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 42315
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 26356
+      },
+      "raw_candidates": 4,
+      "valid_candidates": 4,
+      "validated": 4,
+      "repaired_bits": [
+        2,
+        2,
+        3,
+        3
+      ]
+    },
+    {
+      "call": 5,
+      "sa_round": 8,
+      "completed": true,
+      "failed": false,
+      "message": "ok",
+      "stop_reason": "stop",
+      "elapsed_seconds": 485.1110869000004,
+      "http_seconds": 485.09946319999653,
+      "usage": {
+        "prompt_tokens": 26236,
+        "completion_tokens": 115349,
+        "total_tokens": 141585,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 108568
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 26236
+      },
+      "raw_candidates": 4,
+      "valid_candidates": 4,
+      "validated": 4,
+      "repaired_bits": [
+        1,
+        3,
+        1,
+        3
+      ]
+    },
+    {
+      "call": 6,
+      "sa_round": 8,
+      "completed": true,
+      "failed": false,
+      "message": "ok",
+      "stop_reason": "stop",
+      "elapsed_seconds": 238.45543950000138,
+      "http_seconds": 238.44166910000058,
+      "usage": {
+        "prompt_tokens": 26074,
+        "completion_tokens": 78047,
+        "total_tokens": 104121,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 71358
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 26074
+      },
+      "raw_candidates": 4,
+      "valid_candidates": 4,
+      "validated": 4,
+      "repaired_bits": [
+        3,
+        3,
+        14,
+        3
+      ]
+    },
+    {
+      "call": 7,
+      "sa_round": 11,
+      "completed": true,
+      "failed": false,
+      "message": "ok",
+      "stop_reason": "stop",
+      "elapsed_seconds": 289.1314177999957,
+      "http_seconds": 289.11101609999605,
+      "usage": {
+        "prompt_tokens": 26522,
+        "completion_tokens": 85091,
+        "total_tokens": 111613,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 78340
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 26522
+      },
+      "raw_candidates": 4,
+      "valid_candidates": 3,
+      "validated": 4,
+      "repaired_bits": [
+        3,
+        3,
+        3,
+        4
+      ]
+    },
+    {
+      "call": 8,
+      "sa_round": 11,
+      "completed": true,
+      "failed": true,
+      "message": "truncated",
+      "stop_reason": "length",
+      "elapsed_seconds": 562.8082353999998,
+      "http_seconds": 562.8057002999994,
+      "usage": {
+        "prompt_tokens": 25690,
+        "completion_tokens": 131073,
+        "total_tokens": 156763,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 131073
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 25690
+      },
+      "raw_candidates": 0,
+      "valid_candidates": 0,
+      "validated": 0,
+      "repaired_bits": []
+    },
+    {
+      "call": 9,
+      "sa_round": 11,
+      "completed": true,
+      "failed": true,
+      "message": "truncated",
+      "stop_reason": "length",
+      "elapsed_seconds": 554.8493832999957,
+      "http_seconds": 554.847806699996,
+      "usage": {
+        "prompt_tokens": 23786,
+        "completion_tokens": 131072,
+        "total_tokens": 154858,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 131072
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 23786
+      },
+      "raw_candidates": 0,
+      "valid_candidates": 0,
+      "validated": 0,
+      "repaired_bits": []
+    },
+    {
+      "call": 10,
+      "sa_round": 14,
+      "completed": true,
+      "failed": true,
+      "message": "truncated",
+      "stop_reason": "length",
+      "elapsed_seconds": 564.2375548999989,
+      "http_seconds": 564.2291399000023,
+      "usage": {
+        "prompt_tokens": 23784,
+        "completion_tokens": 131072,
+        "total_tokens": 154856,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 131072
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 23784
+      },
+      "raw_candidates": 0,
+      "valid_candidates": 0,
+      "validated": 0,
+      "repaired_bits": []
+    },
+    {
+      "call": 11,
+      "sa_round": 14,
+      "completed": false,
+      "status": "interrupted_waiting_for_response",
+      "usage": null,
+      "request_body_saved": false
+    }
+  ],
+  "timeline": [
+    {
+      "stage": "SA 1",
+      "cost": 1212730.7634665626,
+      "stalled": 0
+    },
+    {
+      "stage": "SA 2",
+      "cost": 1174508.0552730775,
+      "stalled": 0
+    },
+    {
+      "stage": "SA 3",
+      "cost": 1174508.0552730775,
+      "stalled": 1
+    },
+    {
+      "stage": "SA 4",
+      "cost": 1174508.0552730775,
+      "stalled": 2
+    },
+    {
+      "stage": "SA 5",
+      "cost": 1174508.0552730775,
+      "stalled": 3
+    },
+    {
+      "stage": "LLM 1",
+      "cost": 1034975.9820942769,
+      "stalled": null
+    },
+    {
+      "stage": "LLM 2",
+      "cost": 1017731.8618925923,
+      "stalled": null
+    },
+    {
+      "stage": "LLM 3",
+      "cost": 1013016.7971225553,
+      "stalled": null
+    },
+    {
+      "stage": "SA 6",
+      "cost": 1013016.7971225553,
+      "stalled": 1
+    },
+    {
+      "stage": "SA 7",
+      "cost": 1013016.7971225553,
+      "stalled": 2
+    },
+    {
+      "stage": "SA 8",
+      "cost": 1013016.7971225553,
+      "stalled": 3
+    },
+    {
+      "stage": "LLM 4",
+      "cost": 976815.8827703118,
+      "stalled": null
+    },
+    {
+      "stage": "LLM 5",
+      "cost": 929241.3856977941,
+      "stalled": null
+    },
+    {
+      "stage": "LLM 6",
+      "cost": 913717.3472924463,
+      "stalled": null
+    },
+    {
+      "stage": "SA 9",
+      "cost": 913717.3472924463,
+      "stalled": 1
+    },
+    {
+      "stage": "SA 10",
+      "cost": 913717.3472924463,
+      "stalled": 2
+    },
+    {
+      "stage": "SA 11",
+      "cost": 913717.3472924463,
+      "stalled": 3
+    },
+    {
+      "stage": "LLM 7",
+      "cost": 907432.5812613841,
+      "stalled": null
+    },
+    {
+      "stage": "LLM 8",
+      "cost": 907432.5812613841,
+      "stalled": null
+    },
+    {
+      "stage": "LLM 9",
+      "cost": 907432.5812613841,
+      "stalled": null
+    },
+    {
+      "stage": "SA 12",
+      "cost": 907432.5812613841,
+      "stalled": 1
+    },
+    {
+      "stage": "SA 13",
+      "cost": 907432.5812613841,
+      "stalled": 2
+    },
+    {
+      "stage": "SA 14",
+      "cost": 907432.5812613841,
+      "stalled": 3
+    },
+    {
+      "stage": "LLM 10",
+      "cost": 907432.5812613841,
+      "stalled": null
+    }
+  ],
+  "sa_calls": 14,
+  "llm_calls_started": 11,
+  "initial_stop": {
+    "difference": 0.005,
+    "comparison": "<"
+  },
+  "amended_stop": {
+    "difference": 0.01,
+    "comparison": "<="
+  }
+}

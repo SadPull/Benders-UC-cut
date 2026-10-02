@@ -1,0 +1,21 @@
+{
+  ".gitattributes": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
+  "archive-verification.json": "b701ea3cd58cd2f59ad58e12bb169f5feee1a773258a9b4ba7c17eaa4b8e3c24",
+  "best-schedule.json": "80251c3edbc53f2b0701d3a45bb9fc4b2fdcc4de6cf3584be4bf05b7eba26bcd",
+  "comparison-parity.json": "a60ad8e7643b8a4e2b8f3afaad88667dfac6c364db6f89928f277aa737f5ac9b",
+  "credential-scan.json": "7d9358dc90aead16d73a50d382c55bd9cbfdd8d73a73c640e2c787f3d92f4d66",
+  "environment.json": "fa97131cf408f889a955aef5a3c6f0fe22bf028e14a8081f773d0974116d966f",
+  "paired-comparison.json": "3b17cc0300160018aba74b5a6ed494a7b6ed5c5ce5b2535f0e670bc5763755e9",
+  "physical-audit.json": "dac4be6e9298e34adee883db0588a36756af7e82c4a270fe5f150e34a191bc02",
+  "poststop-regression.txt": "f273bc77d903ad9267abb59c971c8457354bea0f0f29a1b94e3ca83c58b458c1",
+  "protocol-amendment.json": "2b5553386dc1f8854a4d83d621dba91ca8894a58bb65e3b7de17575ccf52d9d2",
+  "protocol-audit.json": "fd7b00e7189612aee1b1bbfbd94fc640cca81181cd228e160904491fa7f28872",
+  "protocol.json": "6552b41c440d1754c723d39946e87f922fa18879a0a42ca323d57b02c8499301",
+  "raw-run.zip": "85cbb6d67082b82f7c0ad7b5fb48cabf43d388a7bda559ed21f6bfd4ccb4c0d1",
+  "README.md": "21b5db324b5fa9b449d2db48e6db5fc5247465567b7143a08e46c9c03124f1a8",
+  "regression.txt": "410f74fa8b25e79aa0bae239a2a51a75a957b4668a93b7b2b80395a43ccfef87",
+  "report.md": "c3c345b2c95196bbb3ff798724801a452608ab99a95a9cea7538da764f2a40e2",
+  "state.json": "3fdb55fc2c7844dababa495e1d9a0904f283bfa62ce8263bdc068da0e461424e",
+  "summary.json": "28704e4b17e9b29c927bce999e7a986b332dbe637914ec0586bba430bc52a37d",
+  "user-stop.json": "de4bec962cbc60cac52c53000d94dc42deff1ef4a51dd5b2d8cc109630eeafb2"
+}

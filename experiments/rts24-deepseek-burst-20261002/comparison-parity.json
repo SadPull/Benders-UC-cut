@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "algorithm_sources_identical": [
+    "paper_solver.py",
+    "paper_model.py",
+    "quantum.py",
+    "master.py",
+    "candidates.py",
+    "subproblem.py",
+    "solver.py",
+    "full_model.py",
+    "context.py",
+    "advisor_feedback.py",
+    "data.py",
+    "common.py"
+  ],
+  "initial_sa_candidates_and_costs_identical": true,
+  "first_business_prompt_byte_parity": {
+    "system.txt": true,
+    "user.txt": true
+  },
+  "search_configuration_identical_except_provider": true,
+  "stopping_rule_amended_midrun": true
+}
