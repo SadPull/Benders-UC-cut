@@ -80,7 +80,7 @@ def solve_paper(data, scenarios, config):
 
     previous_feedback = None
     llm_calls = stalled = 0
-    if config.llm.schedule not in {"fixed", "stagnation"} or (config.llm.max_calls is not None and config.llm.max_calls < 0):
+    if config.llm.schedule not in {"fixed", "stagnation", "stagnation_burst"} or (config.llm.max_calls is not None and config.llm.max_calls < 0):
         raise ValueError("invalid LLM schedule or call limit")
 
     def available():
@@ -113,7 +113,7 @@ def solve_paper(data, scenarios, config):
         fuel = sum(s.probability*r.objective for s, r in zip(scenarios, results)) if feasible else float("inf")
         objective = fixed+fuel
         solutions = [ScenarioSolution(s.name, s.probability, r.objective, r.p, r.r) for s, r in zip(scenarios, results)] if feasible else []
-        if feasible and config.event_sink is not None:
+        if feasible and (config.event_sink is not None or config.target_cost is not None):
             from .attribution import validate_schedule
             from types import SimpleNamespace
             validate_schedule(data, scenarios, SimpleNamespace(objective=objective, u=candidate.u,
@@ -145,7 +145,7 @@ def solve_paper(data, scenarios, config):
             status = "LLM_CALL_LIMIT"
             break
         sa_before = incumbent
-        round_advice = None
+        round_advice = []
         costs, lag_constant = uc.coefficients(multipliers)
         current = best if best is not None else seed
         if current is None:
@@ -267,13 +267,20 @@ def solve_paper(data, scenarios, config):
                 # Complete SA evaluations first: LLM sees measured full-horizon feedback.
                 base_for_llm = []
                 for entry in sorted(pool, key=lambda r: r["cost"])[:config.quantum.candidate_pool_size]:
+                    if not available():
+                        break
                     u = np.array([[entry["point"][key("u", i, t)] for t in range(data.horizon)] for i in range(data.n_units)])
                     candidate = make_candidate(data, scenarios, u, source="pool" if config.advisor_only else "sa")
                     evaluate(candidate, outer)
                     base_for_llm.append(candidate)
                 due, stalled = call_due(config.llm.schedule, sa_before, incumbent, stalled, llm_calls)
-                within_calls = config.llm.max_calls is None or llm_calls < config.llm.max_calls
-                if available() and within_calls and (config.advisor_only or due):
+                if not config.advisor_only:
+                    emit("sa_round_validated", iteration=outer, incumbent_before=sa_before,
+                         incumbent=incumbent, stalled=stalled, llm_due=due)
+                burst_size = 3 if config.llm.schedule == "stagnation_burst" else 1
+                for batch_index in range(1, burst_size+1 if config.advisor_only or due else 1):
+                    if not available() or (config.llm.max_calls is not None and llm_calls >= config.llm.max_calls):
+                        break
                     phase = time.perf_counter()
                     context = build_llm_context(data, scenarios, LLMContextInput(
                         incumbent=best, incumbent_results=best_results, base_evaluations=context_evaluations[-16:],
@@ -289,17 +296,17 @@ def solve_paper(data, scenarios, config):
                     prior_ids = {r["commitment_hash"] for r in diagnostics["evaluations"]}
                     timings["context"] += time.perf_counter()-phase
                     phase = time.perf_counter()
-                    emit("llm_start", iteration=outer)
+                    emit("llm_start", iteration=outer, call_index=llm_calls+1, batch_index=batch_index)
                     llm_calls += 1
-                    stalled = 0
+                    call_index = llm_calls if config.llm.schedule == "stagnation_burst" else outer
                     timeout = config.llm.timeout_seconds
                     if math.isfinite(deadline):
                         remaining = max(.001, deadline-time.perf_counter())
                         timeout = remaining if timeout is None else min(timeout, remaining)
-                    advice = ask_llm_for_candidates(data, scenarios, outer, base_for_llm, best,
+                    advice = ask_llm_for_candidates(data, scenarios, call_index, base_for_llm, best,
                         replace(config.llm, timeout_seconds=timeout,
                                 max_retries=1, collect_diagnostics=True), context=context)
-                    round_advice = advice
+                    round_advice.append(advice)
                     timings["llm"] += time.perf_counter()-phase-advice.diagnostics.get("repair_seconds", 0.)
                     timings["repair"] += advice.diagnostics.get("repair_seconds", 0.)
                     diagnostics["llm_calls"].append(advice.diagnostics)
@@ -321,8 +328,10 @@ def solve_paper(data, scenarios, config):
                     emit("llm_feedback", feedback=previous_feedback)
                     if config.llm.api_format == "codex_subagent":
                         from pathlib import Path
-                        call_dir = Path(config.llm.exchange_dir) / "calls" / f"{outer:03d}"
+                        call_dir = Path(config.llm.exchange_dir) / "calls" / f"{call_index:03d}"
                         publish(call_dir / "feedback.json", previous_feedback)
+                if round_advice:
+                    stalled = 0
             if not pool:
                 break
             pool.sort(key=lambda r: r["cost"])
@@ -380,9 +389,9 @@ def solve_paper(data, scenarios, config):
             "elapsed_seconds": time.perf_counter()-started})
         history.append(IterationRecord(outer, sum(len(p) for p in pools), 0, len(evaluated)-before_count,
             len(evaluated)-before_count, 0, optimality_count-before_opt, feasibility_count-before_feas, incumbent,
-            llm_candidates=round_advice.raw_count if round_advice else 0,
-            llm_valid_candidates=round_advice.valid_count if round_advice else 0,
-            llm_failed=round_advice.failed if round_advice else False))
+            llm_candidates=sum(advice.raw_count for advice in round_advice),
+            llm_valid_candidates=sum(advice.valid_count for advice in round_advice),
+            llm_failed=any(advice.failed for advice in round_advice)))
         emit("iteration", iteration=outer, incumbent=incumbent, reliable_lower=reported_lower, timings=dict(timings))
         if not temporal and len(evaluated) == before_count and not config.run_to_deadline and config.stop_on_no_new_candidates:
             status = "NO_NEW_CANDIDATES"

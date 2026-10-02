@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--time-limit-seconds", type=float)
     parser.add_argument("--max-llm-calls", type=int)
     parser.add_argument("--original-feedback", action="store_true")
-    parser.add_argument("--strategy", choices=("sa", "fixed", "stagnation", "llm"), default="fixed")
+    parser.add_argument("--strategy", choices=("sa", "fixed", "stagnation", "stagnation_burst", "llm"), default="fixed")
     parser.add_argument("--target-reference-gap", type=float,
                         help="Run until strictly below this relative Gurobi reference difference; ignores rounds")
     args = parser.parse_args()
@@ -38,7 +38,7 @@ def main():
                     reasoning_effort="max", max_tokens=None, timeout_seconds=None,
                     max_retries=1, collect_diagnostics=True, exchange_dir=str(root),
                     enhanced_feedback=not args.original_feedback, max_calls=args.max_llm_calls,
-                    schedule="stagnation" if args.strategy == "stagnation" else "fixed")
+                    schedule=args.strategy if args.strategy in {"stagnation", "stagnation_burst"} else "fixed")
     config = BendersConfig(max_iterations=args.rounds, master_encoding="dynamic",
         decomposition="none", decommit_candidates=False, random_candidates=False,
         advisor_only=args.strategy == "llm", quantum_candidates=args.strategy != "llm",

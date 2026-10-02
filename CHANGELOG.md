@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add `stagnation_burst`: start with SA, switch after three consecutive rounds
+  below 0.05% improvement, validate and refresh context between three sequential
+  LLM calls, then reset stagnation and return to SA. Preserve existing strategies.
+- Check the strict reference target after complete physical/cost validation,
+  including calls without an event sink; stop within an unfinished LLM batch.
+
 ## v0.17.0 - 2026-10-02
 
 - Add a native `codex_subagent` advisor path with atomic file exchange,

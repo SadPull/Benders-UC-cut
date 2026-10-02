@@ -18,9 +18,20 @@ python -u -m suc_benders.astra_run --data data/suc_10x24.json --seed 7 --rounds 
 | 原反馈固定交替 | `--strategy fixed --original-feedback` |
 | 增强反馈固定交替 | `--strategy fixed` |
 | 增强反馈停滞触发 | `--strategy stagnation` |
+| 连续停滞三轮后连续调用三次 | `--strategy stagnation_burst` |
 | 增强反馈无 SA | `--strategy llm` |
 
 停滞模式在首次 SA 后调用一次；随后连续 3 次 SA 的改善不足该轮 SA 前最佳成本的 0.05% 时调用。显著改善或一次调用结束会重置计数；失败也消耗调用额度。达到 `--max-llm-calls` 后，混合模式继续 SA，无 SA 模式停止。默认调用额度不限，但仍受轮数和可选总时间约束。
+
+`stagnation_burst` 从 SA 开始，没有首次调用特例。每轮 SA 完整候选验证后比较最佳成本，连续 3 轮降本不足轮前最佳成本的 0.05% 才进入 LLM；降本达到 0.05% 清零计数。每组顺序调用 3 次，每次完成候选验证、最佳解更新和自动反馈后重新构造下一次输入，组内不运行 SA。组末清零停滞计数并回到 SA。调用目录按全局调用序号编号；事件同时记录 SA 轮数、调用序号及组内序号。失败调用消耗本组一次额度。
+
+本次 RTS-24 三场景实验命令（种子 7、候选池 16）：
+
+```powershell
+python -u -m suc_benders.astra_run --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --seed 7 --strategy stagnation_burst --target-reference-gap 0.005 --output-dir results/rts24-sa-llm-burst-new
+```
+
+任意候选完成全部场景调度及物理/成本验证后，参考差严格小于 0.5% 立即停止；等于 0.5% 继续。无需完成该候选后的候选或本组三次调用。目标模式不设 SA 轮数、总时间或调用次数上限；参考求解仍有独立的 600 秒时限。
 
 无 SA 模式复用同一连续评估流程，不构建或采样 QUBO，独立入口为上述 `--strategy llm`。该模式不报告认证下界。轮数不是跨策略的等价资源预算；正式比较应另行冻结端到端预算。
 

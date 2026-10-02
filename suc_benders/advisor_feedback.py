@@ -4,11 +4,11 @@ import numpy as np
 
 def call_due(schedule, before, after, stalled, calls):
     """Update SA stagnation; the caller resets it only after an actual call."""
-    if schedule not in {"fixed", "stagnation"}:
+    if schedule not in {"fixed", "stagnation", "stagnation_burst"}:
         raise ValueError("unknown LLM schedule")
     improvement = (before-after)/max(abs(before), 1e-12) if np.isfinite(before) else 0.
     stalled = 0 if improvement >= .0005 else stalled+1
-    return schedule == "fixed" or calls == 0 or stalled >= 3, stalled
+    return schedule == "fixed" or (schedule == "stagnation" and calls == 0) or stalled >= 3, stalled
 
 
 def changes(before, after):
