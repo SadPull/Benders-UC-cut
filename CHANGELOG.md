@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.16.0 - 2026-10-02
+
+- Add a 32-generator, 24-hour IEEE RTS-24 derived copperplate UC/SUC benchmark
+  with pinned public source bytes, per-field provenance, an offline deterministic
+  converter and explicit single/three-scenario profiles. Preserve old defaults.
+- Support validated optional `initial_output` in JSON; historical inputs retain
+  their initial-at-Pmin behavior.
+- Add a one-shot serial baseline runner with hard SA deadlines, independent
+  Gurobi references, complete schedules/events, fixed-dispatch cost checks and
+  source-fingerprinted offline audits. No LLM or QPU calls.
+- Pass 153 regression tests and both baseline audits. Each SA run completed
+  three rounds; its feasible cost exceeded the corresponding Gurobi reference
+  by 46.892743% (deterministic) and 32.702773% (stochastic). No quality or speed
+  advantage is claimed and no optimization runs were repeated.
+- Archive all four runs and checksummed evidence under
+  `experiments/rts24-baseline-20261002/`. Both references reached the requested
+  1e-4 MIP gap; 19 schedules passed independent physical/cost validation.
+
 ## v0.15.0 - 2026-10-02
 
 - Add optional Responses API input/output support and reject incomplete or

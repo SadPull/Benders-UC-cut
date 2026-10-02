@@ -1,0 +1,147 @@
+{
+  "passed": true,
+  "profiles": {
+    "deterministic": {
+      "passed": true,
+      "states": {
+        "sa": {
+          "status": "completed",
+          "exitcode": 0,
+          "wall_seconds": 55.04946199999904
+        },
+        "reference": {
+          "status": "completed",
+          "exitcode": 0,
+          "wall_seconds": 10.953894199999922
+        }
+      },
+      "sa_completed": 3,
+      "completed_rounds": 3,
+      "samples_processed": true,
+      "validated_candidates": 7,
+      "sa_objective": 1223143.120217308,
+      "reference_objective": 832677.7064492828,
+      "reference_lower_bound": 832611.6890515791,
+      "reference_status": "OPTIMAL",
+      "reference_mip_gap": 7.928325352272214e-05,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "fixed_dispatch_check": {
+        "all_feasible": true,
+        "full_objective": 832677.7064492828,
+        "recomputed_objective": 832677.706449443,
+        "difference": 1.601874828338623e-07,
+        "tolerance": 0.08426777064492828,
+        "scenario_statuses": [
+          "OPTIMAL"
+        ],
+        "result_sha256": "134c08040dafbc59bcfd03b534c31fdaf8da359f98372249cde1b98d76b319ad"
+      },
+      "relative_reference_cost_difference": 0.46892742623439965,
+      "certified_relative_error_bound": 0.46904389681410774,
+      "sa_reliable_lower": 800643.2030495941
+    },
+    "stochastic": {
+      "passed": true,
+      "states": {
+        "sa": {
+          "status": "completed",
+          "exitcode": 0,
+          "wall_seconds": 113.95187040000019
+        },
+        "reference": {
+          "status": "completed",
+          "exitcode": 0,
+          "wall_seconds": 115.28267259999848
+        }
+      },
+      "sa_completed": 3,
+      "completed_rounds": 3,
+      "samples_processed": true,
+      "validated_candidates": 10,
+      "sa_objective": 1174508.0552730775,
+      "reference_objective": 885066.7044303413,
+      "reference_lower_bound": 884978.8546508438,
+      "reference_status": "OPTIMAL",
+      "reference_mip_gap": 9.925780628454788e-05,
+      "max_residual_mw": 1.6825651982799172e-11,
+      "fixed_dispatch_check": {
+        "all_feasible": true,
+        "full_objective": 885066.7044303413,
+        "recomputed_objective": 885066.7044308289,
+        "difference": 4.876637831330299e-07,
+        "tolerance": 0.08950667044303412,
+        "scenario_statuses": [
+          "OPTIMAL",
+          "OPTIMAL",
+          "OPTIMAL"
+        ],
+        "result_sha256": "90bf87597b701f8793adc455c70c4b6e31feaf3e905203bc66d0dd7eb52f7dac"
+      },
+      "relative_reference_cost_difference": 0.327027725022184,
+      "certified_relative_error_bound": 0.32715945595837254,
+      "sa_reliable_lower": 825016.4960638006
+    }
+  },
+  "protocol": {
+    "sa": {
+      "max_iterations": 3,
+      "penalty": 1000000.0,
+      "theta_step": 1.0,
+      "reserve_scale": 100.0,
+      "repair_candidates": true,
+      "decommit_candidates": false,
+      "decommit_ladder_size": 8,
+      "quantum_candidates": true,
+      "quantum": {
+        "backend": "kaiwu-local",
+        "kaiwu_seed": 7,
+        "candidate_pool_size": 16,
+        "initial_temperature": 100.0,
+        "alpha": 0.98,
+        "cutoff_temperature": 0.01,
+        "iterations_per_temperature": 5
+      },
+      "llm": {
+        "enabled": false,
+        "max_candidates": 4,
+        "timeout_seconds": 180.0,
+        "temperature": 0.2,
+        "max_tokens": 65536,
+        "reasoning_effort": "max",
+        "max_retries": 3,
+        "retry_backoff_seconds": 30.0,
+        "api_format": "chat_completions",
+        "base_url": null,
+        "model": null,
+        "collect_diagnostics": false
+      },
+      "subproblem_output_flag": 0,
+      "max_candidate_evaluations": null,
+      "collect_diagnostics": true,
+      "random_candidates": false,
+      "random_seed": 7,
+      "random_candidate_pool_size": 16,
+      "master_encoding": "dynamic",
+      "decomposition": "none",
+      "block_hours": 2,
+      "block_inner_iterations": 3,
+      "time_limit_seconds": 600.0,
+      "run_to_deadline": false,
+      "stop_on_no_new_candidates": false,
+      "event_sink": null
+    },
+    "reference": {
+      "time_limit": 600.0,
+      "mip_gap": 0.0001,
+      "output_flag": 1
+    },
+    "reference_threads": 1,
+    "reference_seed": 7,
+    "order": [
+      "deterministic/sa",
+      "stochastic/sa",
+      "deterministic/reference",
+      "stochastic/reference"
+    ]
+  }
+}

@@ -1,4 +1,49 @@
-# SUC + Benders (10×24)
+# SUC + Benders: public and historical benchmarks
+
+## IEEE RTS-24 derived benchmark
+
+The new [public-input benchmark](data/rts24/README.md) has **32 generators and
+24 hourly periods**, with 3405 MW installed capacity and 2850 MW peak demand.
+It combines pinned MATPOWER costs and capacities with published RTS-79 UC
+time constraints, initial output and hourly loads. Every field has provenance,
+an offline converter and source checksums. It is a **copperplate, fixed-startup-cost
+derivative**, not a reproduction of the IEEE network or the UC+ACOPF formulation.
+Hydro units have no water/energy budgets; network and hot/cold startup costs are
+outside this benchmark's scope.
+
+The [v0.16.0 baseline archive](experiments/rts24-baseline-20261002/README.md)
+passed all 153 regression tests and both profile audits. Three SA rounds left
+feasible costs 46.89% (deterministic) and 32.70% (stochastic) above the independent
+Gurobi references. These are smoke-test results, not evidence of algorithmic
+superiority. Full schedules, bounds, logs and checksums are preserved.
+
+The deterministic profile uses the published load and zero reserve. The SUC
+profile uses project-defined 0.90/1.00/1.05 load multipliers, probabilities
+0.25/0.50/0.25, and 5% reserve; these are not original IEEE scenarios.
+Historical commands and archived 10x24 results retain their existing defaults.
+
+```powershell
+python data/rts24/convert.py --check
+python -m suc_benders.rts24_experiment --output-dir results/rts24-new-validation
+```
+
+The one-shot validation runner requires a clean committed checkout and a new
+output directory. It runs both SA profiles first (seed 7, dynamic full horizon,
+pool 16, at most 3 rounds/600 seconds each), then independent Gurobi references
+(one thread, seed 7, 600-second solve limit, MIP gap 1e-4). It never calls an LLM,
+QPU, independent decommitment search or random candidate generator, and never
+automatically reruns a completed or failed output directory.
+
+For individual runs, use the existing interfaces with explicit inputs:
+
+```powershell
+python -m suc_benders --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --master-encoding dynamic --no-decommit --max-iterations 3 --time-limit-seconds 600 --output results/rts24-sa.json
+python -m suc_benders.full --data data/rts24/units.json --scenario-file data/rts24/deterministic.json --time-limit 600 --mip-gap 0.0001
+```
+
+Use the validation runner for the exact single-thread reference protocol and
+hard SA deadline. Optional JSON `initial_output` preserves published initial
+dispatch; omitting it retains the historical initial-at-Pmin behavior.
 
 ## Current research: LLM / SA efficiency
 
@@ -90,7 +135,7 @@ the lower-bound gap, feasible-cost difference, same-price sampling error and
 uncertified/incomplete results. Box-dual convergence is not a certificate of
 global SUC optimality.
 
-Current release: [v0.15.0](CHANGELOG.md).
+Current release: [v0.16.0](CHANGELOG.md).
 
 The completed exact-block control, findings and checksummed raw records are
 published under [experiments/exact-block-control-20261001](experiments/exact-block-control-20261001/README.md).

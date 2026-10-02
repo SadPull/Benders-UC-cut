@@ -1,0 +1,93 @@
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+Set parameter Threads to value 1
+Set parameter Seed to value 7
+Set parameter OutputFlag to value 1
+Set parameter MIPGap to value 0.0001
+Set parameter TimeLimit to value 600
+Gurobi Optimizer version 13.0.1 build v13.0.1rc0 (win64 - Windows 11.0 (22623.2))
+
+CPU model: AMD Ryzen 5 5600 6-Core Processor, instruction set [SSE2|AVX|AVX2]
+Thread count: 6 physical cores, 12 logical processors, using up to 1 threads
+
+Non-default parameters:
+TimeLimit  600
+Seed  7
+Threads  1
+
+Optimize a model with 19656 rows, 6912 columns and 50084 nonzeros (Min)
+Model fingerprint: 0x53ed4602
+Model has 3840 linear objective coefficients
+Model has 1584 quadratic objective terms
+Variable types: 4608 continuous, 2304 integer (2304 binary)
+Coefficient statistics:
+  Matrix range     [1e+00, 4e+02]
+  Objective range  [3e-04, 2e+03]
+  QObjective range [1e-04, 3e-01]
+  Bounds range     [1e+00, 1e+00]
+  RHS range        [1e+00, 3e+03]
+
+Presolve removed 11561 rows and 1258 columns
+Presolve time: 0.22s
+Presolved: 8095 rows, 5654 columns, 28948 nonzeros
+Presolved model has 1584 quadratic objective terms
+Variable types: 3888 continuous, 1766 integer (1766 binary)
+
+Root relaxation: objective 8.701655e+05, 15261 iterations, 0.34 seconds (0.35 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0 870165.470    0  180          - 870165.470      -     -    0s
+     0     0 870663.135    0  239          - 870663.135      -     -    0s
+H    0     0                    933522.21537 870713.466  6.73%     -    0s
+     0     0 870713.466    0  230 933522.215 870713.466  6.73%     -    0s
+     0     0 870713.466    0  230 933522.215 870713.466  6.73%     -    0s
+     0     0 870713.466    0  230 933522.215 870713.466  6.73%     -    1s
+     0     0 870713.466    0  280 933522.215 870713.466  6.73%     -    1s
+     0     0 870713.466    0  280 933522.215 870713.466  6.73%     -    1s
+     0     2 870713.466    0  280 933522.215 870713.466  6.73%     -    1s
+H    4     4                    897685.25513 870972.918  2.98%   158    1s
+H   35    33                    897454.69671 872897.510  2.74%   166    2s
+H  105    87                    891229.93448 872909.937  2.06%   104    3s
+*  183   138              44    890863.69657 872989.298  2.01%  79.4    4s
+*  184   129              42    889363.69657 872989.298  1.84%  79.1    4s
+   246   179 883502.702   22   97 889363.697 873253.585  1.81%  76.7    5s
+*  262   146              36    886102.20460 873253.585  1.45%  72.8    5s
+H  397   206                    885781.57215 874084.003  1.32%  63.5    6s
+H  515   269                    885515.20825 874341.008  1.26%  59.7    7s
+   676   348 879429.278    9  112 885515.208 875762.859  1.10%  59.7   10s
+H  785   360                    885423.26522 875762.859  1.09%  84.4   15s
+  1053   397 883782.867   25   96 885423.265 875762.859  1.09%  83.9   20s
+  1441   361 882516.048   19   94 885423.265 875762.859  1.09%  78.7   25s
+  1909   392 877105.447   19   65 885423.265 877104.318  0.94%  72.9   30s
+H 1975   382                    885066.70443 877221.196  0.89%  72.2   30s
+  2371   444     cutoff   19      885066.704 878385.592  0.75%  68.4   35s
+  2857   532 infeasible   22      885066.704 879235.161  0.66%  64.2   40s
+  3334   584     cutoff   33      885066.704 879818.099  0.59%  60.8   45s
+  3890   622     cutoff   31      885066.704 880510.656  0.51%  57.0   50s
+  4348   669 883024.258   26   62 885066.704 881019.183  0.46%  54.8   55s
+  4944   684 884370.379   25   75 885066.704 881634.652  0.39%  52.2   60s
+  5603   721 884741.966   35   31 885066.704 882183.159  0.33%  49.4   65s
+  6225   682     cutoff   25      885066.704 882632.489  0.28%  47.2   70s
+  6786   652 884838.229   29   57 885066.704 882986.874  0.23%  45.4   75s
+  7454   606 infeasible   37      885066.704 883448.436  0.18%  43.4   80s
+  8057   580 infeasible   28      885066.704 883781.929  0.15%  41.4   85s
+  8705   413     cutoff   37      885066.704 884217.506  0.10%  39.8   90s
+  9413   181 884986.156   32   17 885066.704 884741.966  0.04%  37.9   95s
+
+Cutting planes:
+  Learned: 14
+  Implied bound: 4
+  MIR: 20
+  Flow cover: 3
+  RLT: 4
+
+Explored 9581 nodes (373722 simplex iterations) in 96.19 seconds (79.79 work units)
+Thread count was 1 (of 12 available processors)
+
+Solution count 10: 885067 885423 885515 ... 897685
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 8.850667044303e+05, best bound 8.849788546508e+05, gap 0.0099%

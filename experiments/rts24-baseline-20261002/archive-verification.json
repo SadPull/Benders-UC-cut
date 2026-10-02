@@ -1,0 +1,8 @@
+{
+  "archived_runs_byte_identical": true,
+  "existing_output_refused_without_changes": true,
+  "secret_exclusion_passed": true,
+  "regression_tests": 153,
+  "regression_passed": true,
+  "baseline_acceptance_passed": true
+}
