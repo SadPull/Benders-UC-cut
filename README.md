@@ -2,6 +2,14 @@
 
 ## Astra advisor module
 
+The [RTS-24 three-call burst experiment](experiments/rts24-sa-llm-burst-20261002/report.md)
+reached the strict 0.5% reference target after **5 SA calls and 2 Astra calls**.
+Its best validated cost is **889097.785912**, **0.455455%** above the independent
+reference. Three consecutive insufficient SA rounds triggered the first burst;
+the first validated candidate in call 2 stopped the run before call 3.
+Use `--strategy stagnation_burst --target-reference-gap 0.005` with the RTS-24
+inputs. Each LLM call sees the latest validated best and preceding feedback.
+
 The [v0.17.0 reference-comparison study](experiments/astra-target-20261002/README.md)
 completed 16 SA/Astra rounds before the user requested a stop. Its best validated
 cost is **572242.837016**, **0.215193%** above the Gurobi reference; the original

@@ -1,0 +1,840 @@
+{
+  "reference": {
+    "feasible_solution": true,
+    "trace_valid": true,
+    "max_residual_mw": 1.3642420526593924e-12,
+    "scenario_residuals": {
+      "low": {
+        "balance": 1.3642420526593924e-12,
+        "reserve": 0.0,
+        "pmin": 0.0,
+        "startup_capacity": 0.0,
+        "shutdown_capacity": 0.0,
+        "ramp_up": 0.0,
+        "ramp_down": 0.0,
+        "nonnegative": 0.0
+      },
+      "base": {
+        "balance": 1.3642420526593924e-12,
+        "reserve": 0.0,
+        "pmin": 0.0,
+        "startup_capacity": 0.0,
+        "shutdown_capacity": 0.0,
+        "ramp_up": 0.0,
+        "ramp_down": 0.0,
+        "nonnegative": 0.0
+      },
+      "high": {
+        "balance": 1.3642420526593924e-12,
+        "reserve": 0.0,
+        "pmin": 0.0,
+        "startup_capacity": 0.0,
+        "shutdown_capacity": 0.0,
+        "ramp_up": 0.0,
+        "ramp_down": 0.0,
+        "nonnegative": 0.0
+      }
+    },
+    "cost_residual": 1.1641532182693481e-09
+  },
+  "best": {
+    "feasible_solution": true,
+    "trace_valid": true,
+    "max_residual_mw": 1.3642420526593924e-12,
+    "scenario_residuals": {
+      "low": {
+        "balance": 9.094947017729282e-13,
+        "reserve": 0.0,
+        "pmin": 0.0,
+        "startup_capacity": 0.0,
+        "shutdown_capacity": 0.0,
+        "ramp_up": 0.0,
+        "ramp_down": 0.0,
+        "nonnegative": 0.0
+      },
+      "base": {
+        "balance": 1.3642420526593924e-12,
+        "reserve": 0.0,
+        "pmin": 0.0,
+        "startup_capacity": 0.0,
+        "shutdown_capacity": 0.0,
+        "ramp_up": 0.0,
+        "ramp_down": 0.0,
+        "nonnegative": 0.0
+      },
+      "high": {
+        "balance": 4.547473508864641e-13,
+        "reserve": 0.0,
+        "pmin": 0.0,
+        "startup_capacity": 0.0,
+        "shutdown_capacity": 0.0,
+        "ramp_up": 0.0,
+        "ramp_down": 0.0,
+        "nonnegative": 0.0
+      }
+    },
+    "cost_residual": 6.984919309616089e-10
+  },
+  "candidates": [
+    {
+      "iteration": 0,
+      "evaluation_count": 1,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 6.821210263296962e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 6.821210263296962e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 3.259629011154175e-09
+    },
+    {
+      "iteration": 1,
+      "evaluation_count": 2,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 4.547473508864641e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.7939677238464355e-09
+    },
+    {
+      "iteration": 1,
+      "evaluation_count": 3,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 4.547473508864641e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.7939677238464355e-09
+    },
+    {
+      "iteration": 1,
+      "evaluation_count": 4,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.7939677238464355e-09
+    },
+    {
+      "iteration": 2,
+      "evaluation_count": 5,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 3.026798367500305e-09
+    },
+    {
+      "iteration": 2,
+      "evaluation_count": 6,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 4.547473508864641e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 3.259629011154175e-09
+    },
+    {
+      "iteration": 2,
+      "evaluation_count": 7,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 3.026798367500305e-09
+    },
+    {
+      "iteration": 2,
+      "evaluation_count": 8,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.7939677238464355e-09
+    },
+    {
+      "iteration": 3,
+      "evaluation_count": 9,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.3283064365386963e-09
+    },
+    {
+      "iteration": 3,
+      "evaluation_count": 10,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 6.821210263296962e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.561137080192566e-09
+    },
+    {
+      "iteration": 4,
+      "evaluation_count": 11,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.7939677238464355e-09
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 12,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.7939677238464355e-09
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 13,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 4.547473508864641e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.7939677238464355e-09
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 14,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 2.0954757928848267e-09
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 15,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 4.547473508864641e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 6.984919309616089e-10
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 16,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 1.1641532182693481e-09
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 17,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 18,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    {
+      "iteration": 5,
+      "evaluation_count": 19,
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 4.547473508864641e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 6.984919309616089e-10
+    }
+  ]
+}

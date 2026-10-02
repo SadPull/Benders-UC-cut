@@ -7,6 +7,10 @@
   LLM calls, then reset stagnation and return to SA. Preserve existing strategies.
 - Check the strict reference target after complete physical/cost validation,
   including calls without an event sink; stop within an unfinished LLM batch.
+- Pass 173 regression tests and archive the RTS-24 three-scenario seed-7 run:
+  5 SA calls and 2 Astra calls reach cost 889097.785912, 0.455455% above the
+  independent reference. Stop after the first validated candidate in call 2;
+  preserve the three unvalidated proposals without treating them as infeasible.
 
 ## v0.17.0 - 2026-10-02
 
