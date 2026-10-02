@@ -25,7 +25,7 @@ class LLMConfig:
     enabled: bool = False
     max_candidates: int = 4
     timeout_seconds: float | None = 180.0
-    temperature: float = 0.2
+    temperature: float | None = 0.2
     # Reasoning models (e.g. deepseek-reasoner) spend part of this budget on
     # hidden reasoning tokens before emitting any text, so the default is sized
     # for those models rather than for a plain chat completion.
@@ -220,8 +220,7 @@ def ask_llm_for_candidates(
         if config.api_format == "chat_completions":
             endpoint = base_url + "/chat/completions"
             payload = {
-                "model": model, "max_tokens": int(config.max_tokens),
-                "temperature": float(config.temperature), "stream": False,
+                "model": model, "stream": False,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
@@ -234,7 +233,7 @@ def ask_llm_for_candidates(
             endpoint = base_url + "/responses"
             payload = {
                 "model": model,
-                "temperature": float(config.temperature), "stream": False, "store": False,
+                "stream": False, "store": False,
                 "input": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
@@ -248,11 +247,14 @@ def ask_llm_for_candidates(
         else:
             endpoint = base_url + "/messages"
             payload = {
-                "model": model, "max_tokens": int(config.max_tokens),
-                "temperature": float(config.temperature), "system": system,
+                "model": model, "system": system,
                 "messages": [{"role": "user", "content": user}],
             }
             headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+        if config.max_tokens is not None and config.api_format != "responses":
+            payload["max_tokens"] = int(config.max_tokens)
+        if config.temperature is not None:
+            payload["temperature"] = float(config.temperature)
         headers.update({"Content-Type": "application/json", "Accept": "application/json"})
         request = Request(
             endpoint, data=json.dumps(payload).encode("utf-8"),

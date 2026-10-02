@@ -1,7 +1,8 @@
-"""Run from Codex, which services calls/ requests using fresh Astra subagents."""
+"""Run with fresh Codex Astra subagents or an explicit Chat Completions endpoint."""
 from dataclasses import asdict
 import argparse
 import json
+import os
 from pathlib import Path
 import time
 
@@ -22,10 +23,16 @@ def main():
     parser.add_argument("--time-limit-seconds", type=float)
     parser.add_argument("--max-llm-calls", type=int)
     parser.add_argument("--original-feedback", action="store_true")
+    parser.add_argument("--http-base-url", help="Use Chat Completions; requires --http-model and LLM_API_KEY")
+    parser.add_argument("--http-model")
     parser.add_argument("--strategy", choices=("sa", "fixed", "stagnation", "stagnation_burst", "llm"), default="fixed")
     parser.add_argument("--target-reference-gap", type=float,
                         help="Run until strictly below this relative Gurobi reference difference; ignores rounds")
     args = parser.parse_args()
+    if bool(args.http_base_url) != bool(args.http_model):
+        parser.error("HTTP base URL and model must be supplied together")
+    if args.http_base_url and not os.getenv("LLM_API_KEY", "").strip():
+        parser.error("HTTP runs require LLM_API_KEY in the environment")
     if args.rounds < 1 or (args.time_limit_seconds is not None and args.time_limit_seconds <= 0):
         parser.error("rounds and time limit must be positive")
     if args.max_llm_calls is not None and args.max_llm_calls < 0:
@@ -39,6 +46,10 @@ def main():
                     max_retries=1, collect_diagnostics=True, exchange_dir=str(root),
                     enhanced_feedback=not args.original_feedback, max_calls=args.max_llm_calls,
                     schedule=args.strategy if args.strategy in {"stagnation", "stagnation_burst"} else "fixed")
+    if args.http_base_url:
+        llm.api_format = "chat_completions"
+        llm.base_url, llm.model = args.http_base_url, args.http_model
+        llm.temperature = None
     config = BendersConfig(max_iterations=args.rounds, master_encoding="dynamic",
         decomposition="none", decommit_candidates=False, random_candidates=False,
         advisor_only=args.strategy == "llm", quantum_candidates=args.strategy != "llm",
@@ -86,9 +97,29 @@ def main():
         print(f"REFERENCE cost={reference['objective']} lower={reference['lower_bound']} target_strictly_below={config.target_cost}", flush=True)
     started = time.perf_counter()
     publish(root / "state.json", dict(status="running"))
+    http_call = None
     with (root / "events.jsonl").open("a", encoding="utf-8", buffering=1) as stream:
         def event(row):
+            nonlocal http_call
             serialized = result_to_dict(row)
+            if args.http_base_url:
+                if row["kind"] == "llm_start":
+                    http_call = root / "calls" / f"{row['call_index']:03d}"
+                    http_call.mkdir(parents=True, exist_ok=False)
+                    publish(http_call / "started.json", serialized)
+                    print(f"HTTP_LLM_START call={row['call_index']} round={row['iteration']}", flush=True)
+                elif row["kind"] == "llm_end":
+                    diagnostics = serialized["diagnostics"]
+                    publish(http_call / "diagnostics.json", diagnostics)
+                    if "request" in diagnostics:
+                        publish(http_call / "request.json", diagnostics["request"])
+                        for message in diagnostics["request"]["messages"]:
+                            name = "system.txt" if message["role"] == "system" else "user.txt"
+                            (http_call / name).write_bytes(message["content"].encode("utf-8"))
+                    if "response" in diagnostics:
+                        publish(http_call / "response.json", diagnostics["response"])
+                elif row["kind"] == "llm_feedback":
+                    publish(http_call / "feedback.json", serialized["feedback"])
             if reference is not None and row["kind"] == "evaluation" and row["feasible"]:
                 serialized["reference_difference"] = row["objective"] / reference["objective"] - 1
                 print(f"EVALUATED round={row['iteration']} cost={row['objective']:.6f} reference_difference={100*serialized['reference_difference']:.6f}%", flush=True)

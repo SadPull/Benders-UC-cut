@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Allow the same burst/target runner to use an explicit Chat Completions model
+  with an environment-only API key, optional token/temperature overrides, and
+  saved per-call requests, responses, usage, repair diagnostics and feedback.
+
 - Add `stagnation_burst`: start with SA, switch after three consecutive rounds
   below 0.05% improvement, validate and refresh context between three sequential
   LLM calls, then reset stagnation and return to SA. Preserve existing strategies.

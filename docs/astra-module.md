@@ -31,6 +31,14 @@ python -u -m suc_benders.astra_run --data data/suc_10x24.json --seed 7 --rounds 
 python -u -m suc_benders.astra_run --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --seed 7 --strategy stagnation_burst --target-reference-gap 0.005 --output-dir results/rts24-sa-llm-burst-new
 ```
 
+同协议 HTTP 模型对照可同时传入 `--http-base-url` 和 `--http-model`，密钥仅从进程环境 `LLM_API_KEY` 读取。下例使用 DeepSeek 官方 Chat Completions 接口；不设置温度和输出 token 上限，使用 `reasoning_effort=max`，每次仅一次 HTTP 请求，无重试。模型列表和参数兼容性应先以独立试请求核对，试请求不能计作正式优化调用。
+
+```powershell
+python -u -m suc_benders.astra_run --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --seed 7 --strategy stagnation_burst --target-reference-gap 0.005 --http-base-url https://api.deepseek.com --http-model deepseek-flash --output-dir results/rts24-deepseek-new
+```
+
+HTTP 调用自动运行；每次的提示词、无认证头请求体、响应、模型/用量、解析修复诊断和验证反馈保存在 `calls/`。配置、提示词和求解/停止规则沿用原实验。不同服务的默认生成参数和传输/调度开销仍可能不同；总耗时不能直接当作纯模型推理速度对比。
+
 任意候选完成全部场景调度及物理/成本验证后，参考差严格小于 0.5% 立即停止；等于 0.5% 继续。无需完成该候选后的候选或本组三次调用。目标模式不设 SA 轮数、总时间或调用次数上限；参考求解仍有独立的 600 秒时限。
 
 无 SA 模式复用同一连续评估流程，不构建或采样 QUBO，独立入口为上述 `--strategy llm`。该模式不报告认证下界。轮数不是跨策略的等价资源预算；正式比较应另行冻结端到端预算。
