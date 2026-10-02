@@ -1,0 +1,10 @@
+{
+  "reference_cost": 571014.0518956743,
+  "reference_lower_bound": 571014.051080178,
+  "objective": 572242.8370161591,
+  "reference_difference": 0.0021519349942533683,
+  "requested_difference": 0.001,
+  "target_reached": false,
+  "reference_runtime": 9.93809500000134,
+  "solver_runtime": 5323.8461178
+}

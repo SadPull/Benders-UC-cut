@@ -8,7 +8,9 @@ from itertools import count
 
 import numpy as np
 
-from .candidates import repair_commitment, commitment_key, make_candidate
+from .candidates import repair_commitment, commitment_key, make_candidate, commitment_hash
+from .advisor_feedback import summarize, call_due
+from .subagent import cancelled, publish
 from .context import LLMContextInput, CandidateEvaluation, build_llm_context
 from .llm import ask_llm_for_candidates
 from .common import require_gurobi
@@ -39,7 +41,7 @@ def coordinate(uc, planes, deadline):
 def solve_paper(data, scenarios, config):
     from .solver import BendersResult, IterationRecord, ScenarioSolution, _construct_feasible_candidate, _fixed_cost
 
-    if (config.llm.enabled and (config.decomposition == "temporal" or config.master_encoding != "dynamic")) or config.decommit_candidates or config.random_candidates or not config.quantum_candidates:
+    if (config.llm.enabled and (config.decomposition == "temporal" or config.master_encoding != "dynamic")) or config.decommit_candidates or config.random_candidates or (not config.quantum_candidates and not config.advisor_only):
         raise ValueError("paper modes require SA, with LLM/decommit/random disabled")
     if not config.repair_candidates:
         raise ValueError("paper modes require the configured full-horizon repair")
@@ -76,8 +78,13 @@ def solve_paper(data, scenarios, config):
     best_results = []
     context_evaluations = []
 
+    previous_feedback = None
+    llm_calls = stalled = 0
+    if config.llm.schedule not in {"fixed", "stagnation"} or (config.llm.max_calls is not None and config.llm.max_calls < 0):
+        raise ValueError("invalid LLM schedule or call limit")
+
     def available():
-        return time.perf_counter() < deadline and (config.max_candidate_evaluations is None or len(evaluated) < config.max_candidate_evaluations)
+        return not (config.target_cost is not None and incumbent < config.target_cost) and not cancelled(config.llm) and time.perf_counter() < deadline and (config.max_candidate_evaluations is None or len(evaluated) < config.max_candidate_evaluations)
 
     def evaluate(candidate, outer):
         nonlocal incumbent, best, best_solutions, best_results
@@ -122,7 +129,7 @@ def solve_paper(data, scenarios, config):
             "elapsed_seconds": time.perf_counter()-started, "cache_hit": False, "source": candidate.source,
             "feasible": feasible, "objective": objective, "incumbent_before": before, "incumbent": incumbent,
             "improved": incumbent < before, "fixed_cost": fixed, "expected_fuel_cost": fuel,
-            "commitment_id": str(signature), "u": candidate.u, "v": candidate.v, "w": candidate.w,
+            "commitment_hash": commitment_hash(candidate), "commitment_id": str(signature), "u": candidate.u, "v": candidate.v, "w": candidate.w,
             "subproblem_seconds": elapsed, "sa_calls": sa_calls})
         emit("evaluation", **{k:v for k,v in diagnostics["evaluations"][-1].items() if k != "elapsed_seconds"},
              scenarios=solutions)
@@ -131,9 +138,14 @@ def solve_paper(data, scenarios, config):
     seed = _construct_feasible_candidate(data, scenarios)
     evaluate(seed, 0)
     status = "MAX_ITERATIONS"
-    for outer in (count(1) if config.run_to_deadline else range(1, config.max_iterations+1)):
+    for outer in (count(1) if config.run_to_deadline or config.target_cost is not None else range(1, config.max_iterations+1)):
         if not available():
             break
+        if config.advisor_only and config.llm.max_calls is not None and llm_calls >= config.llm.max_calls:
+            status = "LLM_CALL_LIMIT"
+            break
+        sa_before = incumbent
+        round_advice = None
         costs, lag_constant = uc.coefficients(multipliers)
         current = best if best is not None else seed
         if current is None:
@@ -187,7 +199,7 @@ def solve_paper(data, scenarios, config):
             local_evaluate({k: seed_point[k] for k in block.bkeys}, 0, "incumbent_projection")
             for point in previous_points[b]:
                 local_evaluate(point, 0, "previous_sa")
-            for inner in range(1, (config.block_inner_iterations if temporal else 1)+1):
+            for inner in range(1, (0 if config.advisor_only else config.block_inner_iterations if temporal else 1)+1):
                 if not available():
                     break
                 lp_value = None
@@ -256,10 +268,12 @@ def solve_paper(data, scenarios, config):
                 base_for_llm = []
                 for entry in sorted(pool, key=lambda r: r["cost"])[:config.quantum.candidate_pool_size]:
                     u = np.array([[entry["point"][key("u", i, t)] for t in range(data.horizon)] for i in range(data.n_units)])
-                    candidate = make_candidate(data, scenarios, u, source="sa")
+                    candidate = make_candidate(data, scenarios, u, source="pool" if config.advisor_only else "sa")
                     evaluate(candidate, outer)
                     base_for_llm.append(candidate)
-                if available():
+                due, stalled = call_due(config.llm.schedule, sa_before, incumbent, stalled, llm_calls)
+                within_calls = config.llm.max_calls is None or llm_calls < config.llm.max_calls
+                if available() and within_calls and (config.advisor_only or due):
                     phase = time.perf_counter()
                     context = build_llm_context(data, scenarios, LLMContextInput(
                         incumbent=best, incumbent_results=best_results, base_evaluations=context_evaluations[-16:],
@@ -267,9 +281,17 @@ def solve_paper(data, scenarios, config):
                         cuts=[], history=history))
                     context.pop("decommit_ladder", None)
                     context["block_cut_count"] = len(cuts)
+                    if config.llm.enhanced_feedback:
+                        context["previous_call_feedback"] = previous_feedback
+                    baseline_u = best.u.copy() if best is not None else None
+                    baseline_row = next((r for r in reversed(diagnostics["evaluations"]) if best is not None and r["commitment_hash"] == commitment_hash(best)), None)
+                    baseline_cost = dict(total=baseline_row["objective"], fixed=baseline_row["fixed_cost"], expected_fuel=baseline_row["expected_fuel_cost"]) if baseline_row else None
+                    prior_ids = {r["commitment_hash"] for r in diagnostics["evaluations"]}
                     timings["context"] += time.perf_counter()-phase
                     phase = time.perf_counter()
                     emit("llm_start", iteration=outer)
+                    llm_calls += 1
+                    stalled = 0
                     timeout = config.llm.timeout_seconds
                     if math.isfinite(deadline):
                         remaining = max(.001, deadline-time.perf_counter())
@@ -277,6 +299,7 @@ def solve_paper(data, scenarios, config):
                     advice = ask_llm_for_candidates(data, scenarios, outer, base_for_llm, best,
                         replace(config.llm, timeout_seconds=timeout,
                                 max_retries=1, collect_diagnostics=True), context=context)
+                    round_advice = advice
                     timings["llm"] += time.perf_counter()-phase-advice.diagnostics.get("repair_seconds", 0.)
                     timings["repair"] += advice.diagnostics.get("repair_seconds", 0.)
                     diagnostics["llm_calls"].append(advice.diagnostics)
@@ -287,7 +310,19 @@ def solve_paper(data, scenarios, config):
                         x = {key(kind, i, t):int(getattr(candidate, kind)[i,t]) for kind in ("u","v","w")
                              for i in range(data.n_units) for t in range(data.horizon)}
                         local_evaluate(x, 1, "llm")
+                        local_result = cache.get(tuple(x[k] for k in block.bkeys))
+                        for proposal in advice.diagnostics.get("proposals", []):
+                            if proposal.get("commitment_id") == commitment_hash(candidate):
+                                proposal["local_dispatch_completed"] = local_result is not None
+                                proposal["local_feasible"] = local_result["feasible"] if local_result else None
                         evaluate(candidate, outer)
+                    previous_feedback = summarize(advice, baseline_u, baseline_cost, diagnostics["evaluations"], prior_ids)
+                    advice.diagnostics["feedback"] = previous_feedback
+                    emit("llm_feedback", feedback=previous_feedback)
+                    if config.llm.api_format == "codex_subagent":
+                        from pathlib import Path
+                        call_dir = Path(config.llm.exchange_dir) / "calls" / f"{outer:03d}"
+                        publish(call_dir / "feedback.json", previous_feedback)
             if not pool:
                 break
             pool.sort(key=lambda r: r["cost"])
@@ -337,28 +372,39 @@ def solve_paper(data, scenarios, config):
             timings["coordination"] += time.perf_counter()-phase
             if update is not None:
                 multipliers, model_upper = update
-        diagnostics["outer"].append({"outer": outer, "reliable_lower": reliable_lower,
+        reported_lower = None if config.advisor_only else reliable_lower
+        diagnostics["outer"].append({"outer": outer, "reliable_lower": reported_lower,
             "sampled_lagrangian_value": identity, "coordination_model_upper": model_upper,
             "normalized_residuals": residual, "prices": old_prices,
             "multiplier_boundary_fraction": float(np.mean(np.abs(multipliers) >= 10-1e-7)) if len(multipliers) else 0.,
             "elapsed_seconds": time.perf_counter()-started})
         history.append(IterationRecord(outer, sum(len(p) for p in pools), 0, len(evaluated)-before_count,
-            len(evaluated)-before_count, 0, optimality_count-before_opt, feasibility_count-before_feas, incumbent))
-        emit("iteration", iteration=outer, incumbent=incumbent, reliable_lower=reliable_lower, timings=dict(timings))
+            len(evaluated)-before_count, 0, optimality_count-before_opt, feasibility_count-before_feas, incumbent,
+            llm_candidates=round_advice.raw_count if round_advice else 0,
+            llm_valid_candidates=round_advice.valid_count if round_advice else 0,
+            llm_failed=round_advice.failed if round_advice else False))
+        emit("iteration", iteration=outer, incumbent=incumbent, reliable_lower=reported_lower, timings=dict(timings))
         if not temporal and len(evaluated) == before_count and not config.run_to_deadline and config.stop_on_no_new_candidates:
             status = "NO_NEW_CANDIDATES"
             break
-    if time.perf_counter() >= deadline:
+    if config.target_cost is not None and incumbent < config.target_cost:
+        status = "TARGET_REACHED"
+    elif cancelled(config.llm):
+        status = "CANCELLED"
+    elif time.perf_counter() >= deadline:
         status = "TIME_LIMIT"
     elif config.max_candidate_evaluations is not None and len(evaluated) >= config.max_candidate_evaluations:
         status = "EVALUATION_LIMIT"
     if best is None:
-        status = "NO_FEASIBLE_SOLUTION" if status != "TIME_LIMIT" else status
+        status = "NO_FEASIBLE_SOLUTION" if status not in {"TIME_LIMIT", "CANCELLED"} else status
     runtime = time.perf_counter()-started
     diagnostics.update(evaluation_count=len(evaluated), local_evaluation_count=total_local,
                        elapsed_seconds=runtime, time_limit_overshoot=max(0., time.perf_counter()-deadline),
                        reliable_lower=reliable_lower, block_count=len(blocks), coupling_count=len(uc.coupling))
     diagnostics["sa_calls"] = sa_calls
+    diagnostics["llm_call_count"] = llm_calls
+    if config.advisor_only:
+        diagnostics["reliable_lower"] = None
     timings["other"] = max(0., runtime-sum(timings.values()))
     empty = np.empty((0, 0), dtype=int)
     return BendersResult(status, incumbent, best.u if best else empty, best.v if best else empty,

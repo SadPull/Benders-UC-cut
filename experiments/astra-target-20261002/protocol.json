@@ -1,0 +1,24 @@
+{
+  "objective": "Continue SA + fresh Astra/max calls until verified feasible cost is strictly less than reference * 1.001",
+  "case": "10 units, 24 hours, low/base/high scenarios",
+  "seed": 7,
+  "strategy": "fixed",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "fresh_agent_per_call": true,
+  "serial": true,
+  "target_relative_difference": 0.001,
+  "target_cost": 571585.0659475699,
+  "reference_cost": 571014.0518956743,
+  "reference_lower_bound": 571014.051080178,
+  "hybrid_round_limit": null,
+  "hybrid_time_limit": null,
+  "reference_hidden_from_advisors": true,
+  "reference_recomputed_this_run": true,
+  "additional_control": "results/astra-target-sa-control-20261002-v2: pure SA 50 rounds, Gurobi global Threads=1, Seed=7; compare equal SA-call prefix",
+  "formal_multiseed_claim": false,
+  "excluded_attempts": [
+    "results/astra-target-01pct-20261002: failed raw reference validation before any LLM call",
+    "results/astra-target-sa-control-20261002: stopped and replaced to match Gurobi global Seed"
+  ]
+}

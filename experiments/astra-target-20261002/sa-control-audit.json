@@ -1,0 +1,311 @@
+{
+  "source_data_sa_parameters_match": true,
+  "validated_schedules": 38,
+  "max_physical_residual_mw": 6.821210263296962e-13,
+  "max_cost_residual": 1.280568540096283e-09,
+  "sa_calls": 50,
+  "llm_calls": 0,
+  "reference_difference": 0.07265695903006075,
+  "prefixes": [
+    {
+      "sa_calls": 1,
+      "objective": 620544.4744084139,
+      "reference_difference": 0.08674116223288464,
+      "elapsed_seconds": 6.10710889999973
+    },
+    {
+      "sa_calls": 2,
+      "objective": 620544.4744084139,
+      "reference_difference": 0.08674116223288464,
+      "elapsed_seconds": 10.296455499999865
+    },
+    {
+      "sa_calls": 3,
+      "objective": 620544.4744084139,
+      "reference_difference": 0.08674116223288464,
+      "elapsed_seconds": 15.211413699998957
+    },
+    {
+      "sa_calls": 4,
+      "objective": 620544.4744084139,
+      "reference_difference": 0.08674116223288464,
+      "elapsed_seconds": 20.172810500000196
+    },
+    {
+      "sa_calls": 5,
+      "objective": 620101.8627889632,
+      "reference_difference": 0.08596602961052424,
+      "elapsed_seconds": 25.54661699999997
+    },
+    {
+      "sa_calls": 6,
+      "objective": 620101.8627889632,
+      "reference_difference": 0.08596602961052424,
+      "elapsed_seconds": 31.41061659999832
+    },
+    {
+      "sa_calls": 7,
+      "objective": 615432.6306919208,
+      "reference_difference": 0.07778894170604733,
+      "elapsed_seconds": 37.827594399997906
+    },
+    {
+      "sa_calls": 8,
+      "objective": 615432.6306919208,
+      "reference_difference": 0.07778894170604733,
+      "elapsed_seconds": 44.67051559999891
+    },
+    {
+      "sa_calls": 9,
+      "objective": 615432.6306919208,
+      "reference_difference": 0.07778894170604733,
+      "elapsed_seconds": 54.00467949999802
+    },
+    {
+      "sa_calls": 10,
+      "objective": 615432.6306919208,
+      "reference_difference": 0.07778894170604733,
+      "elapsed_seconds": 62.230478499997844
+    },
+    {
+      "sa_calls": 11,
+      "objective": 615432.6306919208,
+      "reference_difference": 0.07778894170604733,
+      "elapsed_seconds": 71.21641140000065
+    },
+    {
+      "sa_calls": 12,
+      "objective": 615432.6306919208,
+      "reference_difference": 0.07778894170604733,
+      "elapsed_seconds": 80.58820550000019
+    },
+    {
+      "sa_calls": 13,
+      "objective": 614177.8499045857,
+      "reference_difference": 0.07559148127023252,
+      "elapsed_seconds": 90.24713419999898
+    },
+    {
+      "sa_calls": 14,
+      "objective": 614177.8499045857,
+      "reference_difference": 0.07559148127023252,
+      "elapsed_seconds": 100.52073050000035
+    },
+    {
+      "sa_calls": 15,
+      "objective": 614177.8499045857,
+      "reference_difference": 0.07559148127023252,
+      "elapsed_seconds": 111.70271309999953
+    },
+    {
+      "sa_calls": 16,
+      "objective": 614177.8499045857,
+      "reference_difference": 0.07559148127023252,
+      "elapsed_seconds": 123.5227863
+    },
+    {
+      "sa_calls": 17,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 134.89611069999955
+    },
+    {
+      "sa_calls": 18,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 147.10149760000058
+    },
+    {
+      "sa_calls": 19,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 159.96941700000025
+    },
+    {
+      "sa_calls": 20,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 171.46060529999886
+    },
+    {
+      "sa_calls": 21,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 184.9313030000012
+    },
+    {
+      "sa_calls": 22,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 199.2217672000006
+    },
+    {
+      "sa_calls": 23,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 214.4522255999982
+    },
+    {
+      "sa_calls": 24,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 230.90749739999956
+    },
+    {
+      "sa_calls": 25,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 244.86833230000047
+    },
+    {
+      "sa_calls": 26,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 260.9705341999979
+    },
+    {
+      "sa_calls": 27,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 276.2744375000002
+    },
+    {
+      "sa_calls": 28,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 292.0494242999994
+    },
+    {
+      "sa_calls": 29,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 310.38770769999974
+    },
+    {
+      "sa_calls": 30,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 329.7373704999991
+    },
+    {
+      "sa_calls": 31,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 349.01471599999786
+    },
+    {
+      "sa_calls": 32,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 367.4227862000007
+    },
+    {
+      "sa_calls": 33,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 387.6478301999996
+    },
+    {
+      "sa_calls": 34,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 406.8547768999997
+    },
+    {
+      "sa_calls": 35,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 430.723793000001
+    },
+    {
+      "sa_calls": 36,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 451.37299989999883
+    },
+    {
+      "sa_calls": 37,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 474.81939109999803
+    },
+    {
+      "sa_calls": 38,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 498.07779310000114
+    },
+    {
+      "sa_calls": 39,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 521.5992133
+    },
+    {
+      "sa_calls": 40,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 544.4550945999981
+    },
+    {
+      "sa_calls": 41,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 568.2064847000001
+    },
+    {
+      "sa_calls": 42,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 592.4268714999998
+    },
+    {
+      "sa_calls": 43,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 619.0293794999998
+    },
+    {
+      "sa_calls": 44,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 646.2434205999998
+    },
+    {
+      "sa_calls": 45,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 671.9838806999978
+    },
+    {
+      "sa_calls": 46,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 697.5375090999987
+    },
+    {
+      "sa_calls": 47,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 725.1381411000002
+    },
+    {
+      "sa_calls": 48,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 754.0890748999991
+    },
+    {
+      "sa_calls": 49,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 784.8687409999984
+    },
+    {
+      "sa_calls": 50,
+      "objective": 612502.1964698473,
+      "reference_difference": 0.07265695903006075,
+      "elapsed_seconds": 817.2856451000007
+    }
+  ]
+}

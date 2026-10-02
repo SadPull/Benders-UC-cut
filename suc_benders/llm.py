@@ -37,6 +37,10 @@ class LLMConfig:
     base_url: str | None = None
     model: str | None = None
     collect_diagnostics: bool = False
+    exchange_dir: str | None = None
+    enhanced_feedback: bool = False
+    schedule: str = "fixed"
+    max_calls: int | None = None
 
 
 @dataclass
@@ -158,7 +162,9 @@ def ask_llm_for_candidates(
     context: dict | None = None,
 ) -> LLMAdviceResult:
     started = time.perf_counter()
-    if config.api_format in {"chat_completions", "responses"}:
+    if config.api_format == "codex_subagent":
+        api_key = ""
+    elif config.api_format in {"chat_completions", "responses"}:
         api_key = (os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or "").strip()
     else:
         api_key = (os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("LLM_API_KEY") or "").strip()
@@ -190,9 +196,9 @@ def ask_llm_for_candidates(
             scrub(record) if config.collect_diagnostics else {},
         )
 
-    if not api_key:
+    if not api_key and config.api_format != "codex_subagent":
         return finish(message="LLM_API_KEY is not set")
-    if config.api_format not in {"messages", "chat_completions", "responses"}:
+    if config.api_format not in {"messages", "chat_completions", "responses", "codex_subagent"}:
         return finish(failed=True, message="unsupported api_format")
 
     base_url, model = llm_settings(config)
@@ -204,128 +210,136 @@ def ask_llm_for_candidates(
     except (TypeError, ValueError, OverflowError) as exc:
         return finish(failed=True, message=type(exc).__name__)
 
-    if config.api_format == "chat_completions":
-        endpoint = base_url + "/chat/completions"
-        payload = {
-            "model": model, "max_tokens": int(config.max_tokens),
-            "temperature": float(config.temperature), "stream": False,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
-        headers = {"Authorization": "Bearer " + api_key}
-        if config.reasoning_effort is not None:
-            payload["reasoning_effort"] = config.reasoning_effort
-    elif config.api_format == "responses":
-        endpoint = base_url + "/responses"
-        payload = {
-            "model": model,
-            "temperature": float(config.temperature), "stream": False, "store": False,
-            "input": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
-        if config.max_tokens is not None:
-            payload["max_output_tokens"] = int(config.max_tokens)
-        headers = {"Authorization": "Bearer " + api_key}
-        if config.reasoning_effort is not None:
-            payload["reasoning"] = {"effort": config.reasoning_effort}
+    if config.api_format == "codex_subagent":
+        from .subagent import exchange
+        content, transport = exchange(config, iteration, system, user)
+        record.update(transport)
+        if content is None:
+            return finish(failed=True, message=transport["status"])
     else:
-        endpoint = base_url + "/messages"
-        payload = {
-            "model": model, "max_tokens": int(config.max_tokens),
-            "temperature": float(config.temperature), "system": system,
-            "messages": [{"role": "user", "content": user}],
-        }
-        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    headers.update({"Content-Type": "application/json", "Accept": "application/json"})
-    request = Request(
-        endpoint, data=json.dumps(payload).encode("utf-8"),
-        headers=headers, method="POST",
-    )
-    if config.collect_diagnostics:
-        record.update(endpoint=endpoint, requested_model=model, request=payload)
-    direct_opener = build_opener(ProxyHandler({}))
-    attempts = max(1, int(config.max_retries))
-    raw = None
-    for attempt in range(attempts):
-        LOGGER.info("LLM request iteration=%s attempt=%s model=%s", iteration, attempt + 1, model)
-        attempt_started = time.perf_counter()
-        attempt_record = {"attempt": attempt + 1}
-        record["attempts"].append(attempt_record)
-        try:
-            timeout = None if config.timeout_seconds is None else float(config.timeout_seconds)
-            with direct_opener.open(request, timeout=timeout) as response:
-                attempt_record["status_code"] = getattr(response, "status", 200)
-                raw = json.loads(response.read().decode("utf-8"))
-            attempt_record["elapsed_seconds"] = time.perf_counter() - attempt_started
-            break
-        except HTTPError as exc:
-            attempt_record.update(
-                status_code=exc.code, elapsed_seconds=time.perf_counter() - attempt_started,
-            )
-            if config.collect_diagnostics:
-                try:
-                    attempt_record["error_body"] = exc.read(4096).decode("utf-8", errors="replace")
-                except OSError:
-                    pass
-            if (exc.code == 429 or 500 <= exc.code < 600) and attempt + 1 < attempts:
-                time.sleep(float(config.retry_backoff_seconds) * (attempt + 1))
-                continue
-            return finish(failed=True, message=f"HTTP {exc.code}")
-        except (URLError, TimeoutError, ConnectionError, OSError) as exc:
-            attempt_record.update(
-                error_type=type(exc).__name__,
-                elapsed_seconds=time.perf_counter() - attempt_started,
-            )
-            if attempt + 1 < attempts:
-                time.sleep(float(config.retry_backoff_seconds) * (attempt + 1))
-                continue
-            return finish(failed=True, message=type(exc).__name__)
-        except (KeyError, TypeError, ValueError) as exc:
-            attempt_record.update(
-                error_type=type(exc).__name__,
-                elapsed_seconds=time.perf_counter() - attempt_started,
-            )
-            return finish(failed=True, message="invalid_response_json")
-
-    if config.collect_diagnostics:
-        record["response"] = raw
-    try:
-        if not isinstance(raw, dict):
-            raise ValueError("response root must be an object")
-        record["usage"] = raw.get("usage")
-        record["returned_model"] = raw.get("model")
         if config.api_format == "chat_completions":
-            choice = raw["choices"][0]
-            content = choice["message"].get("content") or ""
-            stop = choice.get("finish_reason")
+            endpoint = base_url + "/chat/completions"
+            payload = {
+                "model": model, "max_tokens": int(config.max_tokens),
+                "temperature": float(config.temperature), "stream": False,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            }
+            headers = {"Authorization": "Bearer " + api_key}
+            if config.reasoning_effort is not None:
+                payload["reasoning_effort"] = config.reasoning_effort
         elif config.api_format == "responses":
-            status = raw.get("status")
-            stop = (raw.get("incomplete_details") or {}).get("reason") or status
-            record.update(response_status=status, stop_reason=stop)
-            if status != "completed":
-                message = "truncated" if stop == "max_output_tokens" else f"response_{status or 'missing_status'}"
-                return finish(failed=True, message=message)
-            content = "".join(
-                block.get("text", "") for item in raw.get("output", [])
-                if isinstance(item, dict) and item.get("type") == "message"
-                for block in item.get("content", [])
-                if isinstance(block, dict) and block.get("type") == "output_text"
-            )
+            endpoint = base_url + "/responses"
+            payload = {
+                "model": model,
+                "temperature": float(config.temperature), "stream": False, "store": False,
+                "input": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            }
+            if config.max_tokens is not None:
+                payload["max_output_tokens"] = int(config.max_tokens)
+            headers = {"Authorization": "Bearer " + api_key}
+            if config.reasoning_effort is not None:
+                payload["reasoning"] = {"effort": config.reasoning_effort}
         else:
-            content = "".join(
-                block.get("text", "") for block in raw.get("content", [])
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
-            stop = raw.get("stop_reason")
-        record["stop_reason"] = stop
-        if stop in {"length", "max_tokens"}:
-            return finish(failed=True, message="truncated")
-        if not isinstance(content, str) or not content.strip():
-            return finish(failed=True, message="empty_content")
+            endpoint = base_url + "/messages"
+            payload = {
+                "model": model, "max_tokens": int(config.max_tokens),
+                "temperature": float(config.temperature), "system": system,
+                "messages": [{"role": "user", "content": user}],
+            }
+            headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+        headers.update({"Content-Type": "application/json", "Accept": "application/json"})
+        request = Request(
+            endpoint, data=json.dumps(payload).encode("utf-8"),
+            headers=headers, method="POST",
+        )
+        if config.collect_diagnostics:
+            record.update(endpoint=endpoint, requested_model=model, request=payload)
+        direct_opener = build_opener(ProxyHandler({}))
+        attempts = max(1, int(config.max_retries))
+        raw = None
+        for attempt in range(attempts):
+            LOGGER.info("LLM request iteration=%s attempt=%s model=%s", iteration, attempt + 1, model)
+            attempt_started = time.perf_counter()
+            attempt_record = {"attempt": attempt + 1}
+            record["attempts"].append(attempt_record)
+            try:
+                timeout = None if config.timeout_seconds is None else float(config.timeout_seconds)
+                with direct_opener.open(request, timeout=timeout) as response:
+                    attempt_record["status_code"] = getattr(response, "status", 200)
+                    raw = json.loads(response.read().decode("utf-8"))
+                attempt_record["elapsed_seconds"] = time.perf_counter() - attempt_started
+                break
+            except HTTPError as exc:
+                attempt_record.update(
+                    status_code=exc.code, elapsed_seconds=time.perf_counter() - attempt_started,
+                )
+                if config.collect_diagnostics:
+                    try:
+                        attempt_record["error_body"] = exc.read(4096).decode("utf-8", errors="replace")
+                    except OSError:
+                        pass
+                if (exc.code == 429 or 500 <= exc.code < 600) and attempt + 1 < attempts:
+                    time.sleep(float(config.retry_backoff_seconds) * (attempt + 1))
+                    continue
+                return finish(failed=True, message=f"HTTP {exc.code}")
+            except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+                attempt_record.update(
+                    error_type=type(exc).__name__,
+                    elapsed_seconds=time.perf_counter() - attempt_started,
+                )
+                if attempt + 1 < attempts:
+                    time.sleep(float(config.retry_backoff_seconds) * (attempt + 1))
+                    continue
+                return finish(failed=True, message=type(exc).__name__)
+            except (KeyError, TypeError, ValueError) as exc:
+                attempt_record.update(
+                    error_type=type(exc).__name__,
+                    elapsed_seconds=time.perf_counter() - attempt_started,
+                )
+                return finish(failed=True, message="invalid_response_json")
+
+        if config.collect_diagnostics:
+            record["response"] = raw
+    try:
+        if config.api_format != "codex_subagent":
+            if not isinstance(raw, dict):
+                raise ValueError("response root must be an object")
+            record["usage"] = raw.get("usage")
+            record["returned_model"] = raw.get("model")
+            if config.api_format == "chat_completions":
+                choice = raw["choices"][0]
+                content = choice["message"].get("content") or ""
+                stop = choice.get("finish_reason")
+            elif config.api_format == "responses":
+                status = raw.get("status")
+                stop = (raw.get("incomplete_details") or {}).get("reason") or status
+                record.update(response_status=status, stop_reason=stop)
+                if status != "completed":
+                    message = "truncated" if stop == "max_output_tokens" else f"response_{status or 'missing_status'}"
+                    return finish(failed=True, message=message)
+                content = "".join(
+                    block.get("text", "") for item in raw.get("output", [])
+                    if isinstance(item, dict) and item.get("type") == "message"
+                    for block in item.get("content", [])
+                    if isinstance(block, dict) and block.get("type") == "output_text"
+                )
+            else:
+                content = "".join(
+                    block.get("text", "") for block in raw.get("content", [])
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+                stop = raw.get("stop_reason")
+            record["stop_reason"] = stop
+            if stop in {"length", "max_tokens"}:
+                return finish(failed=True, message="truncated")
+            if not isinstance(content, str) or not content.strip():
+                return finish(failed=True, message="empty_content")
         content = content.strip().removeprefix("```json").removesuffix("```").strip()
         parsed = json.loads(content)
         if isinstance(parsed, list):
@@ -344,7 +358,7 @@ def ask_llm_for_candidates(
     output: list[MasterCandidate] = []
     seen = {commitment_key(candidate.u, candidate.v, candidate.w) for candidate in base_candidates}
     for index, entry in enumerate(entries[: int(config.max_candidates)]):
-        proposal = {"proposal_id": f"llm:{iteration}:{index}", "origin": "llm"}
+        proposal = {"proposal_id": f"{record.get('call_id', f'llm:{iteration}')}:{index}", "origin": "llm"}
         if config.collect_diagnostics:
             record["proposals"].append(proposal)
         if not isinstance(entry, dict):
@@ -395,4 +409,4 @@ def ask_llm_for_candidates(
         seen.add(key)
         output.append(repaired)
         proposal["outcome"] = "accepted"
-    return finish(output, len(entries))
+    return finish(output, len(entries), failed=not output and config.api_format == "codex_subagent", message="no_valid_candidates" if not output and config.api_format == "codex_subagent" else "ok")

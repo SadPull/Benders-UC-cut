@@ -1,5 +1,26 @@
 # SUC + Benders: public and historical benchmarks
 
+## Astra advisor module
+
+The [v0.17.0 reference-comparison study](experiments/astra-target-20261002/README.md)
+completed 16 SA/Astra rounds before the user requested a stop. Its best validated
+cost is **572242.837016**, **0.215193%** above the Gurobi reference; the original
+0.1% target was **not met**. The archive includes a fresh 50-call SA control,
+same-call comparisons, all raw exchanges and independent physical checks.
+
+The [Codex-controlled Astra module](docs/astra-module.md) now generates proposal
+feedback automatically and exchanges files with fresh `gpt-6-astra` / `max`
+subagents. It supports fixed alternation, stagnation-triggered calls, an
+LLM-only continuous-subproblem control, and SA-only runs. Python waits for
+Codex to service each request; it does not launch subagents by itself.
+
+```powershell
+python -u -m suc_benders.astra_run --data data/suc_10x24.json --seed 7 --rounds 2 --strategy fixed --output-dir results/astra-new-run
+```
+
+Two real subagent calls passed the file-exchange and automatic-feedback
+acceptance check. This is integration validation, not a performance comparison.
+
 ## IEEE RTS-24 derived benchmark
 
 The new [public-input benchmark](data/rts24/README.md) has **32 generators and

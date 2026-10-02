@@ -1,0 +1,22 @@
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpybwhrjat\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp8ho8auvx\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp6slpbfpd\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpspt4kpt6\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp8o14gn2o\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpqbvfj8qq\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmprcj9dhpc\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp3th58jop\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp3th58jop\run\calls\002
+2026-10-02T15:15:28+08:00 offline one COMPLETE
+2026-10-02T15:15:28+08:00 offline two COMPLETE
+2026-10-02T15:15:28+08:00 offline one BUDGET_EXHAUSTED
+2026-10-02T15:15:28+08:00 offline one COMPLETE
+WAIT_SUBAGENT s7 round=1 C:\Users\12433\AppData\Local\Temp\tmpw5q4vnrh\calls\001
+WAIT_SUBAGENT s7 round=1 C:\Users\12433\AppData\Local\Temp\tmpd0mkpev5\calls\001
+----------------------------------------------------------------------
+Ran 166 tests in 282.704s
+
+OK

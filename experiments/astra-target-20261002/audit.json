@@ -1,0 +1,267 @@
+{
+  "audit_passed": true,
+  "calls": [
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:1",
+      "agent_id": "/root/astra_target_001",
+      "wait_seconds": 507.854443799999,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 0,
+      "improvements": 2,
+      "repair_bits": [
+        64,
+        64,
+        64,
+        21
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:2",
+      "agent_id": "/root/astra_target_002",
+      "wait_seconds": 259.77389720000065,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 0,
+      "improvements": 2,
+      "repair_bits": [
+        0,
+        0,
+        21,
+        20
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:3",
+      "agent_id": "/root/astra_target_003",
+      "wait_seconds": 272.3662155999991,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 0,
+      "improvements": 3,
+      "repair_bits": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:4",
+      "agent_id": "/root/astra_target_004",
+      "wait_seconds": 246.49387899999783,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 1,
+      "improvements": 0,
+      "repair_bits": [
+        20,
+        21,
+        20,
+        21
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:5",
+      "agent_id": "/root/astra_target_005",
+      "wait_seconds": 214.57030289999966,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 0,
+      "improvements": 3,
+      "repair_bits": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:6",
+      "agent_id": "/root/astra_target_006",
+      "wait_seconds": 247.29381339999964,
+      "proposed": 4,
+      "completed": 3,
+      "feasible": 3,
+      "duplicates": 0,
+      "improvements": 0,
+      "repair_bits": [
+        20,
+        null,
+        33,
+        36
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:7",
+      "agent_id": "/root/astra_target_007",
+      "wait_seconds": 1031.1143377999979,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 2,
+      "improvements": 0,
+      "repair_bits": [
+        16,
+        17,
+        1,
+        1
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:8",
+      "agent_id": "/root/astra_target_008",
+      "wait_seconds": 196.50136519999796,
+      "proposed": 4,
+      "completed": 3,
+      "feasible": 3,
+      "duplicates": 1,
+      "improvements": 1,
+      "repair_bits": [
+        20,
+        0,
+        20,
+        null
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:9",
+      "agent_id": "/root/astra_target_009",
+      "wait_seconds": 263.9462610999981,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 2,
+      "improvements": 0,
+      "repair_bits": [
+        16,
+        1,
+        1,
+        17
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:10",
+      "agent_id": "/root/astra_target_010",
+      "wait_seconds": 208.3906437000005,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 1,
+      "improvements": 0,
+      "repair_bits": [
+        20,
+        18,
+        22,
+        18
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:11",
+      "agent_id": "/root/astra_target_011",
+      "wait_seconds": 383.55913430000146,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 0,
+      "improvements": 2,
+      "repair_bits": [
+        13,
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:12",
+      "agent_id": "/root/astra_target_012",
+      "wait_seconds": 188.91187899999932,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 0,
+      "improvements": 1,
+      "repair_bits": [
+        0,
+        20,
+        20,
+        20
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:13",
+      "agent_id": "/root/astra_target_013",
+      "wait_seconds": 174.79217709999648,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 1,
+      "improvements": 3,
+      "repair_bits": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:14",
+      "agent_id": "/root/astra_target_014",
+      "wait_seconds": 231.3519938999998,
+      "proposed": 4,
+      "completed": 3,
+      "feasible": 3,
+      "duplicates": 0,
+      "improvements": 0,
+      "repair_bits": [
+        22,
+        19,
+        null,
+        23
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:15",
+      "agent_id": "/root/astra_target_015",
+      "wait_seconds": 205.4296568000027,
+      "proposed": 3,
+      "completed": 3,
+      "feasible": 3,
+      "duplicates": 1,
+      "improvements": 0,
+      "repair_bits": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "call_id": "7d4940df99514cf2922e611271934e94:16",
+      "agent_id": "/root/astra_target_016",
+      "wait_seconds": 288.9777357000021,
+      "proposed": 4,
+      "completed": 4,
+      "feasible": 4,
+      "duplicates": 0,
+      "improvements": 1,
+      "repair_bits": [
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "objective": 572242.8370161591,
+  "status": "CANCELLED",
+  "sa_calls": 16,
+  "completed_rounds": 16,
+  "continuous_dispatch_calls": 237,
+  "elapsed_seconds": 5323.8461178,
+  "http_requests": 0
+}

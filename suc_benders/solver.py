@@ -41,6 +41,8 @@ class BendersConfig:
     decommit_candidates: bool = True
     decommit_ladder_size: int = 8
     quantum_candidates: bool = True
+    advisor_only: bool = False
+    target_cost: float | None = None
     quantum: QuantumConfig = field(default_factory=QuantumConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     subproblem_output_flag: int = 0
@@ -142,6 +144,10 @@ def solve_benders(
     config: BendersConfig | None = None,
 ) -> BendersResult:
     config = config or BendersConfig()
+    if config.target_cost is not None and (not math.isfinite(config.target_cost) or config.target_cost <= 0 or config.master_encoding != "dynamic"):
+        raise ValueError("target_cost requires a positive finite cost and dynamic encoding")
+    if config.advisor_only and (config.master_encoding != "dynamic" or config.decomposition != "none" or not config.llm.enabled or config.quantum_candidates):
+        raise ValueError("advisor_only requires dynamic whole horizon, LLM enabled and SA disabled")
     if config.master_encoding not in ("legacy", "compact", "dynamic") or config.decomposition not in ("none", "temporal"):
         raise ValueError("unknown encoding or decomposition")
     if config.block_hours < 1 or config.block_inner_iterations < 1:

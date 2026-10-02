@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.17.0 - 2026-10-02
+
+- Add a native `codex_subagent` advisor path with atomic file exchange,
+  exclusive dispatch claims, identity/hash checks, cancellation and single-use
+  receipts. Codex dispatches fresh gpt-6-astra/max agents; Python makes no LLM
+  HTTP requests and does not require an API key for this path.
+- Generate proposal-level repair, duplicate, validation and measured-cost
+  feedback automatically. Keep existing HTTP interfaces and historical runs.
+- Add standalone fixed, stagnation-triggered, SA-only and advisor-only runs,
+  plus an opt-in strict reference-cost stopping condition independent of rounds.
+  Recompute and physically validate the independent Gurobi reference dispatch.
+- Pass the two-call integration acceptance and archive its exact inputs,
+  outputs, feedback and source snapshot. Archive the subsequent seed-7 study
+  with 16 SA calls and 16 fresh Astra calls, stopped after full validation of
+  call 16 at the user's explicit request. The original 0.1% target was NOT met.
+- Best validated cost: 572242.837016, 0.215193% above the independently checked
+  Gurobi reference 571014.051896. The final proposal required no repair.
+  Matched pure SA costs 614177.849905 after 16 calls and 612502.196470 after 50.
+  These are not equal total-compute budgets; no speed advantage is claimed.
+- Preserve every proposal, invalid/duplicate outcomes, physical audits,
+  user-stop amendment, timing interruption, excluded attempts, source/data
+  snapshots and checksummed archives. A new three-call LLM burst strategy has
+  not been started in this release.
+- Pass all 168 regression tests on the release workspace; retain the test log
+  and source/test fingerprints with the experiment archive.
+
 ## v0.16.0 - 2026-10-02
 
 - Add a 32-generator, 24-hour IEEE RTS-24 derived copperplate UC/SUC benchmark
