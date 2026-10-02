@@ -22,13 +22,19 @@ class HTTPBurstTests(unittest.TestCase):
                 self_test.assertEqual(request.get_header("Authorization"), "Bearer test-secret")
                 self_test.assertEqual(request.full_url, "https://api.deepseek.com/chat/completions")
                 self_test.assertIsNone(timeout)
+                saved = Path(temporary.name) / "calls/001/request.json"
+                self_test.assertEqual(json.loads(saved.read_text()), payloads[-1])
+                self_test.assertTrue((saved.parent / "system.txt").exists())
+                self_test.assertTrue((saved.parent / "user.txt").exists())
                 return io.BytesIO(json.dumps(dict(model="deepseek-flash", echoed="test-secret",
                     choices=[dict(message=dict(content='{"candidates":[]}'), finish_reason="stop")],
                     usage=dict(total_tokens=42))).encode())
         self_test = self
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
         config = LLMConfig(api_format="chat_completions", base_url="https://api.deepseek.com",
             model="deepseek-flash", temperature=None, max_tokens=None, timeout_seconds=None,
-            max_retries=1, collect_diagnostics=True)
+            max_retries=1, collect_diagnostics=True, exchange_dir=temporary.name)
         with patch.dict("os.environ", {"LLM_API_KEY": "test-secret"}), patch(
                 "suc_benders.llm.build_opener", return_value=Opener()):
             result = ask_llm_for_candidates(data, [Scenario("tiny", 1., data.base_load)], 1, [], None, config)

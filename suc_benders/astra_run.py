@@ -104,7 +104,8 @@ def main():
             serialized = result_to_dict(row)
             if args.http_base_url:
                 if row["kind"] == "llm_start":
-                    http_call = root / "calls" / f"{row['call_index']:03d}"
+                    call_number = row['call_index'] if config.llm.schedule == "stagnation_burst" else row['iteration']
+                    http_call = root / "calls" / f"{call_number:03d}"
                     http_call.mkdir(parents=True, exist_ok=False)
                     publish(http_call / "started.json", serialized)
                     print(f"HTTP_LLM_START call={row['call_index']} round={row['iteration']}", flush=True)

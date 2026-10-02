@@ -262,6 +262,14 @@ def ask_llm_for_candidates(
         )
         if config.collect_diagnostics:
             record.update(endpoint=endpoint, requested_model=model, request=payload)
+            if config.exchange_dir:
+                from pathlib import Path
+                from .subagent import publish
+                call_dir = Path(config.exchange_dir) / "calls" / f"{iteration:03d}"
+                call_dir.mkdir(parents=True, exist_ok=True)
+                publish(call_dir / "request.json", scrub(payload))
+                (call_dir / "system.txt").write_bytes(scrub(system).encode("utf-8"))
+                (call_dir / "user.txt").write_bytes(scrub(user).encode("utf-8"))
         direct_opener = build_opener(ProxyHandler({}))
         attempts = max(1, int(config.max_retries))
         raw = None
