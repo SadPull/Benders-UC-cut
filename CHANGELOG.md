@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased - fixed-round Farluna rerun
+## v0.15.0 - 2026-10-02
+
+- Add optional Responses API input/output support and reject incomplete or
+  truncated outputs while preserving existing Chat Completions defaults.
+- Add a file-based Codex subagent experiment driver with per-call input/output
+  hashes, single-use receipts, the original candidate repair, and no HTTP calls.
+- Preserve the stopped Farluna 50-round study: one complete SA run, two
+  interrupted SA+LLM traces, and no complete 50-round pairs.
+- Archive the single Responses trial (65536 reasoning tokens, no candidate)
+  and same-input Astra trial (four repaired feasible candidates; best
+  571753.316901, 0.129465% above the feasible reference).
+- Archive the subsequent Astra/max seed-7 experiment: seven subagent calls,
+  six complete rounds, and a validated unrepaired candidate costing
+  571504.279645 in round 7, 0.085852% above the feasible reference.
+- Record the user's mid-study amendment to at most 10 rounds and early stop
+  below 0.1%; stop the worker during round 7 and cancel the other seeds.
+  Preserve this post-hoc rule without claiming a completed paired study.
+- Save the reports, exact source snapshots, raw inputs/outputs and checksummed
+  archives under `experiments/llm-advisor-evaluation-20261002/`.
+- Verify current solver/test files match the snapshot that passed all 145
+  regression tests, and retain physical/cost audits and secret-exclusion checks.
+
+### Fixed-round protocol
 
 - Add an opt-in 50-round paired rerun without overall or client request timeouts.
 - Keep duplicate-candidate rounds running to the requested round count and

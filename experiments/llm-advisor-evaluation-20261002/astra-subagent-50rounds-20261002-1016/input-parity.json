@@ -1,0 +1,11 @@
+{
+  "prompt_function_unchanged": true,
+  "repair_and_solver_sources_unchanged": true,
+  "configuration_and_package_equality_checked_during_prepare": true,
+  "initial_sa_seed7_reused_without_modification": true,
+  "seed7_round1_input_byte_identical": true,
+  "input_sha256": {
+    "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+    "user.txt": "0b5dd6122be311781046ff14468b30e7bee11b35958f3f7cff95c4042ea1b923"
+  }
+}

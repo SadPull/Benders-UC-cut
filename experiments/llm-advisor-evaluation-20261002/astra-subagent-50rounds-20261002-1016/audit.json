@@ -1,0 +1,30 @@
+{
+  "final": false,
+  "validated_candidates": 61,
+  "maximum_physical_residual_mw": 6.821210263296962e-13,
+  "maximum_cost_residual": 1.280568540096283e-09,
+  "verified_subagent_calls": 7,
+  "old_trajectories_unchanged": true,
+  "source_snapshot_matches": true,
+  "secret_scan_passed": true,
+  "runs": [
+    {
+      "run": "sa__s7",
+      "status": "completed",
+      "completed_rounds": 50,
+      "sa_calls": 50,
+      "events_sha256": "4d2e131510337628ea23781b5514060167a1e43adf4cb7821706605f43328139"
+    },
+    {
+      "run": "sa_llm__s7",
+      "status": "user_stopped_threshold",
+      "completed_rounds": 6,
+      "sa_calls": 7,
+      "events_sha256": "c8d0d1809a86a8b30a278f3da06464dbe031b15a55d9bedb5ab7911c104b0c18"
+    }
+  ],
+  "final_under_amended_protocol": true,
+  "original_full_study_complete": false,
+  "stopping_rule_verified": true,
+  "worker_stopped_verified": true
+}

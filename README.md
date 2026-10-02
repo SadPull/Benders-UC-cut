@@ -2,6 +2,15 @@
 
 ## Current research: LLM / SA efficiency
 
+The latest [audited results](experiments/llm-advisor-evaluation-20261002/README.md)
+include the stopped Farluna study, a Responses API trial, and GPT-6 Astra
+subagent trials. In the latest seed-7 run, seven independent Astra/max calls
+produced a validated cost of **571504.279645**, **0.085852%** above the feasible
+reference. The user changed the stopping rule during the study; it stopped
+during round 7 after six complete rounds. This is a single-seed result, not a
+completed five-seed comparison or a certified optimality gap. All experiment
+processes are stopped; no scheduled monitoring is active.
+
 The current question is whether LLM-generated schedules reduce SA calls to a
 fixed feasible-cost target, or improve feasible cost at an equal end-to-end
 time budget. Use `python -m suc_benders.efficiency_experiment`; see
@@ -33,6 +42,28 @@ The final cost compares equal round counts, not equal elapsed time. The
 for time and first-passage comparisons. The default command without `--rounds`
 still uses the v0.14.1 600-second / 300-second request protocol.
 
+The executed 50-round Farluna study was stopped by the user with one complete
+SA run and two incomplete SA+LLM traces. Its
+[stop report and raw archive](experiments/llm-advisor-evaluation-20261002/llm-sa-efficiency-50rounds-20261001-180425/stopped-report.md)
+preserve the incomplete samples; there are no complete 50-round pairs.
+
+## Codex subagent experiment
+
+`suc_benders.subagent_experiment` preserves the original solver and prompt
+while exchanging per-round input files and validated response receipts with
+the supervising chat. Each LLM call uses a fresh `gpt-6-astra` subagent with
+`max` reasoning. The local Responses envelope only reuses parsing and repair;
+the transport makes no HTTP requests or automatic agent launches. The chat
+must dispatch each agent and acknowledge its output. Temperature and actual
+token usage are not exposed by this subagent interface.
+
+This research driver retains its original five-seed, 50-round configuration.
+The latest run's user-requested 10-round / below-0.1% stopping amendment and
+the session's stopping helper are preserved in the
+[experiment archive](experiments/llm-advisor-evaluation-20261002/astra-subagent-50rounds-20261002-1016/README.md).
+Existing run directories cannot be replayed automatically. Reading the
+saved reports requires no new model or optimization calls.
+
 ## Independent exact-block control
 
 `python -m suc_benders.exact_experiment` runs an independent original-block
@@ -59,7 +90,7 @@ the lower-bound gap, feasible-cost difference, same-price sampling error and
 uncertified/incomplete results. Box-dual convergence is not a certificate of
 global SUC optimality.
 
-Current release: [v0.14.1](CHANGELOG.md).
+Current release: [v0.15.0](CHANGELOG.md).
 
 The completed exact-block control, findings and checksummed raw records are
 published under [experiments/exact-block-control-20261001](experiments/exact-block-control-20261001/README.md).
@@ -189,6 +220,11 @@ When `--llm` is enabled, the advisor receives a compact P0/P1 context containing
 - unit marginal costs and unit cost decomposition
 
 All context values are rounded to three decimals and lists are capped to keep the prompt compact. LLM output remains advisory only and is always validated locally.
+
+`--llm-api-format responses` selects the OpenAI-compatible `/responses` endpoint,
+using `input`, `max_output_tokens`, and `reasoning.effort`. Only completed
+responses are accepted; output-token truncation is reported as a failure.
+The existing Chat Completions and Messages formats remain selectable.
 
 Per-unit fuel cost is the probability-weighted cost of scenario outputs,
 `E[a*p^2 + b*p]`, rather than the cost of the expected output. Unit decomposition

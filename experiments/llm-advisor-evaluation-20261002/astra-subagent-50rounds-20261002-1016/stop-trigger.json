@@ -1,0 +1,29 @@
+{
+  "reason": "reference_difference_below_0.1_percent",
+  "requested_max_rounds": 10,
+  "reference_difference_threshold": 0.001,
+  "reference": 571014.0518951993,
+  "best_objective": 571504.2796448672,
+  "relative_difference": 0.0008585213411838044,
+  "completed_rounds_at_trigger": 6,
+  "best_iteration": 7,
+  "triggered_at": "2026-10-02T03:19:21.741456+00:00",
+  "worker_pid": 23776,
+  "worker_create_time": 1790907691.9000535,
+  "worker_verified_stopped": true,
+  "final_state": {
+    "status": "user_stopped_threshold",
+    "seed": 7,
+    "strategy": "sa_llm",
+    "budget": null,
+    "rounds": 50,
+    "started_at": "2026-10-02T02:21:32.163318+00:00",
+    "pid": 23776,
+    "stop_reason": "reference_difference_below_0.1_percent",
+    "ended_at": "2026-10-02T03:19:21.872777+00:00",
+    "amended_round_limit": 10,
+    "completed_rounds": 6,
+    "actual_sa_calls": 7,
+    "actual_llm_calls": 7
+  }
+}

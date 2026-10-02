@@ -1,0 +1,16 @@
+{
+  "seed": 7,
+  "iteration": 4,
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "fork_turns": "none",
+  "max_candidates": 4,
+  "input_sha256": {
+    "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+    "user.txt": "5b370756d579bf5e47b0ef87045f78ee37ffc205ef97152456314c6944bcc64e"
+  },
+  "created_at": "2026-10-02T02:37:12.185236+00:00",
+  "transport": "codex_subagent",
+  "temperature_override": null,
+  "max_output_tokens_override": null
+}

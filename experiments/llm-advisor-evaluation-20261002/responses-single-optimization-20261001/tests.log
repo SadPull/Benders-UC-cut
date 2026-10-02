@@ -1,0 +1,36 @@
+test_invalid_json_is_rejected (tests.test_llm.LLMAdvisorTests) ... ok
+test_invalid_shape_is_discarded (tests.test_llm.LLMAdvisorTests) ... ok
+test_list_root_response_is_accepted (tests.test_llm.LLMAdvisorTests) ... ok
+test_missing_key_is_safe (tests.test_llm.LLMAdvisorTests) ... ok
+test_ragged_matrix_is_discarded_not_fatal (tests.test_llm.LLMAdvisorTests) ... ok
+test_responses_failure_empty_and_invalid_json (tests.test_llm.LLMAdvisorTests) ... ok
+test_responses_payload_and_output_text (tests.test_llm.LLMAdvisorTests) ... ok
+test_responses_rejects_incomplete_even_with_parseable_text (tests.test_llm.LLMAdvisorTests) ... ok
+test_auth_failure_is_not_retried (tests.test_attribution.ChatCompletionsTests) ... ok
+test_chat_payload_and_safe_audit (tests.test_attribution.ChatCompletionsTests) ... ok
+test_duplicate_and_nonbinary_proposals_are_recorded (tests.test_attribution.ChatCompletionsTests) ... ok
+test_network_failure_stops_at_attempt_limit (tests.test_attribution.ChatCompletionsTests) ... ok
+test_transient_http_retries_once_and_scrubs_echoed_key (tests.test_attribution.ChatCompletionsTests) ... ok
+test_truncated_empty_and_invalid_json_are_distinct (tests.test_attribution.ChatCompletionsTests) ... ok
+test_deadline_events_and_thresholds (tests.test_efficiency.EfficiencyTests) ... ok
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+test_dynamic_llm_candidates_share_cuts_and_validation (tests.test_efficiency.EfficiencyTests) ... ok
+test_fixed_rounds_do_not_stop_on_duplicates_and_remove_llm_timeout (tests.test_efficiency.EfficiencyTests) ... ok
+test_no_new_candidates_keeps_running_until_deadline (tests.test_efficiency.EfficiencyTests) ... ok
+test_no_retry_on_timeout (tests.test_efficiency.EfficiencyTests) ... ok
+test_partial_last_event_is_ignored (tests.test_efficiency.EfficiencyTests) ... ok
+test_preflight_parameter_rejection_is_not_downgraded (tests.test_efficiency.EfficiencyTests) ... ok
+test_requested_api_settings_and_scrubbing (tests.test_efficiency.EfficiencyTests) ... ok
+test_resume_fingerprint_and_existing_output (tests.test_efficiency.EfficiencyTests) ... ok
+test_round_supervisor_and_resume_identity (tests.test_efficiency.EfficiencyTests) ... ok
+test_supervisor_terminates_uninterruptible_call (tests.test_efficiency.EfficiencyTests) ... ok
+test_temporal_llm_stays_disabled (tests.test_efficiency.EfficiencyTests) ... ok
+test_unlimited_endpoint_and_timed_checkpoints_are_separate (tests.test_efficiency.EfficiencyTests) ... ok
+test_unlimited_http_timeout_and_no_retry_on_server_error (tests.test_efficiency.EfficiencyTests) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 2.056s
+
+OK

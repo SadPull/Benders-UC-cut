@@ -1,0 +1,30 @@
+{
+  "validated_candidates": 117,
+  "maximum_physical_residual_mw": 9.094947017729282e-13,
+  "sa_counter_and_cutoff_checks": true,
+  "no_duplicate_evaluation": true,
+  "secret_scan_passed": true,
+  "runs": [
+    {
+      "run": "sa__s7",
+      "status": "completed",
+      "sa_calls": 50,
+      "evaluations": 35,
+      "events_sha256": "4d2e131510337628ea23781b5514060167a1e43adf4cb7821706605f43328139"
+    },
+    {
+      "run": "sa_llm__s17",
+      "status": "interrupted",
+      "sa_calls": 16,
+      "evaluations": 36,
+      "events_sha256": "0b093d2be23eb7f8bc800a2b3b349a8b15249d0b796ab8888e30b1168a2b54d8"
+    },
+    {
+      "run": "sa_llm__s7",
+      "status": "interrupted",
+      "sa_calls": 21,
+      "evaluations": 50,
+      "events_sha256": "08a4b75b33a3111a15cac498f23902060cfc39dc7bc0861a5de263b12c286fcb"
+    }
+  ]
+}

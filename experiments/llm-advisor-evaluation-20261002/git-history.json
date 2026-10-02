@@ -1,0 +1,17 @@
+{
+  "before_consolidation": {
+    "main": "db2d2c02d2a28987745f2e0e90f16c16846aefe3",
+    "codex/llm-sa-efficiency": "d67506018b8dba004ee07c26a5212bf36e5be2f7",
+    "codex/farluna-efficiency": "9d3e038d28015b88c3dce4ccc6223298a28575bd",
+    "codex/farluna-50-rounds": "d54b618c2ec17299a8cc6323d9b7786bfe599090"
+  },
+  "target_branch": "main",
+  "release_tag": "v0.15.0",
+  "obsolete_branches": [
+    "codex/llm-sa-efficiency",
+    "codex/farluna-efficiency",
+    "codex/farluna-50-rounds"
+  ],
+  "history_preserved_by_ancestry": true,
+  "delete_after_remote_main_contains_all_tips": true
+}

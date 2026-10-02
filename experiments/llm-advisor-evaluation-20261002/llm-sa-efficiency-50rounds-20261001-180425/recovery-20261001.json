@@ -1,0 +1,43 @@
+{
+  "detected_at": "2026-10-01T12:53:57.377923+00:00",
+  "reason": "Supervisor, worker and postprocessor no longer exist; exit cause unknown; stderr is empty.",
+  "original_process_metadata": {
+    "command": "python -u -m suc_benders.efficiency_experiment --rounds 50",
+    "started_at": "2026-10-01T18:04:25.5945339+08:00",
+    "pid": 11596,
+    "stderr": "results\\llm-sa-efficiency-50rounds-20261001-180425.err.log",
+    "stdout": "results\\llm-sa-efficiency-50rounds-20261001-180425.out.log",
+    "rounds": 50,
+    "output_dir": "results\\llm-sa-efficiency-50rounds-20261001-180425"
+  },
+  "original_states": {
+    "sa_llm__s7": {
+      "status": "running",
+      "seed": 7,
+      "strategy": "sa_llm",
+      "budget": null,
+      "rounds": 50
+    },
+    "sa__s7": {
+      "status": "completed",
+      "seed": 7,
+      "strategy": "sa",
+      "budget": null,
+      "rounds": 50,
+      "exitcode": 0
+    }
+  },
+  "original_file_sha256": {
+    "runs/sa_llm__s7/events.jsonl": "08a4b75b33a3111a15cac498f23902060cfc39dc7bc0861a5de263b12c286fcb",
+    "runs/sa_llm__s7/state.json": "b4b5434fd62bc4ac84264324e0069b00ca67091b71955b2fa92b1a3f99da1f00",
+    "runs/sa__s7/events.jsonl": "4d2e131510337628ea23781b5514060167a1e43adf4cb7821706605f43328139",
+    "runs/sa__s7/result.json": "557a2275796b8225e535f2d5a9f0a90c0710768554e7145c2fe2efe2de58524f",
+    "runs/sa__s7/state.json": "2d144ae419c2f70aeb46edfbd622ff6e8e12f93d87aef5fd47bcf9374c7da2ab",
+    "runs/sa__s7/summary.json": "857be8bcc15fe9067d3a5b85bc315e540f9d6fe2506237e8c26cd37cf107f91c"
+  },
+  "interrupted_run": "sa_llm__s7",
+  "completed_rounds_before_interruption": 20,
+  "sa_calls_before_interruption": 21,
+  "llm_calls_before_interruption": 21,
+  "policy": "Keep both seed-7 traces unchanged, mark stopped run interrupted, resume only 8 unstarted runs with identical source/input/configuration fingerprint; no interrupted sample rerun."
+}

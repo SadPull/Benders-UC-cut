@@ -1,0 +1,49 @@
+{
+  "status": "request_failed",
+  "message": "truncated",
+  "http_requests": 1,
+  "sa_calls": 0,
+  "dispatch_calls": 0,
+  "llm_seconds": 516.2604131000044,
+  "total_seconds": 516.2645763000037,
+  "raw_candidates": 0,
+  "accepted_candidates": 0,
+  "new_feasible_candidates": 0,
+  "cached_candidates": 0,
+  "baseline_objective": 583861.4307989404,
+  "best_objective": 583861.4307989404,
+  "improvement": 0.0,
+  "response_status": "incomplete",
+  "stop_reason": "max_output_tokens",
+  "usage": {
+    "input_tokens": 13587,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 65536,
+    "output_tokens_details": {
+      "reasoning_tokens": 65536
+    },
+    "total_tokens": 79123,
+    "x_details": [
+      {
+        "input_tokens": 13587,
+        "input_tokens_details": {
+          "text_tokens": 13587
+        },
+        "output_tokens": 65536,
+        "output_tokens_details": {
+          "reasoning_tokens": 65536,
+          "text_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 79123,
+        "x_billing_type": "response_api"
+      }
+    ]
+  },
+  "original_chat_seconds": 472.39031879999675,
+  "source_events_unchanged": true
+}

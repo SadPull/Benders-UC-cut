@@ -24,7 +24,7 @@ def main() -> None:
     parser.add_argument("--max-candidate-evaluations", type=int, default=None)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--llm", action="store_true")
-    parser.add_argument("--llm-api-format", choices=("messages", "chat_completions"), default="chat_completions")
+    parser.add_argument("--llm-api-format", choices=("messages", "chat_completions", "responses"), default="chat_completions")
     parser.add_argument("--llm-base-url", default=None)
     parser.add_argument("--llm-model", default=None)
     parser.add_argument("--no-quantum", action="store_true", help="Skip Kaiwu QUBO construction and simulated annealing")

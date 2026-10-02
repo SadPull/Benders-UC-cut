@@ -1,0 +1,7 @@
+{
+  "command": "python -m unittest discover -s tests -q",
+  "tests": 145,
+  "elapsed_seconds": 283.517,
+  "exit_code": 0,
+  "result": "OK"
+}

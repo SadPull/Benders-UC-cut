@@ -1,0 +1,22 @@
+{
+  "prepared_at": "2026-10-01T15:51:29.914438+00:00",
+  "source": "results\\responses-single-optimization-20261001\\request.json",
+  "source_sha256": "4ea1e94a9f457f7859a21ddf97fc8c4ac976792dfa0d494ae85e4e748979e53c",
+  "source_iteration": 15,
+  "source_seed": 17,
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "subagent_calls": 1,
+  "business_input_sha256": {
+    "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+    "user.txt": "ae0170944a6932b77b28a37a1bda39684d985f76c08f8eb86984ac4e504bdaa2"
+  },
+  "baseline_objective": 583861.4307989404,
+  "max_candidates": 4,
+  "max_output_tokens_override": null,
+  "comparison_caveat": "Original system/user text is byte-identical. Subagent runtime instructions and message roles are different; temperature is not configurable through this tool. No unlimited-reasoning claim.",
+  "agent_task": "/root/astra_single_advice",
+  "dispatch_confirmed_at": "2026-10-01T15:55:24.350049+00:00",
+  "successful_subagent_dispatches": 1,
+  "rejected_dispatches_before_start": 2
+}

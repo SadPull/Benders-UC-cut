@@ -1,0 +1,8 @@
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+{"candidate": 1, "feasible": true, "objective": 574664.4795309271}
+{"candidate": 2, "feasible": true, "objective": 572496.4653830617}
+{"candidate": 3, "feasible": true, "objective": 571753.3169014588}
+{"candidate": 4, "feasible": true, "objective": 571794.5871936161}
+{"status": "completed", "model": "gpt-6-astra", "subagent_calls": 1, "http_requests": 0, "sa_calls": 0, "dispatch_calls": 12, "raw_candidates": 4, "accepted_candidates": 4, "new_feasible_candidates": 4, "cached_candidates": 0, "baseline_objective": 583861.4307989404, "best_objective": 571753.3169014588, "improvement": 12108.113897481584, "improvement_percent": 2.073799237074654, "reference_objective": 571014.0518951993, "reference_difference_percent": 0.12946529140671625, "local_validation_seconds": 8.120945299997402, "candidate_file_sha256": "99cfc672d85f06a034db242a9d127fdf78838f26917fd6eb3ffcb825618f9818", "observed_agent_seconds": 280.6682097911835, "observed_agent_seconds_note": "From confirmation of dispatch to file write; excludes earlier dispatch overhead, includes input-read/output-write tools. Not API latency.", "model_token_usage": null, "source_events_unchanged": true, "completed_at": "2026-10-01T16:08:52.921898+00:00"}

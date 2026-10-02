@@ -29,7 +29,7 @@ class LLMConfig:
     # Reasoning models (e.g. deepseek-reasoner) spend part of this budget on
     # hidden reasoning tokens before emitting any text, so the default is sized
     # for those models rather than for a plain chat completion.
-    max_tokens: int = 65536
+    max_tokens: int | None = 65536
     reasoning_effort: str | None = "max"
     max_retries: int = 3
     retry_backoff_seconds: float = 30.0
@@ -136,7 +136,7 @@ def _prompt(
 
 def llm_settings(config: LLMConfig) -> tuple[str, str]:
     """Resolve non-secret settings for both the client and experiment manifest."""
-    if config.api_format == "chat_completions":
+    if config.api_format in {"chat_completions", "responses"}:
         base = os.getenv("LLM_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
         model = os.getenv("LLM_MODEL") or os.getenv("ANTHROPIC_MODEL")
     else:
@@ -158,7 +158,7 @@ def ask_llm_for_candidates(
     context: dict | None = None,
 ) -> LLMAdviceResult:
     started = time.perf_counter()
-    if config.api_format == "chat_completions":
+    if config.api_format in {"chat_completions", "responses"}:
         api_key = (os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or "").strip()
     else:
         api_key = (os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("LLM_API_KEY") or "").strip()
@@ -192,7 +192,7 @@ def ask_llm_for_candidates(
 
     if not api_key:
         return finish(message="LLM_API_KEY is not set")
-    if config.api_format not in {"messages", "chat_completions"}:
+    if config.api_format not in {"messages", "chat_completions", "responses"}:
         return finish(failed=True, message="unsupported api_format")
 
     base_url, model = llm_settings(config)
@@ -217,6 +217,21 @@ def ask_llm_for_candidates(
         headers = {"Authorization": "Bearer " + api_key}
         if config.reasoning_effort is not None:
             payload["reasoning_effort"] = config.reasoning_effort
+    elif config.api_format == "responses":
+        endpoint = base_url + "/responses"
+        payload = {
+            "model": model,
+            "temperature": float(config.temperature), "stream": False, "store": False,
+            "input": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        if config.max_tokens is not None:
+            payload["max_output_tokens"] = int(config.max_tokens)
+        headers = {"Authorization": "Bearer " + api_key}
+        if config.reasoning_effort is not None:
+            payload["reasoning"] = {"effort": config.reasoning_effort}
     else:
         endpoint = base_url + "/messages"
         payload = {
@@ -287,6 +302,19 @@ def ask_llm_for_candidates(
             choice = raw["choices"][0]
             content = choice["message"].get("content") or ""
             stop = choice.get("finish_reason")
+        elif config.api_format == "responses":
+            status = raw.get("status")
+            stop = (raw.get("incomplete_details") or {}).get("reason") or status
+            record.update(response_status=status, stop_reason=stop)
+            if status != "completed":
+                message = "truncated" if stop == "max_output_tokens" else f"response_{status or 'missing_status'}"
+                return finish(failed=True, message=message)
+            content = "".join(
+                block.get("text", "") for item in raw.get("output", [])
+                if isinstance(item, dict) and item.get("type") == "message"
+                for block in item.get("content", [])
+                if isinstance(block, dict) and block.get("type") == "output_text"
+            )
         else:
             content = "".join(
                 block.get("text", "") for block in raw.get("content", [])
