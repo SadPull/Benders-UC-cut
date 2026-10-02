@@ -60,7 +60,6 @@ class HTTPBurstTests(unittest.TestCase):
                 self.assertIsNone(config.llm.temperature)
                 self.assertEqual(config.quantum.kaiwu_seed, 7)
                 self.assertEqual(config.quantum.candidate_pool_size, 16)
-                self.assertFalse(config.decommit_candidates)
                 request = dict(messages=[dict(role="system", content="system"), dict(role="user", content="user")])
                 config.event_sink(dict(kind="llm_start", call_index=1, iteration=3, batch_index=1))
                 config.event_sink(dict(kind="llm_end", diagnostics=dict(request=request, response={"id": "test"})))

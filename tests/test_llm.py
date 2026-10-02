@@ -8,7 +8,6 @@ import numpy as np
 from suc_benders import load_suc_data
 from suc_benders.candidates import repair_commitment
 from suc_benders.llm import LLMConfig, ask_llm_for_candidates
-from suc_benders.master import MasterCandidate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class LLMAdvisorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
         cls.base = [
             repair_commitment(
                 cls.units,
@@ -73,7 +72,7 @@ class LLMAdvisorTests(unittest.TestCase):
     def test_list_root_response_is_accepted(self):
         class Response:
             def read(self):
-                content = '[{"name":"ok","u":' + json.dumps([[0] * 24 for _ in range(10)]) + '}]'
+                content = '[{"name":"ok","u":' + json.dumps([[0] * 24 for _ in range(32)]) + '}]'
                 return json.dumps({"content":[{"type":"text","text":content}]}).encode()
 
             def __enter__(self):
@@ -184,7 +183,7 @@ class LLMAdvisorTests(unittest.TestCase):
         return result, opener
 
     def test_responses_payload_and_output_text(self):
-        content = json.dumps({"candidates": [{"u": [[0] * 24 for _ in range(10)]}]})
+        content = json.dumps({"candidates": [{"u": [[0] * 24 for _ in range(32)]}]})
         raw = {"status": "completed", "model": "test-model",
                "usage": {"input_tokens": 5, "output_tokens": 10}, "output": [
                    {"type": "reasoning", "summary": [{"text": "not candidate JSON"}]},

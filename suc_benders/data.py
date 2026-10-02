@@ -176,10 +176,10 @@ def _read_scenarios(raw: object, base_load: np.ndarray, horizon: int) -> tuple[l
 
 
 def load_suc_data(
-    data_path: str | Path = "data/suc_10x24.json",
+    data_path: str | Path = "data/rts24/units.json",
     scenario_path: str | Path | None = None,
 ) -> tuple[UCData, list[Scenario]]:
-    """Load validated 10x24 UC data and stochastic scenarios.
+    """Load validated UC data and stochastic scenarios.
 
     A load_factor is relative to the canonical base load, while an explicit
     ``load`` array is an absolute 24-period scenario.

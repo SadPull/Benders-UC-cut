@@ -7,7 +7,7 @@ import numpy as np
 
 from suc_benders import load_suc_data, Scenario
 from suc_benders.candidates import make_candidate
-from suc_benders.context import build_llm_context, CandidateEvaluation, LLMContextInput, LocalMoveResult
+from suc_benders.context import build_llm_context, CandidateEvaluation, LLMContextInput
 from suc_benders.llm import LLMAdviceResult, LLMConfig, _prompt
 from suc_benders.master import QuantumConfig
 from suc_benders.solver import BendersConfig, solve_benders
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ScenarioDualTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
         n, h = cls.units.n_units, cls.units.horizon
         cls.u = np.ones((n, h), dtype=int)
         cls.v = np.zeros_like(cls.u)
@@ -48,7 +48,7 @@ class ScenarioDualTests(unittest.TestCase):
 class PromptContextTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
 
     def test_prompt_contains_context(self):
         context = {
@@ -74,7 +74,7 @@ class PromptContextTests(unittest.TestCase):
 class SolverContextIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
 
     def test_solver_passes_p0_p1_context_to_llm(self):
         captured = {}
@@ -83,7 +83,8 @@ class SolverContextIntegrationTests(unittest.TestCase):
             captured["context"] = kwargs.get("context")
             return LLMAdviceResult([], 0, 0, False, "ok")
 
-        with patch("suc_benders.solver.ask_llm_for_candidates", side_effect=fake_ask_llm):
+        with patch("suc_benders.paper_solver.ask_llm_for_candidates", side_effect=fake_ask_llm), \
+             patch("suc_benders.paper_solver.solve_qubo", return_value=[]):
             result = solve_benders(
                 self.units,
                 self.scenarios,
@@ -106,8 +107,6 @@ class SolverContextIntegrationTests(unittest.TestCase):
             "incumbent_cost",
             "base_candidates",
             "scenario_duals",
-            "benders_cut_summary",
-            "local_move_results",
             "candidate_comparison",
             "scenario_dispatch_summary",
             "reserve_margin",
@@ -122,7 +121,6 @@ class SolverContextIntegrationTests(unittest.TestCase):
         self.assertEqual(len(context["scenario_duals"]["reserve"]), 3)
         self.assertEqual(len(context["reserve_margin"]), 3)
         self.assertLessEqual(len(context["base_candidates"]), 10)
-        self.assertLessEqual(len(context["local_move_results"]), 10)
         self.assertLessEqual(len(context["candidate_comparison"]), 10)
         self.assertLessEqual(len(context["tight_constraints"]), 20)
         self.assertLessEqual(len(context["infeasible_diagnostics"]), 20)
@@ -150,7 +148,7 @@ class SolverContextIntegrationTests(unittest.TestCase):
 class ContextBuilderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
 
     def test_context_values_are_rounded_and_finite(self):
         incumbent = make_candidate(
@@ -175,14 +173,6 @@ class ContextBuilderTests(unittest.TestCase):
             feasibility_cuts=0,
             hamming_to_incumbent=0,
         )
-        move = LocalMoveResult(
-            move="single",
-            unit=0,
-            period=0,
-            width=1,
-            cost_change=-1.234567,
-            improved=True,
-        )
         context = build_llm_context(
             self.units,
             self.scenarios,
@@ -190,9 +180,7 @@ class ContextBuilderTests(unittest.TestCase):
                 incumbent=incumbent,
                 incumbent_results=results,
                 base_evaluations=[evaluation],
-                local_move_results=[move],
                 candidate_evaluations=[evaluation],
-                cuts=[],
                 history=[],
                 infeasible_diagnostics=[],
             ),
@@ -208,7 +196,6 @@ class ContextBuilderTests(unittest.TestCase):
         )
         self.assertEqual(context["incumbent_cost"]["total"], round(fixed + expected_fuel, 3))
         self.assertEqual(context["base_candidates"][0]["total_cost"], 123.457)
-        self.assertEqual(context["local_move_results"][0]["cost_change"], -1.235)
         self.assertEqual(len(context["unit_marginal_cost"]), self.units.n_units)
         self.assertEqual(len(context["unit_cost_decomposition"]), self.units.n_units)
 

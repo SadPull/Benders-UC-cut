@@ -1,7 +1,0 @@
-{
-  "reason": "Explicit user request to finish current call then stop and publish results",
-  "completed_call": 16,
-  "full_validation_finished_before_cancel": true,
-  "original_target": 0.001,
-  "original_target_reached": false
-}

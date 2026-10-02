@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Sequence
+from typing import Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
@@ -51,10 +51,6 @@ class LLMAdviceResult:
     failed: bool = False
     message: str = ""
     diagnostics: dict = field(default_factory=dict)
-
-
-def _finite(value: Any) -> float | None:
-    return float(value) if np.isfinite(value) else None
 
 
 def _prompt(
@@ -147,8 +143,8 @@ def llm_settings(config: LLMConfig) -> tuple[str, str]:
         base = os.getenv("ANTHROPIC_BASE_URL") or os.getenv("LLM_BASE_URL")
         model = os.getenv("ANTHROPIC_MODEL") or os.getenv("LLM_MODEL")
     return (
-        (config.base_url or base or "https://api.farluna.tech/v1").rstrip("/"),
-        (config.model or model or "farluna/deepseek-v4.1-flash").strip(),
+        (config.base_url or base or "https://api.deepseek.com").rstrip("/"),
+        (config.model or model or "deepseek-flash").strip(),
     )
 
 

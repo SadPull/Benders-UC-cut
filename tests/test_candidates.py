@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class CandidateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
 
     def test_repair_invalid_input_without_mutation(self):
         raw = np.zeros((self.units.n_units, self.units.horizon), dtype=int)
@@ -27,7 +27,7 @@ class CandidateTests(unittest.TestCase):
 
     def test_repair_rejects_bad_shape(self):
         self.assertIsNone(repair_commitment(self.units, self.scenarios, np.zeros((1, 1))))
-        self.assertIsNone(repair_commitment(self.units, self.scenarios, np.full((10, 24), np.nan)))
+        self.assertIsNone(repair_commitment(self.units, self.scenarios, np.full((self.units.n_units, self.units.horizon), np.nan)))
 
     def test_make_candidate_rebuilds_transitions(self):
         u = np.zeros((self.units.n_units, self.units.horizon), dtype=int)

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from suc_benders.advisor_feedback import call_due
-from suc_benders.attribution import validate_schedule
+from suc_benders.validation import validate_schedule
 from suc_benders.candidates import make_candidate
 from suc_benders.data import Scenario
 from suc_benders.llm import LLMAdviceResult, LLMConfig
@@ -28,7 +28,7 @@ class BurstTests(unittest.TestCase):
         self.scenarios = [Scenario("tiny", 1., self.data.base_load)]
         self.candidates = [make_candidate(self.data, self.scenarios,
             np.array([[1, 1, 1]] * n + [[0, 0, 0]] * (3-n)), source="llm") for n in (3, 2, 1)]
-        self.config = BendersConfig(master_encoding="dynamic", decommit_candidates=False,
+        self.config = BendersConfig(
             max_iterations=6, stop_on_no_new_candidates=False,
             llm=LLMConfig(enabled=True, schedule="stagnation_burst", enhanced_feedback=True))
 
@@ -97,7 +97,7 @@ class BurstTests(unittest.TestCase):
                 answers.append(LLMAdviceResult(self.candidates[1:]))
                 with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
                         "suc_benders.paper_solver.ask_llm_for_candidates", side_effect=answers) as ask, patch(
-                        "suc_benders.attribution.validate_schedule", wraps=validate_schedule) as validate:
+                        "suc_benders.validation.validate_schedule", wraps=validate_schedule) as validate:
                     result = solve_benders(self.data, self.scenarios, self.config)
                 self.assertEqual(result.status, "TARGET_REACHED")
                 self.assertEqual(ask.call_count, position)

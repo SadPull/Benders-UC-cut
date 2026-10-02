@@ -1,21 +1,22 @@
 import unittest
-from pathlib import Path
 
 import numpy as np
 
-from suc_benders import load_suc_data
+from suc_benders.data import Scenario
+from tests.test_capacity import one_hour_data
 from suc_benders.full_model import FullConfig, solve_full
 from suc_benders.subproblem import solve_scenario
-
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 class FullModelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units = one_hour_data()
+        cls.scenarios = [Scenario("low", .25, .9*cls.units.base_load),
+                         Scenario("base", .5, cls.units.base_load),
+                         Scenario("high", .25, 1.05*cls.units.base_load)]
         cls.result = solve_full(cls.units, cls.scenarios, FullConfig(output_flag=0, mip_gap=1e-4))
+        cls.addClassCleanup(cls.result.model.dispose)
 
     def test_full_model_objective_decomposition(self):
         self.assertEqual(self.result.status, "OPTIMAL")

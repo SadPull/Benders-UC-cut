@@ -1,6 +1,5 @@
 import json
 import tempfile
-import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -11,28 +10,22 @@ import gurobipy as gp
 
 from suc_benders.candidates import make_candidate
 from suc_benders.data import Scenario
-from suc_benders.efficiency_experiment import configuration, summarize, read_events, preflight, supervise, prepare
-from suc_benders.llm import LLMAdviceResult, ask_llm_for_candidates
+from suc_benders.rts24_experiment import read_events
+from suc_benders.llm import LLMConfig, LLMAdviceResult, ask_llm_for_candidates
 from suc_benders.paper_model import CompactQubo
-from suc_benders.solver import solve_benders
+from suc_benders.solver import BendersConfig, solve_benders
 from tests.test_capacity import one_hour_data
 from tests.test_paper import candidate_point
 
 
-def stuck_worker(directory, seed, strategy, budget, connection):
-    connection.send(time.perf_counter()+budget)
-    Path(directory, "events.jsonl").write_text('{"kind":"sa_start"}\n',encoding="utf-8")
-    time.sleep(5)
+def configuration(seed, strategy, rounds=50):
+    return BendersConfig(max_iterations=rounds, stop_on_no_new_candidates=False,
+        llm=LLMConfig(enabled=strategy == "sa_llm", api_format="chat_completions",
+            base_url="https://api.deepseek.com", model="deepseek-flash", timeout_seconds=None,
+            max_retries=1, collect_diagnostics=True))
 
 
-def round_worker(directory, seed, strategy, budget, connection, rounds):
-    connection.send(float("inf"))
-    Path(directory, "events.jsonl").write_text(
-        ''.join(json.dumps({"kind":"iteration", "iteration":i+1})+'\n' for i in range(rounds)),
-        encoding="utf-8")
-
-
-class EfficiencyTests(unittest.TestCase):
+class DynamicSolverTests(unittest.TestCase):
     def test_fixed_rounds_do_not_stop_on_duplicates_and_remove_llm_timeout(self):
         data=replace(one_hour_data(),base_load=np.full(3,30.))
         ss=[Scenario("tiny",1.,data.base_load)]
@@ -49,8 +42,6 @@ class EfficiencyTests(unittest.TestCase):
         self.assertEqual(sum(e['kind']=='iteration' for e in events),3)
         self.assertIsNone(config.time_limit_seconds)
         self.assertFalse(config.stop_on_no_new_candidates)
-        self.assertEqual(configuration(7,"sa").time_limit_seconds,600.)
-        self.assertEqual(configuration(7,"sa_llm").llm.timeout_seconds,300.)
 
     def test_unlimited_http_timeout_and_no_retry_on_server_error(self):
         data=one_hour_data()
@@ -63,73 +54,6 @@ class EfficiencyTests(unittest.TestCase):
         self.assertIsNone(opener.return_value.open.call_args.kwargs['timeout'])
         self.assertEqual(opener.return_value.open.call_count,1)
 
-    def test_round_supervisor_and_resume_identity(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/"run"
-            with patch("suc_benders.efficiency_experiment.worker",round_worker):
-                supervise(path,7,"sa",rounds=3)
-            state=json.loads((path/'state.json').read_text())
-            self.assertEqual(state['status'],'completed')
-            self.assertIsNone(state['budget'])
-            study=Path(directory)/"study"
-            prepare(study,False,rounds=50)
-            prepare(study,True,rounds=50)
-            with self.assertRaises(ValueError):prepare(study,True)
-            with self.assertRaises(ValueError):prepare(study,True,rounds=100)
-
-    def test_unlimited_endpoint_and_timed_checkpoints_are_separate(self):
-        events=[{"kind":"evaluation","elapsed_seconds":20,"sa_calls":1,"feasible":True,"objective":108.},
-                {"kind":"evaluation","elapsed_seconds":900,"sa_calls":2,"feasible":True,"objective":101.}]
-        result=summarize(events,None,100.)
-        self.assertEqual(result['objective'],101.)
-        self.assertEqual(result['checkpoints']['600'],108.)
-        self.assertEqual(result['targets']['0.02']['seconds'],900)
-
-    def test_resume_fingerprint_and_existing_output(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/"study"
-            prepare(path,False)
-            before=(path/"manifest.json").read_bytes()
-            prepare(path,True)
-            self.assertEqual(before,(path/"manifest.json").read_bytes())
-            with self.assertRaises(ValueError):
-                prepare(path,False)
-            with patch("suc_benders.efficiency_experiment.SEEDS",(99,)):
-                with self.assertRaises(ValueError):
-                    prepare(path,True)
-
-    def test_preflight_parameter_rejection_is_not_downgraded(self):
-        from urllib.error import HTTPError
-        import io
-        with patch.dict("os.environ",{"LLM_API_KEY":"SECRET"}), \
-             patch("suc_benders.efficiency_experiment.build_opener") as opener:
-            opener.return_value.open.side_effect=HTTPError("http://example",400,"Bad request",{},io.BytesIO(b'unsupported max SECRET'))
-            result=preflight()
-        self.assertFalse(result["accepted"])
-        self.assertEqual(result["status"],400)
-        self.assertNotIn("SECRET",json.dumps(result))
-        self.assertEqual(opener.return_value.open.call_count,1)
-
-    def test_supervisor_terminates_uninterruptible_call(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/"run"
-            with patch("suc_benders.efficiency_experiment.worker",stuck_worker):
-                supervise(path,7,"sa",.1)
-            state=json.loads((path/"state.json").read_text())
-            self.assertEqual(state["status"],"budget_complete")
-            self.assertEqual(read_events(path/"events.jsonl"),[{"kind":"sa_start"}])
-
-    def test_deadline_events_and_thresholds(self):
-        events = [{"kind":"sa_start"}, {"kind":"sa_end", "status":"failed"},
-                  {"kind":"evaluation", "elapsed_seconds":10, "sa_calls":1, "feasible":True, "objective":108.},
-                  {"kind":"evaluation", "elapsed_seconds":601, "sa_calls":2, "feasible":True, "objective":100.},
-                  {"kind":"sa_start"}]
-        summary = summarize(events, 600, 100)
-        self.assertEqual(summary["sa_calls"], 2)
-        self.assertEqual(summary["objective"], 108.)
-        self.assertIsNone(summary["targets"]["0.06"])
-        self.assertEqual(summary["targets"]["0.08"]["sa_calls"], 1)
-        self.assertEqual(summary["checkpoints"]["600"], 108.)
 
     def test_partial_last_event_is_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -180,8 +104,8 @@ class EfficiencyTests(unittest.TestCase):
             self.assertGreater(args[5].timeout_seconds, 180)
             self.assertLessEqual(args[5].timeout_seconds, 300)
             return LLMAdviceResult([proposal, proposal])
-        config = replace(configuration(7,"sa_llm"), run_to_deadline=False, max_iterations=2,
-                         time_limit_seconds=400, event_sink=events.append)
+        config = replace(configuration(7,"sa_llm"), max_iterations=2,
+                         time_limit_seconds=400, llm=replace(configuration(7,"sa_llm").llm, timeout_seconds=300), event_sink=events.append)
         optimize = gp.Model.optimize
         def continuous(model, *args, **kwargs):
             model.update()
@@ -191,7 +115,6 @@ class EfficiencyTests(unittest.TestCase):
              patch("suc_benders.paper_solver.solve_qubo",return_value=[np.array([])]), \
              patch.object(CompactQubo,"decode",return_value=(candidate_point(seed),0.)), \
              patch("suc_benders.paper_solver.ask_llm_for_candidates",side_effect=advise), \
-             patch("suc_benders.solver.decommit_commitment",side_effect=AssertionError("decommit")), \
              patch.object(gp.Model,"optimize",continuous):
             result = solve_benders(data,scenarios,config)
         self.assertTrue(contexts)
@@ -206,16 +129,11 @@ class EfficiencyTests(unittest.TestCase):
         data=replace(one_hour_data(),base_load=np.full(3,30.))
         ss=[Scenario("tiny",1.,data.base_load)]
         events=[]
-        config=replace(configuration(7,"sa"),time_limit_seconds=.3,event_sink=events.append)
+        config=replace(configuration(7,"sa",rounds=100000),time_limit_seconds=.3,event_sink=events.append)
         with patch("suc_benders.paper_solver.solve_qubo",return_value=[]):
             result=solve_benders(data,ss,config)
         self.assertEqual(result.status,"TIME_LIMIT")
         self.assertGreater(sum(e["kind"]=="sa_start" for e in events),1)
-
-    def test_temporal_llm_stays_disabled(self):
-        data=one_hour_data()
-        with self.assertRaises(ValueError):
-            solve_benders(data,[Scenario("tiny",1.,data.base_load)],replace(configuration(7,"sa_llm"),decomposition="temporal"))
 
 
 if __name__ == "__main__":

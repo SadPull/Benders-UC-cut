@@ -120,7 +120,7 @@ class AstraModuleTests(unittest.TestCase):
         data = replace(one_hour_data(), base_load=np.full(3, 30.))
         scenarios = [Scenario("tiny", 1., data.base_load)]
         self.config.enhanced_feedback = True
-        cfg = BendersConfig(master_encoding="dynamic", decommit_candidates=False,
+        cfg = BendersConfig(
             max_iterations=2, stop_on_no_new_candidates=False, llm=self.config,
             quantum=QuantumConfig(candidate_pool_size=1))
         def respond(_):
@@ -171,7 +171,7 @@ class AstraModuleTests(unittest.TestCase):
         def event(row):
             if row["kind"] == "evaluation":
                 publish(self.root / "cancel.json", {})
-        cfg = BendersConfig(master_encoding="dynamic", decommit_candidates=False,
+        cfg = BendersConfig(
             llm=self.config, event_sink=event)
         with patch("suc_benders.paper_solver.solve_qubo", side_effect=AssertionError("cancelled")):
             result = solve_benders(data, [Scenario("tiny", 1., data.base_load)], cfg)
@@ -197,7 +197,7 @@ class AstraModuleTests(unittest.TestCase):
         def fail(*args, **kwargs):
             calls.append(args[2])
             return LLMAdviceResult([], failed=True, message="failed", diagnostics={"proposals": []})
-        cfg = BendersConfig(master_encoding="dynamic", decommit_candidates=False,
+        cfg = BendersConfig(
             max_iterations=8, stop_on_no_new_candidates=False,
             llm=LLMConfig(enabled=True, schedule="stagnation", max_calls=2))
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
@@ -214,7 +214,7 @@ class AstraModuleTests(unittest.TestCase):
         data = replace(one_hour_data(), base_load=np.full(3, 30.))
         scenarios = [Scenario("tiny", 1., data.base_load)]
         candidate = make_candidate(data, scenarios, np.ones((1, 3), dtype=int), source="llm")
-        cfg = BendersConfig(master_encoding="dynamic", decommit_candidates=False,
+        cfg = BendersConfig(
             advisor_only=True, quantum_candidates=False, max_iterations=4,
             stop_on_no_new_candidates=False, llm=LLMConfig(enabled=True, max_calls=2))
         optimize = gp.Model.optimize
@@ -248,7 +248,7 @@ class AstraModuleTests(unittest.TestCase):
         cost = _fixed_cost(data, initial.u, initial.v, initial.w) + solve_scenario(
             data, scenarios[0], initial.u, initial.v, initial.w).objective
         candidate = make_candidate(data, scenarios, np.array([[1, 1, 1], [0, 0, 0]]), source="llm")
-        cfg = BendersConfig(master_encoding="dynamic", decommit_candidates=False,
+        cfg = BendersConfig(
             max_iterations=1, stop_on_no_new_candidates=False, target_cost=cost,
             llm=LLMConfig(enabled=True))
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(

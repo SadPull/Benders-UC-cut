@@ -7,7 +7,7 @@ import numpy as np
 
 from .common import Scenario, commitment_capacity
 from .data import UCData
-from .master import BendersCut, MasterCandidate
+from .master import MasterCandidate
 from .subproblem import ScenarioResult
 
 
@@ -25,27 +25,13 @@ class CandidateEvaluation:
 
 
 @dataclass
-class LocalMoveResult:
-    move: str
-    unit: int
-    period: int
-    width: int
-    cost_change: float
-    improved: bool
-    source: str = "local"
-
-
-@dataclass
 class LLMContextInput:
     incumbent: MasterCandidate | None
     incumbent_results: Sequence[ScenarioResult]
     base_evaluations: Sequence[CandidateEvaluation]
-    local_move_results: Sequence[LocalMoveResult]
     candidate_evaluations: Sequence[CandidateEvaluation]
-    cuts: Sequence[BendersCut]
     history: Sequence[Any]
     infeasible_diagnostics: Sequence[Mapping[str, Any]] = field(default_factory=list)
-    decommit_ladder: Sequence[CandidateEvaluation] = field(default_factory=list)
 
 
 def _round3(value: Any) -> Any:
@@ -116,53 +102,6 @@ def _scenario_duals(results: Sequence[ScenarioResult]) -> dict:
         for result in results
     ]
     return {"balance": balance, "reserve": reserve}
-
-
-def _benders_cut_summary(
-    cuts: Sequence[BendersCut],
-    incumbent: MasterCandidate | None,
-    expected_fuel: float | None,
-) -> dict:
-    optimality_cuts = [cut for cut in cuts if cut.kind == "optimality"]
-    recent = optimality_cuts[-5:]
-    tight_count = 0
-    if incumbent is not None and expected_fuel is not None:
-        for cut in optimality_cuts:
-            value = cut.value(incumbent.u, incumbent.v, incumbent.w)
-            if abs(value - expected_fuel) <= 1e-3:
-                tight_count += 1
-    if optimality_cuts:
-        beta_u = np.sum([cut.beta_u for cut in optimality_cuts], axis=0)
-        unit_scores = np.sum(np.abs(beta_u), axis=1)
-        period_scores = np.sum(np.abs(beta_u), axis=0)
-        top_units = np.argsort(-unit_scores)[:5].tolist()
-        top_periods = np.argsort(-period_scores)[:5].tolist()
-    else:
-        top_units = []
-        top_periods = []
-    return {
-        "total_cuts": len(cuts),
-        "recent_cuts": len(recent),
-        "tight_at_incumbent": tight_count,
-        "top_covered_units": top_units,
-        "top_covered_periods": top_periods,
-    }
-
-
-def _local_move_rows(results: Sequence[LocalMoveResult]) -> list[dict]:
-    rows = []
-    for result in sorted(results, key=lambda item: abs(item.cost_change), reverse=True)[:10]:
-        rows.append(
-            {
-                "move": result.move,
-                "unit": result.unit,
-                "period": result.period,
-                "width": result.width,
-                "cost_change": result.cost_change,
-                "improved": result.improved,
-            }
-        )
-    return rows
 
 
 def _candidate_comparison_rows(
@@ -361,10 +300,6 @@ def build_llm_context(
                 context_input.base_evaluations, total
             ),
             "scenario_duals": _scenario_duals(results),
-            "benders_cut_summary": _benders_cut_summary(
-                context_input.cuts, incumbent, expected_fuel
-            ),
-            "local_move_results": _local_move_rows(context_input.local_move_results),
             "candidate_comparison": _candidate_comparison_rows(
                 context_input.candidate_evaluations
             ),
@@ -385,7 +320,6 @@ def build_llm_context(
             ),
             "hourly_commitment_profile": _hourly_commitment_profile(data, incumbent),
             "peaker_usage": _peaker_usage(data, incumbent),
-            "decommit_ladder": _decommit_ladder_rows(context_input.decommit_ladder),
         }
     )
 
@@ -461,20 +395,6 @@ def _decommit_gradient_rows(
     return rows
 
 
-def decommit_gradient_map(
-    data: UCData,
-    scenarios: Sequence[Scenario],
-    incumbent: MasterCandidate | None,
-    results: Sequence[ScenarioResult],
-) -> dict[tuple[int, int], float]:
-    """Map (unit, period) -> estimated total cost change of switching it off."""
-
-    return {
-        (row["unit"], row["period"]): row["estimated_total_change"]
-        for row in _decommit_gradient_rows(data, scenarios, incumbent, results)
-    }
-
-
 def _unit_hour_decommit_gradient(
     data: UCData,
     scenarios: Sequence[Scenario],
@@ -546,22 +466,3 @@ def _peaker_usage(data: UCData, incumbent: MasterCandidate | None) -> list[dict]
             }
         )
     return rows
-
-
-def _decommit_ladder_rows(
-    ladder: Sequence[CandidateEvaluation],
-) -> list[dict]:
-    rows = []
-    for index, evaluation in enumerate(ladder):
-        rows.append(
-            {
-                "rung": index + 1,
-                "source": evaluation.source,
-                "total_cost": evaluation.total_cost,
-                "fixed_cost": evaluation.fixed_cost,
-                "expected_fuel_cost": evaluation.expected_fuel_cost,
-                "feasible": evaluation.feasible,
-                "hamming_to_incumbent": evaluation.hamming_to_incumbent,
-            }
-        )
-    return rows[:10]

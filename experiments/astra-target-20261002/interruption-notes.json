@@ -1,8 +1,0 @@
-{
-  "round": 7,
-  "note": "The chat turn was interrupted after candidate generation. The solver remained alive waiting for the receipt. User requested continuation; the existing candidate was consumed once without restarting the solver or model.",
-  "candidate_file_mtime": 1790928231.1625025,
-  "receipt_completed_at": 1790929054.650962,
-  "file_to_receipt_seconds": 823.4884595870972,
-  "timing_interpretation": "End-to-end runtime includes this delay; do not report it as pure optimization or model inference time."
-}

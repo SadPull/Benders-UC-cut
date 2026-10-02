@@ -47,6 +47,6 @@ assumptions: 0.90/1.00/1.05 load multipliers, probabilities 0.25/0.50/0.25,
 and 5% reserve. These scenarios and probabilities are **not IEEE source data**.
 Maximum stochastic demand plus reserve is 3142.125 MW.
 
-Always specify both `--data data/rts24/units.json` and the chosen
-`--scenario-file data/rts24/deterministic.json` or `stochastic.json`.
-Existing default commands still use the historical 10x24 case.
+The default input is `data/rts24/units.json` with the stochastic profile.
+Use `--scenario-file data/rts24/deterministic.json` for the deterministic case;
+`--scenario-file data/rts24/stochastic.json` selects the stochastic profile explicitly.

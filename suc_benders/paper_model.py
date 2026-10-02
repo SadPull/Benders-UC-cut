@@ -1,4 +1,4 @@
-"""Indexed SUC rows shared by temporal partitioning, continuous oracles and QUBO.
+"""Indexed whole-horizon SUC rows shared by continuous dispatch and QUBO.
 
 Rows use residual <= 0 (or == 0). Costs are in original currency units;
 scenario probabilities are incorporated exactly once, at construction.
@@ -52,11 +52,8 @@ class Cut:
 
 
 class IndexedUC:
-    def __init__(self, data, scenarios, block_hours):
+    def __init__(self, data, scenarios):
         self.data, self.scenarios = data, scenarios
-        self.blocks = [tuple(range(t, min(t + block_hours, data.horizon)))
-                       for t in range(0, data.horizon, block_hours)]
-        self.owner = {t: b for b, ts in enumerate(self.blocks) for t in ts}
         self.bounds, self.linear, self.quadratic, self.rows = {}, {}, {}, []
         d = data
         for t in range(d.horizon):
@@ -91,7 +88,7 @@ class IndexedUC:
                     self.add({u: float(d.pmin[i]), p: -1.}, scale=d.pmax[i], label="pmin")
                     self.add({p: 1., r: 1., u: -float(d.pmax[i]), v: float(d.pmax[i]-d.pstart[i])}, scale=d.pmax[i], label="startup_capacity")
                     a = {p: 1., r: 1., u: -float(d.pmax[i])}
-                    # Redundant envelope keeps each relaxed block physically bounded.
+                    # Keep the continuous relaxation physically bounded.
                     self.add(a.copy(), scale=d.pmax[i], label="envelope")
                     if t + 1 < d.horizon:
                         a[key("w", i, t+1)] = float(d.pmax[i]-d.pshut[i])
@@ -104,38 +101,12 @@ class IndexedUC:
             for s, scenario in enumerate(scenarios):
                 self.add({key("p", i, t, s): 1. for i in range(d.n_units)}, -float(scenario.load[t]), True, label="balance")
                 self.add({key("r", i, t, s): -1. for i in range(d.n_units)}, float(d.reserve_fraction*scenario.load[t]), label="reserve")
-        self.local = [[] for _ in self.blocks]
-        self.coupling = []
-        for row in self.rows:
-            owners = {self.owner[k[2]] for k in row.a}
-            if len(owners) == 1:
-                self.local[next(iter(owners))].append(row)
-            else:
-                self.coupling.append(row)
-        self.cost_scale = max(1., sum(max(0., c)*self.bounds[k][1] for k, c in self.linear.items())
-                              + sum(c*self.bounds[k][1]**2 for k, c in self.quadratic.items()))
 
     def add(self, a, c=0., equality=False, scale=1., label=""):
         self.rows.append(Row({k: v for k, v in a.items() if v}, c, equality, float(scale), label))
 
-    def coefficients(self, multipliers):
-        costs = dict(self.linear)
-        constant = 0.
-        for price, row in zip(multipliers, self.coupling):
-            factor = self.cost_scale * price / row.scale
-            constant += factor * row.c
-            for k, v in row.a.items():
-                costs[k] = costs.get(k, 0.) + factor*v
-        return costs, constant
 
-    def original_cost(self, x):
-        return sum(c*x[k] for k, c in self.linear.items()) + sum(c*x[k]**2 for k, c in self.quadratic.items())
-
-    def residuals(self, x):
-        return np.array([row.value(x)/row.scale for row in self.coupling])
-
-
-def fixed_binary(rows, keys):
+def fixed_binary(rows):
     """Propagate only consequences of small integer hard rows, exactly."""
     fixed = {}
     small = [r for r in rows if all(binary(k) for k in r.a) and len(r.a) <= 3]
@@ -160,21 +131,17 @@ def fixed_binary(rows, keys):
 
 
 class Block:
-    def __init__(self, indexed, index):
-        self.uc, self.index = indexed, index
-        self.times = indexed.blocks[index]
-        self.keys = [k for k in indexed.bounds if indexed.owner[k[2]] == index]
+    def __init__(self, indexed):
+        self.uc = indexed
+        self.times = tuple(range(indexed.data.horizon))
+        self.keys = list(indexed.bounds)
         self.bkeys = [k for k in self.keys if binary(k)]
         self.ckeys = [k for k in self.keys if not binary(k)]
-        self.rows = indexed.local[index]
+        self.rows = indexed.rows
         self.integer_rows = [r for r in self.rows if all(binary(k) for k in r.a)]
-        self.fixed = fixed_binary(self.integer_rows, self.bkeys)
-        self.feasibility_cuts = []
-        # Fixed across multiplier changes, including worst possible price terms.
+        self.fixed = fixed_binary(self.integer_rows)
         self.scale = max(1., sum(abs(indexed.linear[k])*indexed.bounds[k][1] for k in self.keys)
-                         + sum(indexed.quadratic.get(k, 0.)*indexed.bounds[k][1]**2 for k in self.keys)
-                         + sum(indexed.cost_scale*10/row.scale*sum(abs(v)*indexed.bounds[k][1]
-                               for k, v in row.a.items() if k in self.keys) for row in indexed.coupling))
+                         + sum(indexed.quadratic.get(k, 0.)*indexed.bounds[k][1]**2 for k in self.keys))
 
     def discrete_feasible(self, x):
         return all((abs(r.value(x)) <= 1e-7 if r.equality else r.value(x) <= 1e-7) for r in self.integer_rows)

@@ -308,21 +308,3 @@ def cut_value(result: ScenarioResult, u: np.ndarray, v: np.ndarray, w: np.ndarra
         + np.sum(result.cut_beta_v * v)
         + np.sum(result.cut_beta_w * w)
     )
-
-
-def aggregate_optimality_cut(results: list[ScenarioResult], scenarios: list[Scenario]) -> ScenarioResult:
-    if not results:
-        raise ValueError("at least one scenario result is required")
-    alpha = sum(scenario.probability * result.cut_alpha for scenario, result in zip(scenarios, results))
-    beta_u = sum(scenario.probability * result.cut_beta_u for scenario, result in zip(scenarios, results))
-    beta_v = sum(scenario.probability * result.cut_beta_v for scenario, result in zip(scenarios, results))
-    beta_w = sum(scenario.probability * result.cut_beta_w for scenario, result in zip(scenarios, results))
-    return ScenarioResult(
-        feasible=True,
-        status="AGGREGATED",
-        objective=sum(scenario.probability * result.objective for scenario, result in zip(scenarios, results)),
-        cut_alpha=float(alpha),
-        cut_beta_u=np.asarray(beta_u),
-        cut_beta_v=np.asarray(beta_v),
-        cut_beta_w=np.asarray(beta_w),
-    )

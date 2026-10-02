@@ -1,581 +1,116 @@
-# SUC + Benders: public and historical benchmarks
+# RTS-24 SUC：SA + LLM Benders
 
-## Astra advisor module
+本项目研究 IEEE RTS-24 派生随机机组组合问题：32 台机组、24 个小时，
+由 Kaiwu 本地模拟退火（SA）生成开停机候选，LLM 提供可选建议，
+Gurobi 求解连续调度子问题并生成 Benders 割。候选必须经过修复、去重和完整物理／成本校验。
+独立 Gurobi 完整模型提供参考解及下界。
 
-The [DeepSeek Flash comparison](experiments/rts24-deepseek-burst-20261002/report.md)
-was stopped by the user at **907432.581261**, **2.527027%** above the reference.
-It used 14 SA calls, 10 completed LLM calls and one interrupted request. The
-amended inclusive 1% target was not reached; calls 8–10 hit the provider's
-generation limit. The archive records both stopping-rule changes, all completed
-exchanges, the partial call, known token usage, and independent audits.
+当前仅维护 RTS-24 全时域动态 QUBO 流程。旧 10×24 数据、归因实验、
+静态／旧版主问题、时间分块与精确块对照、独立减开机搜索及旧实验归档已移除。
 
-The [RTS-24 three-call burst experiment](experiments/rts24-sa-llm-burst-20261002/report.md)
-reached the strict 0.5% reference target after **5 SA calls and 2 Astra calls**.
-Its best validated cost is **889097.785912**, **0.455455%** above the independent
-reference. Three consecutive insufficient SA rounds triggered the first burst;
-the first validated candidate in call 2 stopped the run before call 3.
-Use `--strategy stagnation_burst --target-reference-gap 0.005` with the RTS-24
-inputs. Each LLM call sees the latest validated best and preceding feedback.
+## 安装
 
-The [v0.17.0 reference-comparison study](experiments/astra-target-20261002/README.md)
-completed 16 SA/Astra rounds before the user requested a stop. Its best validated
-cost is **572242.837016**, **0.215193%** above the Gurobi reference; the original
-0.1% target was **not met**. The archive includes a fresh 50-call SA control,
-same-call comparisons, all raw exchanges and independent physical checks.
-
-The [Codex-controlled Astra module](docs/astra-module.md) now generates proposal
-feedback automatically and exchanges files with fresh `gpt-6-astra` / `max`
-subagents. It supports fixed alternation, stagnation-triggered calls, an
-LLM-only continuous-subproblem control, and SA-only runs. Python waits for
-Codex to service each request; it does not launch subagents by itself.
-
-```powershell
-python -u -m suc_benders.astra_run --data data/suc_10x24.json --seed 7 --rounds 2 --strategy fixed --output-dir results/astra-new-run
-```
-
-Two real subagent calls passed the file-exchange and automatic-feedback
-acceptance check. This is integration validation, not a performance comparison.
-
-## IEEE RTS-24 derived benchmark
-
-The new [public-input benchmark](data/rts24/README.md) has **32 generators and
-24 hourly periods**, with 3405 MW installed capacity and 2850 MW peak demand.
-It combines pinned MATPOWER costs and capacities with published RTS-79 UC
-time constraints, initial output and hourly loads. Every field has provenance,
-an offline converter and source checksums. It is a **copperplate, fixed-startup-cost
-derivative**, not a reproduction of the IEEE network or the UC+ACOPF formulation.
-Hydro units have no water/energy budgets; network and hot/cold startup costs are
-outside this benchmark's scope.
-
-The [v0.16.0 baseline archive](experiments/rts24-baseline-20261002/README.md)
-passed all 153 regression tests and both profile audits. Three SA rounds left
-feasible costs 46.89% (deterministic) and 32.70% (stochastic) above the independent
-Gurobi references. These are smoke-test results, not evidence of algorithmic
-superiority. Full schedules, bounds, logs and checksums are preserved.
-
-The deterministic profile uses the published load and zero reserve. The SUC
-profile uses project-defined 0.90/1.00/1.05 load multipliers, probabilities
-0.25/0.50/0.25, and 5% reserve; these are not original IEEE scenarios.
-Historical commands and archived 10x24 results retain their existing defaults.
-
-```powershell
-python data/rts24/convert.py --check
-python -m suc_benders.rts24_experiment --output-dir results/rts24-new-validation
-```
-
-The one-shot validation runner requires a clean committed checkout and a new
-output directory. It runs both SA profiles first (seed 7, dynamic full horizon,
-pool 16, at most 3 rounds/600 seconds each), then independent Gurobi references
-(one thread, seed 7, 600-second solve limit, MIP gap 1e-4). It never calls an LLM,
-QPU, independent decommitment search or random candidate generator, and never
-automatically reruns a completed or failed output directory.
-
-For individual runs, use the existing interfaces with explicit inputs:
-
-```powershell
-python -m suc_benders --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --master-encoding dynamic --no-decommit --max-iterations 3 --time-limit-seconds 600 --output results/rts24-sa.json
-python -m suc_benders.full --data data/rts24/units.json --scenario-file data/rts24/deterministic.json --time-limit 600 --mip-gap 0.0001
-```
-
-Use the validation runner for the exact single-thread reference protocol and
-hard SA deadline. Optional JSON `initial_output` preserves published initial
-dispatch; omitting it retains the historical initial-at-Pmin behavior.
-
-## Current research: LLM / SA efficiency
-
-The latest [audited results](experiments/llm-advisor-evaluation-20261002/README.md)
-include the stopped Farluna study, a Responses API trial, and GPT-6 Astra
-subagent trials. In the latest seed-7 run, seven independent Astra/max calls
-produced a validated cost of **571504.279645**, **0.085852%** above the feasible
-reference. The user changed the stopping rule during the study; it stopped
-during round 7 after six complete rounds. This is a single-seed result, not a
-completed five-seed comparison or a certified optimality gap. All experiment
-processes are stopped; no scheduled monitoring is active.
-
-The current question is whether LLM-generated schedules reduce SA calls to a
-fixed feasible-cost target, or improve feasible cost at an equal end-to-end
-time budget. Use `python -m suc_benders.efficiency_experiment`; see
-[experiment protocol](#llm--sa-efficiency-study) below. The independent
-decommitment search is disabled in this study; its scheduling ideas are supplied
-to the LLM as heuristics, with all proposals independently validated.
-
-The [Farluna rerun results](experiments/llm-sa-efficiency-farluna-20261001/findings.md)
-contain five complete seed pairs. SA+LLM had a higher final feasible cost in all
-five pairs (mean increase 8236.76), and zero SA-call savings at jointly reached
-quality targets. One response produced two repaired, feasible candidates;
-four requests timed out and five were unfinished at the overall deadline.
-The [v0.14.0 results](experiments/llm-sa-efficiency-20261001/findings.md),
-which used the previous provider and observed 32000-token truncation, remain
-available separately.
-
-## Fixed-round Farluna rerun
-
-`python -m suc_benders.efficiency_experiment --rounds 50` runs the same five
-seeds and two strategies for 50 rounds each, without an overall time limit or
-a client-side LLM request timeout. It retains max reasoning, 65536 tokens,
-one SA call per round, and all existing candidate checks. Failed requests are
-recorded without retry; duplicate candidates do not end the run early.
-Server-side failures can still occur. Runs remain serial and use fresh output
-directories; resume skips existing runs and requires matching fingerprints.
-
-The final cost compares equal round counts, not equal elapsed time. The
-60/120/300/600-second checkpoints and fixed quality thresholds remain available
-for time and first-passage comparisons. The default command without `--rounds`
-still uses the v0.14.1 600-second / 300-second request protocol.
-
-The executed 50-round Farluna study was stopped by the user with one complete
-SA run and two incomplete SA+LLM traces. Its
-[stop report and raw archive](experiments/llm-advisor-evaluation-20261002/llm-sa-efficiency-50rounds-20261001-180425/stopped-report.md)
-preserve the incomplete samples; there are no complete 50-round pairs.
-
-## Codex subagent experiment
-
-`suc_benders.subagent_experiment` preserves the original solver and prompt
-while exchanging per-round input files and validated response receipts with
-the supervising chat. Each LLM call uses a fresh `gpt-6-astra` subagent with
-`max` reasoning. The local Responses envelope only reuses parsing and repair;
-the transport makes no HTTP requests or automatic agent launches. The chat
-must dispatch each agent and acknowledge its output. Temperature and actual
-token usage are not exposed by this subagent interface.
-
-This research driver retains its original five-seed, 50-round configuration.
-The latest run's user-requested 10-round / below-0.1% stopping amendment and
-the session's stopping helper are preserved in the
-[experiment archive](experiments/llm-advisor-evaluation-20261002/astra-subagent-50rounds-20261002-1016/README.md).
-Existing run directories cannot be replayed automatically. Reading the
-saved reports requires no new model or optimization calls.
-
-## Independent exact-block control
-
-`python -m suc_benders.exact_experiment` runs an independent original-block
-MIQP control against `results/paper-transfer-20260930-v2`. It leaves the SA
-research backend and archived results unchanged. `--mode offline|closed|both`
-selects the experiment (default: both); `--output-dir PATH` chooses a fresh
-directory. Resume with the same arguments and `--resume`; inputs, software and
-source fingerprints must match. The archived source directory must be available
-locally as described in the paper-transfer experiment README.
-
-Offline control selects the first/middle/last complete multiplier snapshots of
-all five seeds for 1/2/3-hour blocks, with a shared 1800-second budget. Each
-original block has at most 30 seconds. Independent closed loops have 300 seconds
-and 10 outer rounds each. Gurobi uses one thread, seed 7, relative gap 1e-8 and
-absolute gap 1e-4. Time-limited incumbents are not certified optima. No QUBO,
-SA, LLM or hardware calls occur in this control.
-
-Atomic state files preserve block certificates, elapsed budgets and completed
-work. After an interruption, wall time since the last active checkpoint,
-including downtime, is conservatively charged to the remaining stage budget.
-Budgets are checked at stage/call boundaries; solver or I/O overhead can finish
-late. Checkpoints exclude late results. `report.md` and `summary.json` separate
-the lower-bound gap, feasible-cost difference, same-price sampling error and
-uncertified/incomplete results. Box-dual convergence is not a certificate of
-global SUC optimality.
-
-Current release: [v0.16.0](CHANGELOG.md).
-
-The completed exact-block control, findings and checksummed raw records are
-published under [experiments/exact-block-control-20261001](experiments/exact-block-control-20261001/README.md).
-
-This repository contains a small, reproducible two-stage stochastic unit commitment model. The research Benders algorithm generates binary commitment candidates using Kaiwu local simulated annealing, decommitment search, and an optional LLM. Gurobi solves only the continuous dispatch subproblems within that algorithm. A separate full deterministic equivalent Gurobi model supplies an external reference solution and proven lower bound for post-run comparisons.
-
-## Scope
-
-- 10 generators, 24 hourly periods
-- three load scenarios:
-  - `low`: 0.90 × base load, probability 0.25
-  - `base`: 1.00 × base load, probability 0.50
-  - `high`: 1.05 × base load, probability 0.25
-- 5% spinning reserve
-- exact 10×24 base load and generator parameters from the original MATLAB data
-- simulated annealing and decommitment for the binary master search
-- optional LLM candidate advice over HTTP; no QPU calls
-
-> The `high` scenario is capped at 1.05 because 1.10 × peak load plus 5% reserve exceeds the installed capacity of the 10-generator system. If you want a different high scenario, provide your own `scenario_file`.
-
-## Install
+使用 Python 3.10、Kaiwu SDK 1.4.1 和可用的 Gurobi 许可证：
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-Use Python 3.10 with Kaiwu SDK 1.4.1, as specified by the
-[SDK installation guide](https://kaiwu-sdk-docs.qboson.com/zh/latest/source/getting_started/sdk_installation_instructions.html).
-If the SDK requests activation, follow its console instructions using your
-own user ID and SDK authorization code.
+Kaiwu 激活方式见 [SDK 安装说明](https://kaiwu-sdk-docs.qboson.com/zh/latest/source/getting_started/sdk_installation_instructions.html)。
+这里只使用本地模拟退火，不调用 QPU。
 
-The Kaiwu integration uses the documented `kaiwu.core.QuboModel` and
-`kaiwu.core.qubo_matrix_to_ising_matrix` APIs. The annealer receives the full
-QUBO matrix, including inequality slack variables; decoding extracts the
-commitment and theta bits and discards the auxiliary bits.
+## 数据
 
-## Capacity and QUBO encoding
+[数据说明与来源](data/rts24/README.md)包含公开输入、转换器及校验和。
+总装机容量 3405 MW，峰值负荷 2850 MW。模型采用无网络聚合系统和固定启动费用；
+不包含输电约束、冷热启动费用或水电能量预算。
 
-`pstart` and `pshut` are separate startup and shutdown output limits. Dispatch
-and reserve must satisfy both limits; a unit that starts in hour t and shuts
-down in hour t+1 has capacity `min(pstart, pshut)`. Candidate checks, repair,
-context, scenario subproblems, and the full reference use this same rule.
-The QUBO uses an auxiliary AND bit for this case when minimum up-time is one
-hour. Slack and AND bits are excluded from `variable_count()` and included in
-`qubo_variables()` and `matrix()`.
+| 配置 | 场景 | 备用 |
+|---|---|---|
+| `data/rts24/deterministic.json` | 公开小时负荷，概率 1 | 0 |
+| `data/rts24/stochastic.json` | 负荷倍率 0.90／1.00／1.05，概率 0.25／0.50／0.25 | 5% |
 
-Reserve inequalities use the exact decimal capacity lattice and explicitly
-bounded integer slack. Demand is rounded up to the next point on that lattice,
-which preserves the binary feasible set. `reserve_scale` affects conditioning,
-not the lattice or its feasible set. Candidate capacity checks use a numerical
-tolerance of 1e-6 MW rather than allowing a 0.5 MW shortage.
-
-Only copies of Benders cuts entering the QUBO are quantized. Constants and
-commitment coefficients are rounded downward in the form `affine <= 0`, so
-quantization can only relax a cut. The worst-case relaxation is at most
-`theta_step` for an optimality cut and 1e-3 in total-shortfall units for a
-feasibility cut. Theta coefficients remain exact on the chosen grid. Original
-cuts, Gurobi dispatch, and reported costs retain their original precision.
-Zero-range and constant inequalities do not request invalid SDK slack ranges.
-
-The objective and optimality cuts use `max(1, theta_cap)` as their common cost
-scale; reserve and feasibility cuts use `reserve_scale`. Scaling occurs before
-squaring constraint residuals. `QuantumConfig.initial_temperature` is a multiplier
-of the Ising single-spin energy-change bound; `cutoff_temperature` is a multiplier
-of the smallest positive objective coefficient. Both are expressed in the same
-units as the normalized matrix. `solve_qubo(matrix, config, *, energy_unit=1.0)`
-remains callable with two arguments; the research loop supplies the master's
-objective resolution explicitly. Cooling to this resolution can take more
-temperature steps than the former fixed normalized cutoff. These changes do not
-guarantee feasible annealing samples or global optimality.
-
-## Architecture
-
-```text
-Kaiwu SA + repair + decommit + optional LLM -> commitment candidates
-Gurobi continuous subproblems              -> dispatch, costs, duals, Benders cuts
-Benders cuts                              -> next Kaiwu QUBO
-
-Independent full Gurobi model              -> reference solution and lower bound
-Completed research results + reference    -> post-run comparison only
-```
-
-- **Candidate generation** uses simulated annealing and decommitment by default;
-  LLM advice is optional. Deterministic initialization, repair, deduplication, and
-  incumbent reuse support those searches without another optimization solver.
-- **Subproblems** receive fixed `u/v/w`; all Gurobi decision variables inside the
-  research loop are continuous. Their costs, duals, and cuts provide normal
-  Benders feedback and decommitment/LLM context.
-- **The full Gurobi reference is independent.** Its commitment, objective, bound,
-  and status never enter candidate generation, cuts, LLM context, or stopping
-  decisions. The benchmark solves it after all research strategies finish.
-- The research algorithm stops at `MAX_ITERATIONS` or `NO_NEW_CANDIDATES`.
-  Temporary LLM failures can retry within the iteration budget. If no evaluated
-  candidate is feasible in every scenario, it returns `NO_FEASIBLE_SOLUTION`;
-  this does not prove the original model infeasible.
-- The heuristic master does not supply a certified global lower bound or a
-  Benders convergence certificate. QUBO energies and sampled objectives must
-  not be treated as proven lower bounds.
-
-## Changes in v0.11.0
-
-- Remove the exact Gurobi master and its influence on candidates and termination.
-- Remove independent local perturbation; keep decommitment moves and their LLM
-  context (`unit_hour_decommit_gradient`, `top_decommit_opportunities`,
-  `hourly_commitment_profile`, `peaker_usage`, and `decommit_ladder`).
-- Report the full model's `ObjBound`, feasible objective, status, MIP gap, and
-  runtime separately as external reference results.
-- Remove the exact-master and perturbation settings from `BendersConfig` and
-  the CLI, including `--no-exact-master`, `--master-time-limit`,
-  `--master-mip-gap`, and `--no-perturb`. Old callers must remove these arguments.
-- Remove research result/history fields `lower_bound`, `gap`, `master_status`,
-  `master_runtime`, `exact_candidates`, and `perturbed_candidates`.
-
-## LLM context
-
-When `--llm` is enabled, the advisor receives a compact P0/P1 context containing:
-
-- incumbent cost decomposition and per-scenario fuel cost
-- base candidate costs and Hamming distance to the incumbent
-- scenario balance and reserve dual prices
-- Benders cut coverage and tightness summary
-- recent local move cost changes
-- candidate comparison table
-- scenario dispatch summary and reserve margins
-- tight constraints and infeasibility diagnostics
-- recent iteration history
-- unit marginal costs and unit cost decomposition
-
-All context values are rounded to three decimals and lists are capped to keep the prompt compact. LLM output remains advisory only and is always validated locally.
-
-`--llm-api-format responses` selects the OpenAI-compatible `/responses` endpoint,
-using `input`, `max_output_tokens`, and `reasoning.effort`. Only completed
-responses are accepted; output-token truncation is reported as a failure.
-The existing Chat Completions and Messages formats remain selectable.
-
-Per-unit fuel cost is the probability-weighted cost of scenario outputs,
-`E[a*p^2 + b*p]`, rather than the cost of the expected output. Unit decomposition
-includes `shutdown_cost`; hourly fixed costs include shutdowns even when the
-unit is already off in that hour.
-
-## Run the benchmark
+随机场景及备用率是项目设定。默认输入是 `data/rts24/units.json`，
+不传 `--scenario-file` 时采用上述随机场景。
 
 ```powershell
-python -m suc_benders.benchmark --max-iterations 5
+python data/rts24/convert.py --check
 ```
 
-The default strategy rows are `quantum-only`, `quantum+repair`, and
-`quantum+repair+decommit`. Every row retains the deterministic initial candidate.
-Select an individual strategy with:
+## 运行
+
+纯 SA：
 
 ```powershell
-python -m suc_benders.benchmark --max-iterations 5 --strategies quantum+repair+decommit
+python -m suc_benders --strategy sa --rounds 3 --output-dir results/rts24-sa-new
 ```
 
-To include `quantum+repair+llm` and `quantum+repair+decommit+llm`:
+SA 与 Astra 固定交替（需在 Codex 中调度子代理）：
 
 ```powershell
-python -m suc_benders.benchmark --max-iterations 5 --llm
+python -m suc_benders --strategy fixed --rounds 2 --output-dir results/rts24-astra-new
 ```
 
-`LLM_API_KEY` must be set before using `--llm`. Without it, the LLM row safely returns no candidates.
-
-Benchmark output keeps `exact_objective` as the independent reference's best
-feasible objective and adds `exact_lower_bound`, `exact_status`, `exact_mip_gap`,
-`exact_mip_gap_tolerance`, and `exact_runtime`. The benchmark uses a reference
-MIP gap tolerance of `1e-4`. `OPTIMAL` means optimal within the declared tolerance;
-with `TIME_LIMIT`, the objective is only the best feasible reference solution.
-The proven lower bound always comes from `ObjBound`, never the feasible objective.
-
-The following metrics are computed only after the research runs finish:
-
-```text
-relative_error = (research objective - reference objective) / reference objective
-reference_gap  = (research objective - reference lower bound) / max(1, abs(research objective))
-```
-
-Unavailable comparisons serialize as `null`, including a zero reference objective
-for `relative_error`. `reference_gap` is an external comparison, not a research
-Benders stopping criterion. Each strategy's `runtime` excludes the full model.
-
-## Run
-
-Benders with simulated annealing and decommitment:
+连续三轮 SA 降本不足 0.05% 后，顺序调用最多三次 LLM；每次调用后先验证并更新反馈：
 
 ```powershell
-python -m suc_benders.run --max-iterations 5
+python -m suc_benders --strategy stagnation_burst --rounds 10 --http-base-url https://api.deepseek.com --http-model deepseek-flash --output-dir results/rts24-http-new
 ```
 
-Add optional LLM advice:
+HTTP 模式从进程环境读取 `LLM_API_KEY`。Astra 使用文件通信，普通终端运行会等待
+Codex 回传候选。两种方式均保存请求、响应、校验和反馈。
+
+| `--strategy` | 行为 |
+|---|---|
+| `sa` | 纯 SA |
+| `fixed` | 每轮 SA 后调用一次 LLM |
+| `stagnation` | 首轮调用，之后连续三轮 SA 改善不足时调用一次 |
+| `stagnation_burst` | 连续三轮 SA 改善不足时顺序调用三次 |
+| `llm` | LLM 与连续子问题，无 SA |
+
+可设置 `--time-limit-seconds`、`--max-llm-calls`、`--seed`、`--scenario-file`。
+输出目录必须是新目录。`python -m suc_benders.astra_run` 使用同一入口。
+完整文件通信、取消、自动反馈及审计方式见 [运行说明](docs/astra-module.md)。
+
+`--target-reference-gap 0.005` 表示独立参考成本差严格小于 0.5% 才停止。
+该模式忽略轮数，不与时间／调用次数上限组合；参考成本用于停止判断和报告，
+不进入 LLM 输入或候选生成。参考解会先固定开停机并重新验证连续调度。
+
+## 独立参考与基线验证
 
 ```powershell
-python -m suc_benders.run --max-iterations 5 --llm
+python -m suc_benders.full --scenario-file data/rts24/deterministic.json --time-limit 600 --mip-gap 0.0001
+python -m suc_benders.rts24_experiment --output-dir results/rts24-baseline-new
 ```
 
-The `--no-quantum` and `--no-decommit` switches support ablations. Disabling
-annealing skips Kaiwu/QUBO construction while retaining the deterministic seed.
+基线验证要求干净且已提交的工作区和新目录。它串行完成两个配置的 SA（种子 7、
+候选池 16、最多 3 轮／600 秒），再求独立参考（单线程、600 秒、MIPGap 1e-4），
+并校验每个完整方案。该命令不会调用 LLM。
 
-Independent full Gurobi reference:
+## 保留的 RTS-24 结果
 
-```powershell
-python -m suc_benders.full
-```
+| 归档 | 结果 |
+|---|---|
+| [SA 基线](experiments/rts24-baseline-20261002/README.md) | 三轮后确定性／随机配置的参考成本差分别为 46.89%／32.70% |
+| [Astra burst](experiments/rts24-sa-llm-burst-20261002/report.md) | 5 次 SA、2 次 Astra；成本 889097.785912，参考差 0.455455%，达到严格 0.5% 目标 |
+| [DeepSeek burst](experiments/rts24-deepseek-burst-20261002/report.md) | 用户停止；成本 907432.581261，参考差 2.527027%，未达到修订后的 1% 目标 |
 
-This command reports both `objective` and `lower_bound`, along with `status`,
-`mip_gap`, and `mip_gap_tolerance`. It accepts `--time-limit` and `--mip-gap`.
+归档保留当次源码、输入、运行记录与审计，文件校验和保持不变。复现当次结果应使用
+压缩包中的源码快照；当前源码清理后不能冒充原版本或恢复原指纹的运行。
+这些单种子实验不构成速度优势或全局最优性证明。
 
-Optional research arguments:
+## 实现与验证
 
-```text
---data data/suc_10x24.json
---scenario-file data/scenarios.json
---quiet
---no-quantum
---no-decommit
---llm
---output run.json
-```
+- `solver.py` 定义配置、结果和统一入口；`paper_solver.py` 实现当前动态全时域循环。
+- `paper_model.py` 实现索引约束、连续松弛和紧凑 QUBO；文件名沿用既有实现。
+- `candidates.py` 负责确定性修复；`context.py` 保留供 LLM 使用的成本、对偶及减开机启发信息。
+- `llm.py`、`subagent.py`、`advisor_feedback.py` 负责候选通信和自动反馈。
+- `validation.py` 独立校验物理约束和成本；`full_model.py` 提供完整 Gurobi 参考。
 
-To use a custom scenario set, create a JSON file such as:
-
-```json
-{
-  "reserve_fraction": 0.05,
-  "scenarios": [
-    {"name": "low",  "probability": 0.25, "load_factor": 0.9},
-    {"name": "base", "probability": 0.50, "load_factor": 1.0},
-    {"name": "high", "probability": 0.25, "load": [700, 750, 850, 950, 1000, 1100, 1150, 1200, 1300, 1400, 1450, 1500, 1400, 1300, 1200, 1050, 1000, 1100, 1200, 1400, 1300, 1100, 900, 800]}
-  ]
-}
-```
-
-## Attribution experiment
-
-The fixed `attribution` suite compares all eight on/off combinations of Kaiwu
-local simulated annealing (Q), LLM advice (L), and decommitment (D), with the same
-repair and initial candidate. Two controls add raw annealing without repair and
-16 independent Bernoulli(0.5) commitment proposals followed by the same repair.
-The latter is an experimental control, not a quantum backend.
-
-The suite runs the canonical three-scenario 10x24 model, a 90% load variant, and
-a two-hour cyclic load shift. Seeds are 7, 17, 27, 37, and 47: 150 research runs.
-Each run is limited to 10 iterations and 40 unique complete candidate evaluations,
-including initialization. Cache hits do not consume this budget. The additional
-`EVALUATION_LIMIT` status only applies when this optional limit is configured.
-The eight main groups retain the existing candidate evaluation order.
-
-Set `LLM_API_KEY` in the process environment before running; never save the key
-in the experiment directory. The selected service uses OpenAI-compatible Chat
-Completions. The original Messages protocol remains the ordinary CLI default.
-Use `--llm-api-format chat_completions`, `--llm-base-url`, and `--llm-model` with
-`suc_benders.run` to select that protocol for an individual run.
-
-```powershell
-$env:OMP_NUM_THREADS = "1"
-$env:OPENBLAS_NUM_THREADS = "1"
-$env:MKL_NUM_THREADS = "1"
-python -m suc_benders.benchmark --suite attribution --llm-base-url http://47.101.31.14:8300/v1 --llm-model deepseek-v4.1-flash --pilot
-python -m suc_benders.benchmark --suite attribution --llm-base-url http://47.101.31.14:8300/v1 --llm-model deepseek-v4.1-flash --resume
-```
-
-`--pilot` completes the first 10-strategy block without solving the full
-reference. `--resume` retains completed runs only when the solver fingerprint,
-inputs, dependencies, and settings match. `--output-dir` defaults to
-`results/attribution-20260930`. Existing benchmark arguments such as
-`--max-iterations` and `--seed` belong to the legacy suite; attribution uses its
-fixed, recorded matrix. The suite executes serially with one Gurobi thread.
-
-LLM settings are temperature 0.2, at most four candidates, 8192 completion tokens,
-180-second timeout, and one retry after 30 seconds for network errors, HTTP 429,
-or HTTP 5xx. There are at most 600 logical calls and 1200 HTTP requests. Auth
-errors, invalid JSON, empty output, truncation, and duplicate proposals are
-reported distinctly. Live call progress is written to `progress.log`.
-
-Each run records provenance before and after repair, candidate hashes, cache
-hits, dispatch feasibility, actual incumbent improvement, timing by phase,
-QUBO size, raw annealing diversity, and sanitized LLM requests/responses with
-reported token usage. A run is checked for physical residuals and cost
-conservation before its completion record is saved. A process interruption
-does not turn an incomplete run into a completed statistical sample.
-
-After all research runs, three independent full models supply reference
-objectives and ObjBound values, with a 300-second time limit and MIPGap 1e-4.
-Reports compare budgets of 10/20/40 evaluations and 30/60/120/300 seconds,
-preserving observed stopping points. Paired bootstrap intervals use 10,000
-resamples. For each fixed D, interaction is C10+C01-C00-C11; a positive value
-means superadditive cost improvement. Deterministic objective repeats are not
-independent algorithm samples; remote LLM outputs are not guaranteed to be
-reproducible from the local seed.
-
-Artifacts include the source snapshot and manifest, per-run JSON and JSONL
-traces, `runs.csv`, `summary.csv`, `checkpoints.csv`, `effects.csv`, `controls.csv`, static plots,
-and a Chinese `report.md`. Report generation is independent of research state.
-
-The completed 2026-09-30 study is in
-[`results/attribution-20260930/report.md`](results/attribution-20260930/report.md).
-Its recovery ledger includes interrupted-call overhead in the total API budget.
-
-## Paper transfer: temporal SA-Benders
-
-The opt-in paper transfer implements bounded Lagrangian cutting-plane
-coordination of 1/2/3-hour blocks, with local continuous convex dispatch,
-SA-only integer masters, and full-horizon repair and validation. It preserves
-the original global time indices: initial conditions are not repeated at block
-boundaries, and cross-block ramps, minimum up/down constraints, transitions,
-and next-hour shutdown capacity limits enter the coupling rows.
-
-```powershell
-python -m suc_benders.run --master-encoding dynamic --decomposition temporal --block-hours 2 --no-decommit --max-iterations 10 --time-limit-seconds 300 --max-candidate-evaluations 40
-```
-
-`--master-encoding compact` selects a static total-cost QUBO;
-`--master-encoding dynamic` enables continuous master relaxation and local
-objective bounds. Omit `--decomposition temporal` for the whole-horizon
-versions. These experimental modes require repair and reject decommitment,
-random-candidate, or disabled-SA configurations. LLM candidates are supported
-only in dynamic whole-horizon mode; temporal and compact modes reject LLM.
-The default remains legacy.
-`theta` continues to mean recourse cost; the new internal total-cost variable
-can be negative under Lagrangian prices. Fixed variables, bounded objective
-bits, exact capacity lattices and one-sided cut quantization are retained.
-
-Local optimality cuts and objective upper bounds are rebuilt at every price
-change; local feasibility cuts survive. The sum of local sampled costs is not
-a certified global lower bound. Only the continuous relaxation bounds at the
-same prices may be summed, including the coupling constant. Kelley planes are
-affine upper bounds, not necessarily tangent planes with an approximate SA
-oracle. The multiplier box is fixed at +/-10 for normalized equalities and
-[0,10] for inequalities; no global convergence claim is made.
-
-Run the fixed six-strategy, five-seed comparison (original 10x24 case only):
-
-```powershell
-$env:OMP_NUM_THREADS = "1"
-$env:OPENBLAS_NUM_THREADS = "1"
-$env:MKL_NUM_THREADS = "1"
-python -m suc_benders.paper_experiment --pilot
-python -m suc_benders.paper_experiment --resume
-```
-
-Each run allows 300 seconds and 40 unique complete candidate evaluations;
-block evaluations are counted separately, with all costs included in runtime.
-SA calls cannot be interrupted, so overshoots are reported and time-checkpoint
-comparisons exclude results completed after the checkpoint. The independent
-full reference runs after all 30 research runs. The manifest fingerprints
-sources, inputs, dependencies and settings; resume refuses mismatched solvers.
-An implementation or validation exception produces an error file, not a
-completed sample. Reports and CSVs are in `results/paper-transfer-20260930-v2`.
-
-The completed 30-run study is preserved in Git under
-[`experiments/paper-transfer-20260930-v2/`](experiments/paper-transfer-20260930-v2/README.md),
-including the [Chinese report](experiments/paper-transfer-20260930-v2/report.md),
-CSVs, plots, validation audit, and a checksummed archive with the complete run
-data and exact experiment source snapshot. The archive predates release-only
-documentation changes; use its source snapshot to reproduce its fingerprint.
-
-## Tests
+启动／关闭容量分别处理；备用使用精确容量格点，进入 QUBO 的割采用单侧保守量化。
+连续模型和实际成本保持原精度。SA 搜索是启发式，QUBO 能量不能作为全局下界。
+时间限制在检查点生效，正在执行的 SA SDK 调用可能产生超时；截止后的候选不计入结果。
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
-
-## Limitations
-
-- Kaiwu local simulated annealing is the only implemented quantum backend; cloud/QPU is not configured.
-- Candidate search is heuristic and does not prove global optimality or infeasibility.
-- `solve_full()` is an external validation reference, not part of the research algorithm.
-- The feasibility cut is a generic total-shortfall cut derived from Gurobi duals; it is not a specialized strong cut.
-- Attribution results concern three related 10x24 cases, not general scaling
-  behavior or quantum hardware advantage.
-
-## LLM / SA efficiency study
-
-The new study compares dynamic whole-horizon SA against SA+LLM on the same
-10-unit, 24-hour, three-scenario input. Independent decommitment is disabled;
-the LLM receives marginal-cost feedback and proposes at most four schedules
-following each SA call. Proposals enter the existing continuous Benders
-subproblems, repair, deduplication and complete physical validation.
-
-Set `LLM_API_KEY` in the environment or the ignored local `.env` file. The new
-entry point uses `https://api.farluna.tech/v1`, `farluna/deepseek-v4.1-flash`,
-`reasoning_effort=max`, and `max_tokens=65536`; keys are excluded from artifacts.
-An API preflight must pass before formal runs. Parameter acceptance does not
-independently prove the provider's reasoning mode.
-The Farluna study allows up to 300 seconds per LLM request, further capped by
-the run's remaining time, with no retry. Its single-request check completed in
-268.73 seconds with a normal JSON response; the total run budget remains 600 seconds.
-
-```powershell
-python -m suc_benders.efficiency_experiment
-python -m suc_benders.efficiency_experiment --output-dir results/llm-sa-efficiency-<timestamp> --resume
-python -m suc_benders.efficiency_experiment --output-dir results/llm-sa-efficiency-<timestamp> --report-only
-```
-
-The two groups use seeds 7/17/27/37/47 with 600 seconds per run, interleaved
-serially. An external process supervisor enforces the deadline. All optimization,
-LLM latency, repair and validation count against it; imports and license startup
-precede timing. Calls begun but interrupted still count. Only fully validated
-results completed before the deadline count toward cost checkpoints or targets.
-There is no candidate/iteration cap and no stop after a repeated-candidate round.
-
-Reports include 60/120/300/600-second costs and first passage to fixed reference
-cost thresholds (+10/8/6/5/4/3/2/1 percent), with elapsed time and cumulative SA
-calls. Unreached targets remain unreached. SA-call savings do not imply savings
-in total compute. The existing Gurobi reference is used only for reporting.
-Resume verifies source/input/configuration fingerprints and skips every existing
-run; interrupted runs are retained as incomplete and are not automatically rerun.
-The old SA experiments and standalone decommitment implementation are preserved.

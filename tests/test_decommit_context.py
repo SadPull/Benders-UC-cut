@@ -6,11 +6,10 @@ import numpy as np
 from suc_benders import load_suc_data
 from suc_benders.candidates import make_candidate
 from suc_benders.context import (
-    LocalMoveResult,
     LLMContextInput,
     CandidateEvaluation,
     build_llm_context,
-    decommit_gradient_map,
+    _decommit_gradient_rows,
 )
 from suc_benders.llm import _prompt
 from suc_benders.subproblem import solve_scenario
@@ -22,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class DecommitGradientTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.units, cls.scenarios = load_suc_data(ROOT / "data/suc_10x24.json")
+        cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
         n, h = cls.units.n_units, cls.units.horizon
         cls.incumbent = make_candidate(
             cls.units, cls.scenarios, np.ones((n, h), dtype=int), source="incumbent"
@@ -41,9 +40,7 @@ class DecommitGradientTests(unittest.TestCase):
                 incumbent=self.incumbent,
                 incumbent_results=self.results,
                 base_evaluations=[],
-                local_move_results=[],
                 candidate_evaluations=[],
-                cuts=[],
                 history=[],
             ),
         )
@@ -51,12 +48,12 @@ class DecommitGradientTests(unittest.TestCase):
         expected_on = int(self.incumbent.u.sum())
         # The prompt view is capped; the map must cover every ON cell.
         self.assertLessEqual(len(rows), 60)
-        gradient = decommit_gradient_map(
+        gradient = _decommit_gradient_rows(
             self.units, self.scenarios, self.incumbent, self.results
         )
         self.assertEqual(len(gradient), expected_on)
-        for (i, t) in gradient:
-            self.assertEqual(int(self.incumbent.u[i, t]), 1)
+        for row in gradient:
+            self.assertEqual(int(self.incumbent.u[row["unit"], row["period"]]), 1)
 
     def test_marginal_cost_formula_matches(self):
         context = build_llm_context(
@@ -66,9 +63,7 @@ class DecommitGradientTests(unittest.TestCase):
                 incumbent=self.incumbent,
                 incumbent_results=self.results,
                 base_evaluations=[],
-                local_move_results=[],
                 candidate_evaluations=[],
-                cuts=[],
                 history=[],
             ),
         )
@@ -88,18 +83,16 @@ class DecommitGradientTests(unittest.TestCase):
                 incumbent=self.incumbent,
                 incumbent_results=self.results,
                 base_evaluations=[],
-                local_move_results=[],
                 candidate_evaluations=[],
-                cuts=[],
                 history=[],
             ),
         )
+        raw = {(row["unit"], row["period"]): row for row in _decommit_gradient_rows(
+            self.units, self.scenarios, self.incumbent, self.results)}
         for row in context["unit_hour_decommit_gradient"]:
-            self.assertAlmostEqual(
-                row["estimated_total_change"],
-                -row["fixed_saving"] + row["estimated_fuel_change"],
-                places=3,
-            )
+            original = raw[row["unit"], row["period"]]
+            expected = -original["fixed_saving"] + original["estimated_fuel_change"]
+            self.assertEqual(row["estimated_total_change"], round(expected, 3))
 
     def test_top_opportunities_capped_at_20(self):
         context = build_llm_context(
@@ -109,14 +102,11 @@ class DecommitGradientTests(unittest.TestCase):
                 incumbent=self.incumbent,
                 incumbent_results=self.results,
                 base_evaluations=[],
-                local_move_results=[],
                 candidate_evaluations=[],
-                cuts=[],
                 history=[],
             ),
         )
         self.assertLessEqual(len(context["top_decommit_opportunities"]), 20)
-        self.assertLessEqual(len(context["decommit_ladder"]), 10)
 
     def test_peaker_usage_roles(self):
         context = build_llm_context(
@@ -126,9 +116,7 @@ class DecommitGradientTests(unittest.TestCase):
                 incumbent=self.incumbent,
                 incumbent_results=self.results,
                 base_evaluations=[],
-                local_move_results=[],
                 candidate_evaluations=[],
-                cuts=[],
                 history=[],
             ),
         )
@@ -147,9 +135,7 @@ class DecommitGradientTests(unittest.TestCase):
                 incumbent=self.incumbent,
                 incumbent_results=self.results,
                 base_evaluations=[],
-                local_move_results=[],
                 candidate_evaluations=[],
-                cuts=[],
                 history=[],
             ),
         )
@@ -167,15 +153,10 @@ class DecommitGradientTests(unittest.TestCase):
                 incumbent=self.incumbent,
                 incumbent_results=self.results,
                 base_evaluations=[],
-                local_move_results=[LocalMoveResult("decommit_block", 9, 20, 4, -500.0, True, "decommit")],
                 candidate_evaluations=[
                     CandidateEvaluation("decommit", 590000.0, 110000.0, 480000.0, {}, True, 1, 0, 5)
                 ],
-                cuts=[],
                 history=[],
-                decommit_ladder=[
-                    CandidateEvaluation("decommit", 590000.0, 110000.0, 480000.0, {}, True, 1, 0, 5)
-                ],
             ),
         )
         _system, user = _prompt(
@@ -186,7 +167,6 @@ class DecommitGradientTests(unittest.TestCase):
             "top_decommit_opportunities",
             "hourly_commitment_profile",
             "peaker_usage",
-            "decommit_ladder",
         ):
             self.assertIn(field, user)
         self.assertIn("removing entire ON blocks", _system)
@@ -213,7 +193,7 @@ class DecommitGradientTests(unittest.TestCase):
         fixed = sum(row["fixed_cost"] + row["startup_cost"] + row["shutdown_cost"] for row in rows)
         self.assertEqual(sum(row["hourly_fixed_cost"] for row in profile), fixed)
         context = build_llm_context(data, scenarios, LLMContextInput(
-            incumbent, results, [], [], [], [], [],
+            incumbent, results, [], [], [],
         ))
         self.assertEqual(context["incumbent_cost"]["total"], round(fixed + expected_fuel, 3))
 

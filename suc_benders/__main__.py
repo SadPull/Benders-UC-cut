@@ -1,4 +1,4 @@
-from .run import main
+from .astra_run import main
 
 if __name__ == "__main__":
     main()

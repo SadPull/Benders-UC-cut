@@ -11,7 +11,7 @@ from suc_benders.data import DataError, load_suc_data
 from suc_benders.full_model import FullConfig, solve_full
 from suc_benders.subproblem import solve_scenario
 from suc_benders import rts24_experiment as experiment
-from suc_benders.attribution import write_json
+from suc_benders.rts24_experiment import write_json
 from suc_benders.data import Scenario
 from tests.test_capacity import one_hour_data
 
@@ -23,6 +23,29 @@ spec.loader.exec_module(converter)
 
 
 class RTS24DataTests(unittest.TestCase):
+    def test_default_data_matches_explicit_stochastic_profile(self):
+        default, scenarios = load_suc_data()
+        explicit, expected = load_suc_data(CASE / "units.json", CASE / "stochastic.json")
+        self.assertEqual((default.n_units, default.horizon), (32, 24))
+        np.testing.assert_array_equal(default.initial_output, explicit.initial_output)
+        self.assertEqual(default.reserve_fraction, explicit.reserve_fraction)
+        for actual, target in zip(scenarios, expected):
+            self.assertEqual((actual.name, actual.probability), (target.name, target.probability))
+            np.testing.assert_array_equal(actual.load, target.load)
+
+    def test_invalid_scenario_profiles_are_rejected(self):
+        profile = json.loads((CASE / "stochastic.json").read_text(encoding="utf-8"))
+        for invalid in ({"probability": .24}, {"load_factor": None, "load": [1, 2]},
+                        {"load": [1] * 24}):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                scenario = {**profile["scenarios"][0], **invalid}
+                if scenario.get("load_factor") is None:
+                    scenario.pop("load_factor", None)
+                path = Path(directory) / "scenarios.json"
+                path.write_text(json.dumps({**profile, "scenarios": [scenario, *profile["scenarios"][1:]]}), encoding="utf-8")
+                with self.assertRaises(DataError):
+                    load_suc_data(CASE / "units.json", path)
+
     def test_pinned_conversion_and_mapping(self):
         generated = converter.convert()
         for name, body in generated.items():
@@ -60,14 +83,16 @@ class RTS24DataTests(unittest.TestCase):
         self.assertEqual(data.initial_output[2], 76)
         self.assertNotEqual(data.initial_output[2], data.pmin[2])
 
-    def test_explicit_initial_output_validation_and_legacy_default(self):
-        obj = json.loads((ROOT / "data/suc_10x24.json").read_text(encoding="utf-8"))
-        legacy, _ = load_suc_data(ROOT / "data/suc_10x24.json")
-        np.testing.assert_array_equal(legacy.initial_output, legacy.pmin)
+    def test_explicit_initial_output_validation_and_default(self):
+        obj = json.loads((ROOT / "data/rts24/units.json").read_text(encoding="utf-8"))
+        obj.pop("initial_output")
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "units.json"
-            for invalid in ([], [float("nan")] * 10, [float("inf")] * 10,
-                            [0] * 10, [9999] * 10):
+            path.write_text(json.dumps(obj), encoding="utf-8")
+            default, _ = load_suc_data(path)
+            np.testing.assert_array_equal(default.initial_output, default.pmin)
+            for invalid in ([], [float("nan")] * obj["n_units"], [float("inf")] * obj["n_units"],
+                            [0] * obj["n_units"], [9999] * obj["n_units"]):
                 path.write_text(json.dumps({**obj, "initial_output": invalid}), encoding="utf-8")
                 with self.assertRaises(DataError):
                     load_suc_data(path)
@@ -105,8 +130,8 @@ class RTS24ProtocolTests(unittest.TestCase):
         config = experiment.configuration()
         self.assertEqual((config.max_iterations, config.time_limit_seconds), (3, 600))
         self.assertEqual((config.quantum.kaiwu_seed, config.quantum.candidate_pool_size), (7, 16))
-        self.assertEqual((config.master_encoding, config.decomposition), ("dynamic", "none"))
-        self.assertFalse(config.llm.enabled or config.decommit_candidates or config.random_candidates)
+        self.assertFalse(config.llm.enabled)
+        self.assertTrue(config.quantum_candidates)
 
     def test_existing_directory_never_starts_another_run(self):
         with tempfile.TemporaryDirectory() as directory, patch("sys.argv", ["rts24", "--output-dir", directory]), \

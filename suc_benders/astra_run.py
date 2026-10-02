@@ -15,7 +15,7 @@ from .subagent import initialize, publish, sha
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", default="data/suc_10x24.json")
+    parser.add_argument("--data", default="data/rts24/units.json")
     parser.add_argument("--scenario-file")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--rounds", type=int, default=2)
@@ -50,11 +50,10 @@ def main():
         llm.api_format = "chat_completions"
         llm.base_url, llm.model = args.http_base_url, args.http_model
         llm.temperature = None
-    config = BendersConfig(max_iterations=args.rounds, master_encoding="dynamic",
-        decomposition="none", decommit_candidates=False, random_candidates=False,
+    config = BendersConfig(max_iterations=args.rounds,
         advisor_only=args.strategy == "llm", quantum_candidates=args.strategy != "llm",
         stop_on_no_new_candidates=False, time_limit_seconds=args.time_limit_seconds,
-        collect_diagnostics=True, quantum=QuantumConfig(kaiwu_seed=args.seed, candidate_pool_size=16), llm=llm)
+        quantum=QuantumConfig(kaiwu_seed=args.seed, candidate_pool_size=16), llm=llm)
     initialize(root, dict(arguments=vars(args), configuration=asdict(config),
         inputs={args.data: sha(args.data), **({args.scenario_file: sha(args.scenario_file)} if args.scenario_file else {})},
         sources={str(p): sha(p) for p in Path(__file__).parent.glob("*.py")}))
@@ -67,8 +66,7 @@ def main():
     if args.target_reference_gap is not None:
         import gurobipy as gp
         from .full_model import solve_full, FullConfig
-        from .attribution import validate_schedule
-        from .rts24_experiment import schedule_object
+        from .validation import validate_schedule, schedule_object
         gp.setParam("Threads", 1)
         gp.setParam("Seed", args.seed)
         full = solve_full(data, scenarios, FullConfig(time_limit=600, mip_gap=1e-6, output_flag=0))

@@ -12,18 +12,38 @@ import platform
 import subprocess
 import sys
 import time
-from types import SimpleNamespace
 
 import numpy as np
 
-from .attribution import validate_schedule, write_json
+from .validation import validate_schedule, schedule_object
 from .data import load_suc_data
-from .efficiency_experiment import read_events
 from .full_model import FullConfig, solve_full
 from .llm import LLMConfig
 from .master import QuantumConfig
 from .solver import BendersConfig, result_to_dict, solve_benders
 from .subproblem import solve_scenario
+
+
+def write_json(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(result_to_dict(value), ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def read_events(path):
+    rows = []
+    if not path.exists():
+        return rows
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            if index != len(lines)-1:
+                raise
+    return rows
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE = ROOT / "data/rts24"
@@ -32,9 +52,9 @@ BUDGET = 600.0
 
 
 def configuration():
-    return BendersConfig(max_iterations=3, master_encoding="dynamic", decomposition="none",
-        time_limit_seconds=BUDGET, decommit_candidates=False, random_candidates=False,
-        collect_diagnostics=True, stop_on_no_new_candidates=False,
+    return BendersConfig(max_iterations=3,
+        time_limit_seconds=BUDGET,
+        stop_on_no_new_candidates=False,
         quantum=QuantumConfig(kaiwu_seed=7, candidate_pool_size=16), llm=LLMConfig(enabled=False))
 
 
@@ -44,13 +64,6 @@ def read(path):
 
 def hash_file(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def schedule_object(row):
-    return SimpleNamespace(objective=row["objective"],
-        **{k: np.asarray(row[k]) for k in ("u", "v", "w")},
-        scenarios=[SimpleNamespace(name=s["name"], objective=s.get("objective", s.get("fuel_cost")),
-            p=np.asarray(s["p"]), r=np.asarray(s["r"])) for s in row["scenarios"]])
 
 
 def worker(directory, profile, strategy):

@@ -5,12 +5,12 @@
 在 Codex 中请求运行；Codex 启动下面的程序并服务文件请求。普通终端独立运行会等待 Codex 回传，不会自行创建代理。
 
 ```powershell
-python -u -m suc_benders.astra_run --data data/suc_10x24.json --seed 7 --rounds 2 --output-dir results/astra-new-run
+python -u -m suc_benders.astra_run --data data/rts24/units.json --seed 7 --rounds 2 --output-dir results/astra-new-run
 ```
 
 可指定 `--scenario-file`、`--time-limit-seconds`、`--max-llm-calls`。默认增强反馈；`--original-feedback` 用于旧提示词对照。输出目录必须不存在。没有隐式重跑或恢复，失败目录保留。
 
-五组配置（每次使用不同输出目录）：
+可选配置（每次使用不同输出目录）：
 
 | 组 | 参数 |
 |---|---|
@@ -48,7 +48,7 @@ HTTP 调用自动运行；每次的提示词、无认证头请求体、响应、
 ### 按参考成本达标停止
 
 ```powershell
-python -u -m suc_benders.astra_run --data data/suc_10x24.json --seed 7 --strategy fixed --target-reference-gap 0.001 --output-dir results/astra-target-new
+python -u -m suc_benders.astra_run --data data/rts24/units.json --seed 7 --strategy fixed --target-reference-gap 0.001 --output-dir results/astra-target-new
 ```
 
 该模式重新求解同一算例的 Gurobi 完整模型（单线程、同种子、MIPGap=1e-6，参考求解最多 600 秒），再固定其开停机方案重算连续调度并通过原有物理验证。原始与复核结果分别保存为 `reference-raw.json` 和 `reference.json`；保留独立下界。参考值只进入停止判断和报告，不进入模型输入。
@@ -84,4 +84,4 @@ python -m suc_benders.astra_audit results/astra-new-run
 
 时间截止在求解器和交接检查点生效；正在执行的 SA SDK 调用不能由 Python 在内部立即中断，超时量保存在结果中。已有完整验证的最佳解立即写入检查点，截止后返回的模型结果不接受。
 
-旧 `subagent_experiment` 为历史实验适配器，新模块不依赖该脚本或它引用的旧实验目录。
+默认数据为 RTS-24 三场景配置。旧实验适配器已删除；`python -m suc_benders` 与本页的 `suc_benders.astra_run` 使用同一入口。
