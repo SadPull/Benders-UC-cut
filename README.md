@@ -89,8 +89,25 @@ python -m suc_benders.rts24_experiment --output-dir results/rts24-baseline-new
 
 ## 保留的 RTS-24 结果
 
+最小必要性对照实验（15 次搜索 + 1 次参考）使用独立入口：
+
+```powershell
+python -m suc_benders.minimal_experiment --output-dir experiments/rts24-minimal-new
+```
+
+该入口冻结源码和输入后串行运行 A 固定种子 SA、B 逐轮换种子 SA、C LLM-only、
+D SA+LLM、E SA+规则启发式，各取种子 7/17/27，搜索预算 1800 秒。
+C/D 各最多三次全新 Astra/max 子代理调用，需要 Codex 按 `subagent.claim/receipt`
+调度；C 用完额度结束，其余组继续 SA 至截止。E 默认总共三轮规则提案，
+`--rule-max-calls 0` 可选择每次停滞均触发三轮；每轮至多四个不同候选。
+规则候选采用提示词中相同的收益表，尝试整段关机及两端修剪。
+运行过程中生成 `report.md`、`summary.json` 和 `curves.csv`，包括截止时刻成绩、
+原始/修复/调度逐级统计、贡献来源、分项耗时及独立物理复核。
+参考解只用于事后比较，不用于停止或生成候选。三个重复仅用于初步筛查。
+
 | 归档 | 结果 |
 |---|---|
+| [最小必要性实验](experiments/rts24-minimal-20261003/analysis.md) | 15 个预定结果及 2 次标记补跑；数值审计通过，但 C／17 补跑、D／7 无模型响应，协同证据仍不足；全部 17 次尝试保留 |
 | [SA 基线](experiments/rts24-baseline-20261002/README.md) | 三轮后确定性／随机配置的参考成本差分别为 46.89%／32.70% |
 | [Astra burst](experiments/rts24-sa-llm-burst-20261002/report.md) | 5 次 SA、2 次 Astra；成本 889097.785912，参考差 0.455455%，达到严格 0.5% 目标 |
 | [DeepSeek burst](experiments/rts24-deepseek-burst-20261002/report.md) | 用户停止；成本 907432.581261，参考差 2.527027%，未达到修订后的 1% 目标 |

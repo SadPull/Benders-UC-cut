@@ -15,7 +15,7 @@ from .master import MasterCandidate, QuantumConfig
 
 @dataclass
 class BendersConfig:
-    max_iterations: int = 20
+    max_iterations: int | None = 20
     penalty: float = 1_000_000.0
     theta_step: float = 1.0
     reserve_scale: float = 100.0
@@ -27,6 +27,8 @@ class BendersConfig:
     max_candidate_evaluations: int | None = None
     time_limit_seconds: float | None = None
     stop_on_no_new_candidates: bool = True
+    sa_seed_per_call: bool = False
+    rule_advisor: bool = False
     event_sink: Callable[[dict], None] | None = field(default=None, repr=False)
 
 
@@ -120,6 +122,12 @@ def solve_benders(
 ) -> BendersResult:
     """Run dynamic whole-horizon SA with optional LLM advice."""
     config = config or BendersConfig()
+    if config.max_iterations is None and config.time_limit_seconds is None and config.target_cost is None:
+        raise ValueError("unlimited iterations require a time limit or target")
+    if config.rule_advisor and (config.llm.enabled or config.advisor_only):
+        raise ValueError("rule advisor requires SA and LLM disabled")
+    if config.sa_seed_per_call and config.quantum.kaiwu_seed is None:
+        raise ValueError("changing SA seeds requires a starting seed")
     if config.target_cost is not None and (not math.isfinite(config.target_cost) or config.target_cost <= 0):
         raise ValueError("target_cost must be positive and finite")
     if config.advisor_only and (not config.llm.enabled or config.quantum_candidates):

@@ -1,0 +1,13 @@
+{
+  "detected_at": 1791012152.5694072,
+  "status": "interrupted_process_missing",
+  "cause": "unknown",
+  "missing_controller_pid": 14228,
+  "missing_worker_pid": 18676,
+  "last_event_kind": "llm_start",
+  "last_event_seconds": 979.9458519,
+  "completed_llm_calls": 2,
+  "started_llm_calls": 3,
+  "unconsumed_call": 3,
+  "treatment": "Keep verified pre-interruption costs; do not grade call 3 or rerun this search; continue the predefined order."
+}

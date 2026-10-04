@@ -1,0 +1,72 @@
+{
+  "objective": 1220423.7732883145,
+  "reference_difference": 0.3789059820899576,
+  "checkpoints": {
+    "300": 1220423.7732883145,
+    "600": 1220423.7732883145,
+    "900": 1220423.7732883145,
+    "1800": 1220423.7732883145
+  },
+  "threshold_seconds": {
+    "0.01": null,
+    "0.005": null
+  },
+  "curve": [
+    {
+      "seconds": 6.621256800000992,
+      "objective": 1220423.7732883145,
+      "source": "fallback",
+      "gain": null
+    }
+  ],
+  "first_llm_improvement_seconds": null,
+  "sa_improvement_after_llm": 0.0,
+  "candidate_stages": {},
+  "calls": [
+    {
+      "kind": "llm_end",
+      "failed": true,
+      "usage": null,
+      "message": "deadline"
+    }
+  ],
+  "llm_started": 1,
+  "rule_started": 0,
+  "sa_calls": 0,
+  "sa_seeds": [],
+  "timings": {
+    "qubo": 0.0,
+    "annealing": 0.0,
+    "relaxation": 0.0,
+    "local_dispatch": 0.19856200000140234,
+    "repair": 0.0,
+    "subproblems": 6.450202699998044,
+    "llm": 1793.1815921000016,
+    "context": 0.005825299998832634,
+    "heuristic": 0.0,
+    "validation": 0.001999999996769475,
+    "other": 0.19186070000432665
+  },
+  "time_limit_overshoot": 0.030043700000533136,
+  "incomplete_evaluations": 0,
+  "sa_returned_raw": 0,
+  "sa_returned_raw_feasible": 0,
+  "sa_returned_after_deadline": 0,
+  "late_evaluations_excluded": 0,
+  "group": "C",
+  "seed": 17,
+  "state": {
+    "status": "TIME_LIMIT",
+    "elapsed_seconds": 1800.030042800001,
+    "exitcode": 0,
+    "process_wall_seconds": 1800.4808903999983
+  },
+  "audit": {
+    "group": "C",
+    "seed": 17,
+    "physical_checked": 1,
+    "errors": [],
+    "protocol_ok": true,
+    "result_objective_consistent": true
+  }
+}

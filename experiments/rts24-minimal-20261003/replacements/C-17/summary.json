@@ -1,0 +1,83 @@
+{
+  "objective": 1220423.7732883145,
+  "reference_difference": 0.3789059820899576,
+  "checkpoints": {
+    "300": 1220423.7732883145,
+    "600": 1220423.7732883145,
+    "900": 1220423.7732883145,
+    "1800": 1220423.7732883145
+  },
+  "threshold_seconds": {
+    "0.01": null,
+    "0.005": null
+  },
+  "curve": [
+    {
+      "seconds": 6.682531200000085,
+      "objective": 1220423.7732883145,
+      "source": "fallback",
+      "gain": null
+    }
+  ],
+  "first_llm_improvement_seconds": null,
+  "sa_improvement_after_llm": 0.0,
+  "candidate_stages": {},
+  "calls": [
+    {
+      "kind": "llm_end",
+      "failed": true,
+      "usage": null,
+      "message": "deadline"
+    }
+  ],
+  "llm_started": 1,
+  "rule_started": 0,
+  "sa_calls": 0,
+  "sa_seeds": [],
+  "timings": {
+    "qubo": 0.0,
+    "annealing": 0.0,
+    "relaxation": 0.0,
+    "local_dispatch": 0.20994320000318112,
+    "repair": 0.0,
+    "subproblems": 6.514565999998013,
+    "llm": 1793.2829152999984,
+    "context": 0.00568599999678554,
+    "heuristic": 0.0,
+    "validation": 0.0018507999993744306,
+    "other": 0.18973940000432776
+  },
+  "time_limit_overshoot": 0.20470159999968018,
+  "incomplete_evaluations": 0,
+  "sa_returned_raw": 0,
+  "sa_returned_raw_feasible": 0,
+  "sa_returned_after_deadline": 0,
+  "late_evaluations_excluded": 0,
+  "post_llm_sa": {
+    "calls": 0,
+    "complete_evaluations": 0,
+    "feasible_evaluations": 0
+  },
+  "group": "C",
+  "seed": 17,
+  "run_directory": "replacements/C-17",
+  "state": {
+    "status": "TIME_LIMIT",
+    "elapsed_seconds": 1800.2047007,
+    "exitcode": 0,
+    "process_wall_seconds": 1800.5179826000021
+  },
+  "audit": {
+    "physical_checked": 1,
+    "errors": [],
+    "protocol_ok": true,
+    "result_objective_consistent": true,
+    "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+    "complete": true
+  },
+  "selected_for_paired_analysis": true,
+  "replacement": true,
+  "llm_responses_consumed": 0,
+  "llm_failed": 1,
+  "llm_transport_status": "no_response"
+}

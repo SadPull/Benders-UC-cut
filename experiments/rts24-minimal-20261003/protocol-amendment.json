@@ -1,0 +1,17 @@
+{
+  "recorded_at": 1791012644.107928,
+  "authorized_by_user": true,
+  "reason": "D-17 controller and worker unexpectedly disappeared before the third response was consumed",
+  "original_max_llm_calls": 18,
+  "amended_max_llm_calls": 21,
+  "replacement": {
+    "group": "D",
+    "seed": 17,
+    "directory": "replacements/D-17",
+    "time_limit_seconds": 1800,
+    "max_llm_calls": 3,
+    "source": "same frozen snapshot",
+    "order": "after the original predefined batch"
+  },
+  "retention": "Keep the interrupted original D-17; use the independently labelled replacement for complete-run paired analysis."
+}

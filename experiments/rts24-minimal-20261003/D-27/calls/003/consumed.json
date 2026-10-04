@@ -1,0 +1,26 @@
+{
+  "call_id": "e5e3787a668741e484f8519b7c0b3081:3",
+  "transport": "codex_subagent",
+  "http_requests": 0,
+  "requested_model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "usage": null,
+  "effective_temperature": null,
+  "max_output_tokens_override": null,
+  "receipt": {
+    "run_id": "e5e3787a668741e484f8519b7c0b3081",
+    "call_id": "e5e3787a668741e484f8519b7c0b3081:3",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max",
+    "input_sha256": {
+      "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+      "user.txt": "2fe51dedc5102c0e2ecfe2258d47ea097247349352f38591012774143da64de5"
+    },
+    "agent_id": "/root/d27_call3",
+    "status": "completed",
+    "completed_at": 1791007988.8222828,
+    "output_sha256": "b86449661a2d767816ff000e48ce5478b8eb35a0ef92c66d99dda39b0bff0b4f"
+  },
+  "status": "completed",
+  "agent_wait_seconds": 290.47680330000003
+}

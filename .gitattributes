@@ -1,0 +1,5 @@
+# Preserve bytes used by the frozen experiment manifests and archive checksums.
+experiments/rts24-minimal-20261003/** -text -whitespace
+experiments/rts24-minimal-20261003.zip* -text -whitespace
+experiments/rts24-recovery-20261004*/** -text -whitespace
+experiments/rts24-recovery-20261004-bundle.zip* -text -whitespace

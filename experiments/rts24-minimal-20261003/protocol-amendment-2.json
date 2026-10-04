@@ -1,0 +1,17 @@
+{
+  "recorded_at": 1791023427.507228,
+  "authorized_by_user": true,
+  "reason": "C-17 first request claimed but no model output or receipt before deadline; cause unknown",
+  "previous_max_llm_calls": 21,
+  "amended_max_llm_calls": 24,
+  "replacement": {
+    "group": "C",
+    "seed": 17,
+    "directory": "replacements/C-17",
+    "time_limit_seconds": 1800,
+    "max_llm_calls": 3,
+    "source": "same frozen snapshot",
+    "order": "after original batch and replacement D-17"
+  },
+  "retention": "Keep original C-17 transport failure; label replacement separately in paired analysis."
+}

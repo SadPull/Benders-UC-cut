@@ -1,0 +1,8 @@
+{
+  "agent_id": "/root/replacement_c17_call1",
+  "status": "interrupted_after_deadline",
+  "recorded_at": 1791041541.4823875,
+  "reason": "Worker closed the request at its 1800-second deadline. Candidate file exists, but no completed agent notification or receipt was available before closure; agent was still running at inspection.",
+  "candidate_file_exists": true,
+  "counts_toward_score": false
+}
