@@ -1,0 +1,186 @@
+{
+  "objective": 885781.5721531347,
+  "reference_difference": 0.0008076992600976052,
+  "checkpoints": {
+    "300": 1220423.7732883145,
+    "600": 1220423.7732883145,
+    "900": 889901.4906783251,
+    "1800": 885781.5721531347
+  },
+  "threshold_seconds": {
+    "0.01": 678.9693235999985,
+    "0.005": 1428.009890199999
+  },
+  "curve": [
+    {
+      "seconds": 6.543701700000383,
+      "objective": 1220423.7732883145,
+      "source": "fallback",
+      "gain": null
+    },
+    {
+      "seconds": 672.6203232000007,
+      "objective": 901013.0553003659,
+      "source": "llm",
+      "gain": 319410.71798794856
+    },
+    {
+      "seconds": 678.9693235999985,
+      "objective": 889901.4906783251,
+      "source": "llm",
+      "gain": 11111.564622040838
+    },
+    {
+      "seconds": 1428.009890199999,
+      "objective": 888637.8764314257,
+      "source": "llm",
+      "gain": 1263.6142468993785
+    },
+    {
+      "seconds": 1434.4252030999996,
+      "objective": 885781.5721531347,
+      "source": "llm",
+      "gain": 2856.304278290947
+    }
+  ],
+  "first_llm_improvement_seconds": 672.6203232000007,
+  "sa_improvement_after_llm": 0.0,
+  "candidate_stages": {
+    "llm": {
+      "raw_count": 8,
+      "raw_feasible_count": 0,
+      "raw_feasible_rate": 0.0,
+      "repaired_count": 6,
+      "repair_bits": [
+        3,
+        3,
+        3,
+        4,
+        3,
+        3
+      ],
+      "repair_bits_mean": 3.1666666666666665,
+      "repair_bits_min": 3,
+      "repair_bits_max": 4,
+      "repaired_duplicates": 0,
+      "repaired_duplicate_rate": 0.0,
+      "unique_repaired": 6,
+      "full_evaluated": 6,
+      "full_feasible": 6,
+      "full_feasible_rate": 1.0,
+      "improving_count": 4,
+      "improvement_rate": 0.6666666666666666
+    }
+  },
+  "calls": [
+    {
+      "kind": "llm_end",
+      "failed": false,
+      "usage": null,
+      "message": "ok"
+    },
+    {
+      "kind": "llm_end",
+      "failed": false,
+      "usage": null,
+      "message": "ok"
+    },
+    {
+      "kind": "llm_end",
+      "failed": true,
+      "usage": null,
+      "message": "deadline"
+    }
+  ],
+  "llm_started": 3,
+  "rule_started": 0,
+  "sa_calls": 0,
+  "sa_seeds": [],
+  "timings": {
+    "qubo": 0.0,
+    "annealing": 0.0,
+    "relaxation": 0.0,
+    "local_dispatch": 1.4700590000065858,
+    "repair": 0.02080969999951776,
+    "subproblems": 43.20764590000181,
+    "llm": 1755.0259314999967,
+    "context": 0.016301799998473143,
+    "heuristic": 0.0,
+    "validation": 0.008711899994523264,
+    "other": 0.3206248000024061
+  },
+  "time_limit_overshoot": 0.07008539999878849,
+  "incomplete_evaluations": 0,
+  "sa_returned_raw": 0,
+  "sa_returned_raw_feasible": 0,
+  "sa_returned_after_deadline": 0,
+  "late_evaluations_excluded": 0,
+  "group": "C",
+  "seed": 27,
+  "state": {
+    "status": "TIME_LIMIT",
+    "elapsed_seconds": 1800.0700846,
+    "exitcode": 0,
+    "process_wall_seconds": 1800.6288656999968
+  },
+  "llm_responses_consumed": 2,
+  "llm_transport_status": "partial",
+  "handoffs": [
+    {
+      "call": "001",
+      "status": "completed",
+      "receipt_status": "completed",
+      "actual_turn_completed": true,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 1.7136709690093994,
+      "receipt_delay_after_file_seconds": 14.953644275665283,
+      "usage": {
+        "input_tokens": 152161,
+        "cached_input_tokens": 88704,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 15812,
+        "reasoning_output_tokens": 7484
+      }
+    },
+    {
+      "call": "002",
+      "status": "completed",
+      "receipt_status": "completed",
+      "actual_turn_completed": true,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 12.120229244232178,
+      "receipt_delay_after_file_seconds": 13.966280698776245,
+      "usage": {
+        "input_tokens": 242586,
+        "cached_input_tokens": 163072,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 17080,
+        "reasoning_output_tokens": 9296
+      }
+    },
+    {
+      "call": "003",
+      "status": "deadline",
+      "receipt_status": null,
+      "actual_turn_completed": false,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 2.3535313606262207,
+      "receipt_delay_after_file_seconds": null,
+      "usage": null
+    }
+  ],
+  "post_llm_sa": {
+    "calls": 0,
+    "complete_evaluations": 0
+  },
+  "audit": {
+    "physical_checked": 7,
+    "errors": [],
+    "complete": true,
+    "protocol_ok": true,
+    "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+    "result_objective_consistent": true
+  },
+  "run_directory": "C:\\Users\\12433\\Desktop\\LLM-benders-SUC\\experiments\\rts24-recovery-20261004-resume\\C-27",
+  "recovery": true
+}

@@ -1,0 +1,2285 @@
+{
+  "call_id": "0e9019a21a6f4ab28ce4cadb45c6b0bd:1",
+  "failed": false,
+  "message": "ok",
+  "proposals": [
+    {
+      "proposal_id": "0e9019a21a6f4ab28ce4cadb45c6b0bd:1:0",
+      "commitment_id": "04c5a77514323d8566d91ea390abe44b92afd4df79a626eb3292ed80207ca9bb",
+      "proposed_changes": [
+        {
+          "unit": 1,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 5,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 13,
+          "end_hour": 14,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 18,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 21,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 9,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 14,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 3,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 4,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 3,
+          "end_hour": 3,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 6,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 10,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 14,
+          "end_hour": 14,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 16,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 4,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 11,
+          "end_hour": 13,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 17,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 19,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 15,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 1,
+          "end_hour": 4,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 10,
+          "end_hour": 12,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 19,
+          "end_hour": 23,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 13,
+          "start_hour": 16,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 1,
+          "end_hour": 10,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 8,
+          "end_hour": 11,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 14,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 9,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 1,
+          "end_hour": 9,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 12,
+          "end_hour": 16,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 4,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 10,
+          "end_hour": 13,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 16,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 10,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 22,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 1,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 7,
+          "end_hour": 8,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 3,
+          "end_hour": 4,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 7,
+          "end_hour": 9,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 16,
+          "end_hour": 17,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 2,
+          "end_hour": 3,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 18,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 3,
+      "outcome": "accepted",
+      "duplicate": false,
+      "cache_hit": false,
+      "continuous_dispatch_completed": true,
+      "local_feasible": true,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 1194310.0417312777,
+        "fixed": 289077.91760000004,
+        "expected_fuel": 905232.1241312777
+      },
+      "costs": {
+        "total": 900551.6017782612,
+        "fixed": 174093.28350000002,
+        "expected_fuel": 726458.3182782612
+      },
+      "cost_change": {
+        "total": -293758.43995301647,
+        "fixed": -114984.63410000002,
+        "expected_fuel": -178773.80585301644
+      },
+      "refreshed_incumbent": true
+    },
+    {
+      "proposal_id": "0e9019a21a6f4ab28ce4cadb45c6b0bd:1:1",
+      "commitment_id": "1bc5ee8dd0ec023ccfc94894926c4f665b3bc2875fa6f6ea354f3ab5b3042806",
+      "proposed_changes": [
+        {
+          "unit": 1,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 5,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 13,
+          "end_hour": 14,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 18,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 21,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 9,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 14,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 3,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 4,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 3,
+          "end_hour": 3,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 6,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 10,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 14,
+          "end_hour": 14,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 16,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 4,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 11,
+          "end_hour": 13,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 17,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 19,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 15,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 1,
+          "end_hour": 4,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 10,
+          "end_hour": 12,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 11,
+          "end_hour": 18,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 19,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 13,
+          "start_hour": 22,
+          "end_hour": 23,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 8,
+          "end_hour": 11,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 14,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 9,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 1,
+          "end_hour": 9,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 12,
+          "end_hour": 16,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 4,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 10,
+          "end_hour": 13,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 16,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 10,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 22,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 1,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 7,
+          "end_hour": 8,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 3,
+          "end_hour": 4,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 7,
+          "end_hour": 9,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 16,
+          "end_hour": 17,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 2,
+          "end_hour": 3,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 18,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 13,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 2,
+      "outcome": "accepted",
+      "duplicate": false,
+      "cache_hit": false,
+      "continuous_dispatch_completed": true,
+      "local_feasible": true,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 1194310.0417312777,
+        "fixed": 289077.91760000004,
+        "expected_fuel": 905232.1241312777
+      },
+      "costs": {
+        "total": 922824.6987195755,
+        "fixed": 169517.268,
+        "expected_fuel": 753307.4307195755
+      },
+      "cost_change": {
+        "total": -271485.3430117022,
+        "fixed": -119560.64960000003,
+        "expected_fuel": -151924.69341170217
+      },
+      "refreshed_incumbent": false
+    },
+    {
+      "proposal_id": "0e9019a21a6f4ab28ce4cadb45c6b0bd:1:2",
+      "commitment_id": "65334fa8cb0e384846fc5f1fd2518414466675c666aec218ab4ac885b4515970",
+      "proposed_changes": [
+        {
+          "unit": 1,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 5,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 13,
+          "end_hour": 14,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 18,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 21,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 9,
+          "end_hour": 9,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 11,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 14,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 3,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 4,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 3,
+          "end_hour": 3,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 6,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 11,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 14,
+          "end_hour": 14,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 16,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 4,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 11,
+          "end_hour": 13,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 17,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 19,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 15,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 1,
+          "end_hour": 4,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 9,
+          "end_hour": 12,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 9,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 19,
+          "end_hour": 23,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 16,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 13,
+          "start_hour": 1,
+          "end_hour": 10,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 13,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 1,
+          "end_hour": 10,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 8,
+          "end_hour": 9,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 12,
+          "end_hour": 13,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 14,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 9,
+          "end_hour": 9,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 14,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 1,
+          "end_hour": 9,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 10,
+          "end_hour": 11,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 14,
+          "end_hour": 16,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 4,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 16,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 14,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 22,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 1,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 7,
+          "end_hour": 8,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 3,
+          "end_hour": 4,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 7,
+          "end_hour": 9,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 16,
+          "end_hour": 17,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 2,
+          "end_hour": 3,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 18,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 3,
+      "outcome": "accepted",
+      "duplicate": false,
+      "cache_hit": false,
+      "continuous_dispatch_completed": true,
+      "local_feasible": true,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 1194310.0417312777,
+        "fixed": 289077.91760000004,
+        "expected_fuel": 905232.1241312777
+      },
+      "costs": {
+        "total": 893140.7419978969,
+        "fixed": 183758.5092,
+        "expected_fuel": 709382.232797897
+      },
+      "cost_change": {
+        "total": -301169.2997333808,
+        "fixed": -105319.40840000004,
+        "expected_fuel": -195849.8913333807
+      },
+      "refreshed_incumbent": true
+    },
+    {
+      "proposal_id": "0e9019a21a6f4ab28ce4cadb45c6b0bd:1:3",
+      "commitment_id": "cdc708c018aecabae400fd77a06c71d97ed6f0ec3fc496a963fd147f1bc00a20",
+      "proposed_changes": [
+        {
+          "unit": 1,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 5,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 12,
+          "end_hour": 12,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 18,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 21,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 1,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 9,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 14,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 2,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 3,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 4,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 3,
+          "end_hour": 3,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 6,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 10,
+          "end_hour": 12,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 14,
+          "end_hour": 14,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 16,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 5,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 4,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 11,
+          "end_hour": 13,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 17,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 6,
+          "start_hour": 19,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 15,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 2,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 17,
+          "end_hour": 20,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 1,
+          "end_hour": 4,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 9,
+          "start_hour": 10,
+          "end_hour": 12,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 1,
+          "end_hour": 2,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 19,
+          "end_hour": 23,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 13,
+          "start_hour": 22,
+          "end_hour": 22,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 14,
+          "start_hour": 1,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 8,
+          "end_hour": 10,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 12,
+          "end_hour": 13,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 15,
+          "start_hour": 16,
+          "end_hour": 21,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 9,
+          "end_hour": 10,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 16,
+          "end_hour": 17,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 16,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 1,
+          "end_hour": 9,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 16,
+          "end_hour": 16,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 17,
+          "start_hour": 20,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 4,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 14,
+          "end_hour": 15,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 18,
+          "start_hour": 16,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 1,
+          "end_hour": 6,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 16,
+          "end_hour": 19,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 19,
+          "start_hour": 22,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 1,
+          "end_hour": 5,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 7,
+          "end_hour": 8,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 25,
+          "start_hour": 10,
+          "end_hour": 10,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 1,
+          "end_hour": 1,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 3,
+          "end_hour": 4,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 7,
+          "end_hour": 9,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 16,
+          "end_hour": 17,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 26,
+          "start_hour": 19,
+          "end_hour": 19,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 2,
+          "end_hour": 3,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 6,
+          "end_hour": 7,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 11,
+          "end_hour": 11,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 15,
+          "end_hour": 15,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 28,
+          "start_hour": 18,
+          "end_hour": 18,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 3,
+      "outcome": "accepted",
+      "duplicate": false,
+      "cache_hit": false,
+      "continuous_dispatch_completed": true,
+      "local_feasible": true,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 1194310.0417312777,
+        "fixed": 289077.91760000004,
+        "expected_fuel": 905232.1241312777
+      },
+      "costs": {
+        "total": 911905.0415146196,
+        "fixed": 181191.8656,
+        "expected_fuel": 730713.1759146196
+      },
+      "cost_change": {
+        "total": -282405.0002166581,
+        "fixed": -107886.05200000005,
+        "expected_fuel": -174518.9482166581
+      },
+      "refreshed_incumbent": false
+    }
+  ]
+}

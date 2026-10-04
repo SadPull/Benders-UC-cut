@@ -1,0 +1,68 @@
+{
+  "objective": 1220423.7732883145,
+  "reference_difference": 0.3789059820899576,
+  "checkpoints": {
+    "300": 1220423.7732883145,
+    "600": 1220423.7732883145,
+    "900": 1220423.7732883145,
+    "1800": 1220423.7732883145
+  },
+  "threshold_seconds": {
+    "0.01": null,
+    "0.005": null
+  },
+  "curve": [
+    {
+      "seconds": 6.824729899999511,
+      "objective": 1220423.7732883145,
+      "source": "fallback",
+      "gain": null
+    }
+  ],
+  "first_llm_improvement_seconds": null,
+  "sa_improvement_after_llm": 0.0,
+  "candidate_stages": {},
+  "calls": [],
+  "llm_started": 1,
+  "rule_started": 0,
+  "sa_calls": 0,
+  "sa_seeds": [],
+  "timings": {},
+  "time_limit_overshoot": null,
+  "incomplete_evaluations": 0,
+  "sa_returned_raw": 0,
+  "sa_returned_raw_feasible": 0,
+  "sa_returned_after_deadline": 0,
+  "late_evaluations_excluded": 0,
+  "group": "C",
+  "seed": 17,
+  "state": {
+    "status": "running",
+    "pid": 26520
+  },
+  "llm_responses_consumed": 0,
+  "llm_transport_status": "no_response",
+  "handoffs": [
+    {
+      "call": "001",
+      "status": null,
+      "dispatch_delay_seconds": 0.009556293487548828,
+      "receipt_delay_after_file_seconds": null,
+      "usage": null
+    }
+  ],
+  "post_llm_sa": {
+    "calls": 0,
+    "complete_evaluations": 0
+  },
+  "audit": {
+    "physical_checked": 1,
+    "errors": [],
+    "complete": false,
+    "protocol_ok": true,
+    "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+    "result_objective_consistent": false
+  },
+  "run_directory": "experiments\\rts24-recovery-20261004-fixed\\C-17",
+  "recovery": true
+}

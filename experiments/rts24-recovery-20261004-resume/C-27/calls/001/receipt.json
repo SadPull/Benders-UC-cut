@@ -1,0 +1,14 @@
+{
+  "run_id": "0cacfb03b4ff40168fe9ca69cfb2817d",
+  "call_id": "0cacfb03b4ff40168fe9ca69cfb2817d:1",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "input_sha256": {
+    "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+    "user.txt": "f358c8ea108ac48293d54091dc2a040492a52a7193d96f870ec81e6118c825b6"
+  },
+  "agent_id": "01a10585-b68a-7ab3-9027-616101ea2a54",
+  "status": "completed",
+  "completed_at": 1791094668.9968545,
+  "output_sha256": "e2b60040914f79b70c378cbd3a6f6653c4fb04220d15779dd9f9f3470b0624c0"
+}

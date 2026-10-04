@@ -1,0 +1,28 @@
+{
+  "authorized_limit": 18,
+  "retained_previous_sessions": 6,
+  "new_session_limit": 12,
+  "groups": [
+    [
+      "C",
+      17
+    ],
+    [
+      "D",
+      7
+    ],
+    [
+      "C",
+      27
+    ],
+    [
+      "D",
+      17
+    ]
+  ],
+  "time_limit_seconds": 1800,
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "approved_by_user": true,
+  "recorded_at": 1791090392.4119925
+}

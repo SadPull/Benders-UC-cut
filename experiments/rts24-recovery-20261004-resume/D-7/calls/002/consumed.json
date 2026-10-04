@@ -1,0 +1,12 @@
+{
+  "call_id": "43812609145548989e8e1d7b3b118747:2",
+  "transport": "codex_subagent",
+  "http_requests": 0,
+  "requested_model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "usage": null,
+  "effective_temperature": null,
+  "max_output_tokens_override": null,
+  "status": "deadline",
+  "agent_wait_seconds": 833.3932008999982
+}

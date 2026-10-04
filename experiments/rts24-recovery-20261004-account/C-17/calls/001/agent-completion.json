@@ -1,0 +1,15 @@
+{
+  "agent_id": "01a10525-1259-7d52-b9c7-bbfb35cd84d8",
+  "exitcode": 0,
+  "actual_turn_completed": true,
+  "receipt_published": true,
+  "usage": {
+    "input_tokens": 207562,
+    "cached_input_tokens": 128768,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 15944,
+    "reasoning_output_tokens": 7681
+  },
+  "late_or_closed": false,
+  "finished_at": 1791088356.7943606
+}

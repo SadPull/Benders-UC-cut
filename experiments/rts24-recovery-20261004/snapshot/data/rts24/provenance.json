@@ -1,0 +1,295 @@
+{
+  "name": "IEEE RTS-24 derived copperplate UC/SUC (fixed startup costs)",
+  "sources": {
+    "case24_ieee_rts.m": {
+      "url": "https://raw.githubusercontent.com/MATPOWER/matpower/8b326f00d496864ed81169f7e684568fc1f7006d/data/case24_ieee_rts.m",
+      "commit": "8b326f00d496864ed81169f7e684568fc1f7006d",
+      "sha256": "a383a9001fd03ab54b2bc590364a71119fd07e82ab814adfd824ce08f9eb26ce"
+    },
+    "RTS79_ucacopf.dat": {
+      "url": "https://raw.githubusercontent.com/anyacastillo/ucacopf/001cf29dc2e9b3d26e71146f82db35fa379b4dca/RTS79_ucacopf.dat",
+      "commit": "001cf29dc2e9b3d26e71146f82db35fa379b4dca",
+      "sha256": "ed1aad8c7a2736edfa411d7a3e45c550e8e5a9e5879224db4e18c529253446eb"
+    }
+  },
+  "generator_mapping": [
+    {
+      "index": 0,
+      "source_generator_id": 1,
+      "matpower_bus": 1,
+      "uc_bus": 101,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 1,
+      "source_generator_id": 2,
+      "matpower_bus": 1,
+      "uc_bus": 101,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 2,
+      "source_generator_id": 3,
+      "matpower_bus": 1,
+      "uc_bus": 101,
+      "raw_startup_limit_MW": 120.0,
+      "raw_shutdown_limit_MW": 120.0
+    },
+    {
+      "index": 3,
+      "source_generator_id": 4,
+      "matpower_bus": 1,
+      "uc_bus": 101,
+      "raw_startup_limit_MW": 120.0,
+      "raw_shutdown_limit_MW": 120.0
+    },
+    {
+      "index": 4,
+      "source_generator_id": 5,
+      "matpower_bus": 2,
+      "uc_bus": 102,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 5,
+      "source_generator_id": 6,
+      "matpower_bus": 2,
+      "uc_bus": 102,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 6,
+      "source_generator_id": 7,
+      "matpower_bus": 2,
+      "uc_bus": 102,
+      "raw_startup_limit_MW": 120.0,
+      "raw_shutdown_limit_MW": 120.0
+    },
+    {
+      "index": 7,
+      "source_generator_id": 8,
+      "matpower_bus": 2,
+      "uc_bus": 102,
+      "raw_startup_limit_MW": 120.0,
+      "raw_shutdown_limit_MW": 120.0
+    },
+    {
+      "index": 8,
+      "source_generator_id": 9,
+      "matpower_bus": 7,
+      "uc_bus": 107,
+      "raw_startup_limit_MW": 420.0,
+      "raw_shutdown_limit_MW": 420.0
+    },
+    {
+      "index": 9,
+      "source_generator_id": 10,
+      "matpower_bus": 7,
+      "uc_bus": 107,
+      "raw_startup_limit_MW": 420.0,
+      "raw_shutdown_limit_MW": 420.0
+    },
+    {
+      "index": 10,
+      "source_generator_id": 11,
+      "matpower_bus": 7,
+      "uc_bus": 107,
+      "raw_startup_limit_MW": 420.0,
+      "raw_shutdown_limit_MW": 420.0
+    },
+    {
+      "index": 11,
+      "source_generator_id": 12,
+      "matpower_bus": 13,
+      "uc_bus": 113,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 12,
+      "source_generator_id": 13,
+      "matpower_bus": 13,
+      "uc_bus": 113,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 13,
+      "source_generator_id": 14,
+      "matpower_bus": 13,
+      "uc_bus": 113,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 14,
+      "source_generator_id": 16,
+      "matpower_bus": 15,
+      "uc_bus": 115,
+      "raw_startup_limit_MW": 60.0,
+      "raw_shutdown_limit_MW": 60.0
+    },
+    {
+      "index": 15,
+      "source_generator_id": 17,
+      "matpower_bus": 15,
+      "uc_bus": 115,
+      "raw_startup_limit_MW": 60.0,
+      "raw_shutdown_limit_MW": 60.0
+    },
+    {
+      "index": 16,
+      "source_generator_id": 18,
+      "matpower_bus": 15,
+      "uc_bus": 115,
+      "raw_startup_limit_MW": 60.0,
+      "raw_shutdown_limit_MW": 60.0
+    },
+    {
+      "index": 17,
+      "source_generator_id": 19,
+      "matpower_bus": 15,
+      "uc_bus": 115,
+      "raw_startup_limit_MW": 60.0,
+      "raw_shutdown_limit_MW": 60.0
+    },
+    {
+      "index": 18,
+      "source_generator_id": 20,
+      "matpower_bus": 15,
+      "uc_bus": 115,
+      "raw_startup_limit_MW": 60.0,
+      "raw_shutdown_limit_MW": 60.0
+    },
+    {
+      "index": 19,
+      "source_generator_id": 21,
+      "matpower_bus": 15,
+      "uc_bus": 115,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 20,
+      "source_generator_id": 22,
+      "matpower_bus": 16,
+      "uc_bus": 116,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 21,
+      "source_generator_id": 23,
+      "matpower_bus": 18,
+      "uc_bus": 118,
+      "raw_startup_limit_MW": 1200.0,
+      "raw_shutdown_limit_MW": 1200.0
+    },
+    {
+      "index": 22,
+      "source_generator_id": 24,
+      "matpower_bus": 21,
+      "uc_bus": 121,
+      "raw_startup_limit_MW": 1200.0,
+      "raw_shutdown_limit_MW": 1200.0
+    },
+    {
+      "index": 23,
+      "source_generator_id": 25,
+      "matpower_bus": 22,
+      "uc_bus": 122,
+      "raw_startup_limit_MW": 50.0,
+      "raw_shutdown_limit_MW": 50.0
+    },
+    {
+      "index": 24,
+      "source_generator_id": 26,
+      "matpower_bus": 22,
+      "uc_bus": 122,
+      "raw_startup_limit_MW": 50.0,
+      "raw_shutdown_limit_MW": 50.0
+    },
+    {
+      "index": 25,
+      "source_generator_id": 27,
+      "matpower_bus": 22,
+      "uc_bus": 122,
+      "raw_startup_limit_MW": 50.0,
+      "raw_shutdown_limit_MW": 50.0
+    },
+    {
+      "index": 26,
+      "source_generator_id": 28,
+      "matpower_bus": 22,
+      "uc_bus": 122,
+      "raw_startup_limit_MW": 50.0,
+      "raw_shutdown_limit_MW": 50.0
+    },
+    {
+      "index": 27,
+      "source_generator_id": 29,
+      "matpower_bus": 22,
+      "uc_bus": 122,
+      "raw_startup_limit_MW": 50.0,
+      "raw_shutdown_limit_MW": 50.0
+    },
+    {
+      "index": 28,
+      "source_generator_id": 30,
+      "matpower_bus": 22,
+      "uc_bus": 122,
+      "raw_startup_limit_MW": 50.0,
+      "raw_shutdown_limit_MW": 50.0
+    },
+    {
+      "index": 29,
+      "source_generator_id": 31,
+      "matpower_bus": 23,
+      "uc_bus": 123,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 30,
+      "source_generator_id": 32,
+      "matpower_bus": 23,
+      "uc_bus": 123,
+      "raw_startup_limit_MW": 180.0,
+      "raw_shutdown_limit_MW": 180.0
+    },
+    {
+      "index": 31,
+      "source_generator_id": 33,
+      "matpower_bus": 23,
+      "uc_bus": 123,
+      "raw_startup_limit_MW": 240.0,
+      "raw_shutdown_limit_MW": 240.0
+    }
+  ],
+  "field_sources": {
+    "pmin,pmax": "MATPOWER gen columns 10,9 (MW); cross-checked against UC data times baseMVA",
+    "cost_a,cost_b,cost_c": "MATPOWER gencost columns 5,6,7; evaluated on MW, no scaling",
+    "startup_cost,shutdown_cost": "MATPOWER gencost columns 2,3; fixed dollars per event",
+    "min_up,min_down": "UC MinimumUpTime, MinimumDownTime; hours",
+    "ramp_up,ramp_down": "UC NominalRampUpLimit, NominalRampDownLimit times baseMVA; MW per hourly step",
+    "pstart,pshut": "min(Pmax, UC StartupCapacityLimit/ShutdownCapacity times baseMVA)",
+    "initial_duration": "UC UnitOnT0State; signed hours",
+    "initial_output": "UC PowerGeneratedT0 times baseMVA; MW",
+    "base_load": "sum UC Demand over all 24 buses times baseMVA; Decimal arithmetic",
+    "reserve_fraction": "UC ReserveRequirement is zero; stochastic profile overrides to project assumption 0.05"
+  },
+  "source_corrections": [
+    "TimePeriod omits hour 15; use NumTimePeriods=24 and the complete 24-by-24 Demand table.",
+    "Exclude generator 15 (synchronous condenser) despite its presence in the UC ThermalGenerator declaration."
+  ],
+  "model_choices": [
+    "Aggregate bus loads; omit network, reactive power and contingencies.",
+    "Use MATPOWER fixed startup costs instead of UC StartupCosts/StartupLags.",
+    "Six U50 hydro units are dispatchable units without water or energy budgets.",
+    "Retain project ramp and terminal rules; this is not a reproduction of UC+ACOPF."
+  ]
+}

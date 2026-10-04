@@ -1,0 +1,9 @@
+{
+  "reason": "Preserve live worker and budget; fix missing custom provider for subsequent calls",
+  "stopped_controller": 25984,
+  "worker_pid": 5048,
+  "failed_calls": [
+    "002"
+  ],
+  "recorded_at": 1791087172.8360338
+}

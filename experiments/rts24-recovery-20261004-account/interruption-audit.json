@@ -1,0 +1,14 @@
+{
+  "original_unchanged": true,
+  "source_hashes_match": true,
+  "reference_verified": true,
+  "validated_feasible_evaluations": 5,
+  "valid_llm_responses": 1,
+  "partial_cost": 895958.5372669585,
+  "call_attempts": 2,
+  "total_new_model_sessions": 6,
+  "authorized_limit": 16,
+  "full_four_new_runs_require_limit": 18,
+  "report_sha256": "135a342c9dc23182e9f4dd9f73c7f476f6718ab40a43eb3e3cf1fff448314ba9",
+  "created_at": 1791090027.042374
+}

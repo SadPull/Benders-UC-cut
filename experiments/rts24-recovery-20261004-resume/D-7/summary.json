@@ -1,0 +1,273 @@
+{
+  "objective": 890427.1426270097,
+  "reference_difference": 0.006056535817408282,
+  "checkpoints": {
+    "300": 1174508.0552730775,
+    "600": 1174508.0552730775,
+    "900": 1174508.0552730775,
+    "1800": 890427.1426270097
+  },
+  "threshold_seconds": {
+    "0.01": 960.4100715999994,
+    "0.005": null
+  },
+  "curve": [
+    {
+      "seconds": 6.521499399999811,
+      "objective": 1220423.7732883145,
+      "source": "fallback",
+      "gain": null
+    },
+    {
+      "seconds": 22.489540299999135,
+      "objective": 1212730.7634665626,
+      "source": "sa",
+      "gain": 7693.009821751853
+    },
+    {
+      "seconds": 57.80128069999955,
+      "objective": 1174508.0552730775,
+      "source": "sa",
+      "gain": 38222.70819348516
+    },
+    {
+      "seconds": 947.5514715999998,
+      "objective": 921644.2705051067,
+      "source": "llm",
+      "gain": 252863.7847679708
+    },
+    {
+      "seconds": 953.9959196999989,
+      "objective": 894299.4556657622,
+      "source": "llm",
+      "gain": 27344.81483934447
+    },
+    {
+      "seconds": 960.4100715999994,
+      "objective": 890427.1426270097,
+      "source": "llm",
+      "gain": 3872.3130387525307
+    }
+  ],
+  "first_llm_improvement_seconds": 947.5514715999998,
+  "sa_improvement_after_llm": 0.0,
+  "candidate_stages": {
+    "sa": {
+      "raw_count": 80,
+      "raw_feasible_count": 0,
+      "raw_feasible_rate": 0.0,
+      "repaired_count": 80,
+      "repair_bits": [
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        74,
+        128,
+        128,
+        128,
+        128,
+        127,
+        128,
+        128,
+        128,
+        117,
+        127,
+        127,
+        113,
+        128,
+        128,
+        128,
+        127,
+        81,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        79,
+        113,
+        113,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        114,
+        113,
+        113,
+        113,
+        112,
+        113,
+        113,
+        112,
+        112,
+        112,
+        113,
+        89,
+        113,
+        89,
+        89,
+        89,
+        89
+      ],
+      "repair_bits_mean": 99.675,
+      "repair_bits_min": 74,
+      "repair_bits_max": 128,
+      "repaired_duplicates": 67,
+      "repaired_duplicate_rate": 0.8375,
+      "unique_repaired": 13,
+      "full_evaluated": 13,
+      "full_feasible": 13,
+      "full_feasible_rate": 1.0,
+      "improving_count": 2,
+      "improvement_rate": 0.15384615384615385
+    },
+    "llm": {
+      "raw_count": 4,
+      "raw_feasible_count": 0,
+      "raw_feasible_rate": 0.0,
+      "repaired_count": 4,
+      "repair_bits": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "repair_bits_mean": 2,
+      "repair_bits_min": 2,
+      "repair_bits_max": 2,
+      "repaired_duplicates": 0,
+      "repaired_duplicate_rate": 0.0,
+      "unique_repaired": 4,
+      "full_evaluated": 4,
+      "full_feasible": 4,
+      "full_feasible_rate": 1.0,
+      "improving_count": 3,
+      "improvement_rate": 0.75
+    }
+  },
+  "calls": [
+    {
+      "kind": "llm_end",
+      "failed": false,
+      "usage": null,
+      "message": "ok"
+    },
+    {
+      "kind": "llm_end",
+      "failed": true,
+      "usage": null,
+      "message": "deadline"
+    }
+  ],
+  "llm_started": 2,
+  "rule_started": 0,
+  "sa_calls": 5,
+  "sa_seeds": [
+    7,
+    7,
+    7,
+    7,
+    7
+  ],
+  "timings": {
+    "qubo": 105.5967120999976,
+    "annealing": 4.158833499999673,
+    "relaxation": 0.8706732999980886,
+    "local_dispatch": 5.125600700001087,
+    "repair": 4.174522300005265,
+    "subproblems": 110.94440500000746,
+    "llm": 1568.3825657999969,
+    "context": 0.010893700000451645,
+    "heuristic": 0.0,
+    "validation": 0.02584710000337509,
+    "other": 0.8958439999896655
+  },
+  "time_limit_overshoot": 0.1858987999985402,
+  "incomplete_evaluations": 0,
+  "sa_returned_raw": 80,
+  "sa_returned_raw_feasible": 0,
+  "sa_returned_after_deadline": 0,
+  "late_evaluations_excluded": 0,
+  "group": "D",
+  "seed": 7,
+  "state": {
+    "status": "TIME_LIMIT",
+    "elapsed_seconds": 1800.1858974999996,
+    "exitcode": 0,
+    "process_wall_seconds": 1801.0157209000008
+  },
+  "llm_responses_consumed": 1,
+  "llm_transport_status": "partial",
+  "handoffs": [
+    {
+      "call": "001",
+      "status": "completed",
+      "receipt_status": "completed",
+      "actual_turn_completed": true,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 2.345048427581787,
+      "receipt_delay_after_file_seconds": 16.910755395889282,
+      "usage": {
+        "input_tokens": 172919,
+        "cached_input_tokens": 126976,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 17525,
+        "reasoning_output_tokens": 9426
+      }
+    },
+    {
+      "call": "002",
+      "status": "deadline",
+      "receipt_status": null,
+      "actual_turn_completed": false,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 1.9487311840057373,
+      "receipt_delay_after_file_seconds": null,
+      "usage": null
+    }
+  ],
+  "post_llm_sa": {
+    "calls": 0,
+    "complete_evaluations": 0
+  },
+  "audit": {
+    "physical_checked": 18,
+    "errors": [],
+    "complete": true,
+    "protocol_ok": true,
+    "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+    "result_objective_consistent": true
+  },
+  "run_directory": "C:\\Users\\12433\\Desktop\\LLM-benders-SUC\\experiments\\rts24-recovery-20261004-resume\\D-7",
+  "recovery": true
+}

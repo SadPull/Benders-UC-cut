@@ -1,0 +1,138 @@
+{
+  "complete": true,
+  "numerical_audit_passed": true,
+  "llm_response_replications_complete": false,
+  "original_unchanged": true,
+  "source_hashes_match": true,
+  "reference_verified": true,
+  "prior_interrupted_records_unchanged": true,
+  "prior_startup_records_unchanged": true,
+  "new_llm_started": 11,
+  "new_model_sessions": 11,
+  "recovery_model_sessions": 17,
+  "recovery_llm_started": 18,
+  "total_llm_started": 36,
+  "attempts_retained": 25,
+  "authorized_recovery_call_limit": 18,
+  "counts": [
+    {
+      "folder": "rts24-recovery-20261004",
+      "requests": 4,
+      "sessions": 3
+    },
+    {
+      "folder": "rts24-recovery-20261004-fixed",
+      "requests": 1,
+      "sessions": 1
+    },
+    {
+      "folder": "rts24-recovery-20261004-account",
+      "requests": 2,
+      "sessions": 2
+    },
+    {
+      "folder": "rts24-recovery-20261004-resume",
+      "requests": 11,
+      "sessions": 11
+    }
+  ],
+  "controller_hashes_unchanged": true,
+  "corrected_report_hashes_match": true,
+  "owned_processes_alive": [],
+  "runs": [
+    {
+      "group": "C",
+      "seed": 17,
+      "objective": 885788.1794256212,
+      "reference_difference": 0.0008151645420400033,
+      "llm_started": 3,
+      "llm_responses_consumed": 2,
+      "post_llm_sa": {
+        "calls": 0,
+        "complete_evaluations": 0
+      },
+      "sa_improvement_after_llm": 0.0,
+      "audit": {
+        "physical_checked": 9,
+        "errors": [],
+        "complete": true,
+        "protocol_ok": true,
+        "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+        "result_objective_consistent": true
+      }
+    },
+    {
+      "group": "D",
+      "seed": 7,
+      "objective": 890427.1426270097,
+      "reference_difference": 0.006056535817408282,
+      "llm_started": 2,
+      "llm_responses_consumed": 1,
+      "post_llm_sa": {
+        "calls": 0,
+        "complete_evaluations": 0
+      },
+      "sa_improvement_after_llm": 0.0,
+      "audit": {
+        "physical_checked": 18,
+        "errors": [],
+        "complete": true,
+        "protocol_ok": true,
+        "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+        "result_objective_consistent": true
+      }
+    },
+    {
+      "group": "C",
+      "seed": 27,
+      "objective": 885781.5721531347,
+      "reference_difference": 0.0008076992600976052,
+      "llm_started": 3,
+      "llm_responses_consumed": 2,
+      "post_llm_sa": {
+        "calls": 0,
+        "complete_evaluations": 0
+      },
+      "sa_improvement_after_llm": 0.0,
+      "audit": {
+        "physical_checked": 7,
+        "errors": [],
+        "complete": true,
+        "protocol_ok": true,
+        "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+        "result_objective_consistent": true
+      }
+    },
+    {
+      "group": "D",
+      "seed": 17,
+      "objective": 889420.3785064076,
+      "reference_difference": 0.004919034976440972,
+      "llm_started": 3,
+      "llm_responses_consumed": 2,
+      "post_llm_sa": {
+        "calls": 0,
+        "complete_evaluations": 0
+      },
+      "sa_improvement_after_llm": 0.0,
+      "audit": {
+        "physical_checked": 21,
+        "errors": [],
+        "complete": true,
+        "protocol_ok": true,
+        "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+        "result_objective_consistent": true
+      }
+    }
+  ],
+  "verified_at": 1791097674.7483149,
+  "agent_protocol_audit_passed": true,
+  "agent_protocol_audit_sha256": "42504b6e97078c7f429180f8f765aa1270c0eb801d06b445b780a72b03b44255",
+  "monitoring": {
+    "mode": "live_in_current_conversation",
+    "scheduled_monitor_used": false,
+    "sampling_seconds": 1,
+    "reader_lock_conflict_recovered": true
+  },
+  "archive_script_sha256": "8b0d9f9f8e8abc1e627f8c6d44f4d8a986d36883237666c391d685221eff0e16"
+}

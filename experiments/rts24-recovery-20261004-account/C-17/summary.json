@@ -1,0 +1,144 @@
+{
+  "objective": 895958.5372669585,
+  "reference_difference": 0.012306228199075564,
+  "checkpoints": {
+    "300": 1220423.7732883145,
+    "600": 1220423.7732883145,
+    "900": 895958.5372669585,
+    "1800": 895958.5372669585
+  },
+  "threshold_seconds": {
+    "0.01": null,
+    "0.005": null
+  },
+  "curve": [
+    {
+      "seconds": 6.547941400000127,
+      "objective": 1220423.7732883145,
+      "source": "fallback",
+      "gain": null
+    },
+    {
+      "seconds": 692.2912904999994,
+      "objective": 898274.8071483911,
+      "source": "llm",
+      "gain": 322148.9661399233
+    },
+    {
+      "seconds": 698.6567976999995,
+      "objective": 895958.5372669585,
+      "source": "llm",
+      "gain": 2316.269881432643
+    }
+  ],
+  "first_llm_improvement_seconds": 692.2912904999994,
+  "sa_improvement_after_llm": 0.0,
+  "candidate_stages": {
+    "llm": {
+      "raw_count": 4,
+      "raw_feasible_count": 0,
+      "raw_feasible_rate": 0.0,
+      "repaired_count": 4,
+      "repair_bits": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "repair_bits_mean": 3,
+      "repair_bits_min": 3,
+      "repair_bits_max": 3,
+      "repaired_duplicates": 0,
+      "repaired_duplicate_rate": 0.0,
+      "unique_repaired": 4,
+      "full_evaluated": 4,
+      "full_feasible": 4,
+      "full_feasible_rate": 1.0,
+      "improving_count": 2,
+      "improvement_rate": 0.5
+    }
+  },
+  "calls": [
+    {
+      "kind": "llm_end",
+      "failed": false,
+      "usage": null,
+      "message": "ok"
+    }
+  ],
+  "llm_started": 2,
+  "rule_started": 0,
+  "sa_calls": 0,
+  "sa_seeds": [],
+  "timings": {},
+  "time_limit_overshoot": null,
+  "incomplete_evaluations": 0,
+  "sa_returned_raw": 0,
+  "sa_returned_raw_feasible": 0,
+  "sa_returned_after_deadline": 0,
+  "late_evaluations_excluded": 0,
+  "group": "C",
+  "seed": 17,
+  "state": {
+    "status": "INTERRUPTED",
+    "pid": 4648,
+    "interruption": {
+      "reason": "Astra session 002 reached account usage limit after writing candidates; no turn.completed; controller stopped worker and remaining runs",
+      "recorded_at": 1791089127.649389,
+      "verified_stopped_at": 1791090026.560944,
+      "worker_pid": 4648,
+      "state_before_interruption": {
+        "status": "running",
+        "pid": 4648
+      },
+      "state_before_sha256": "d51e04ea7aadb2d22c6092421a1d49f60c9b8b14b598fac25d2b6f16213f0716",
+      "failed_call": "002",
+      "received_calls": 1,
+      "unscored_output": "calls/002/candidates.json"
+    }
+  },
+  "llm_responses_consumed": 1,
+  "llm_transport_status": "partial",
+  "handoffs": [
+    {
+      "call": "001",
+      "status": "completed",
+      "receipt_status": "completed",
+      "actual_turn_completed": true,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 0.09904837608337402,
+      "receipt_delay_after_file_seconds": 17.28640389442444,
+      "usage": {
+        "input_tokens": 207562,
+        "cached_input_tokens": 128768,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 15944,
+        "reasoning_output_tokens": 7681
+      }
+    },
+    {
+      "call": "002",
+      "status": null,
+      "receipt_status": "failed",
+      "actual_turn_completed": false,
+      "output_excluded": true,
+      "dispatch_delay_seconds": 0.15013647079467773,
+      "receipt_delay_after_file_seconds": 3.8391313552856445,
+      "usage": null
+    }
+  ],
+  "post_llm_sa": {
+    "calls": 0,
+    "complete_evaluations": 0
+  },
+  "audit": {
+    "physical_checked": 5,
+    "errors": [],
+    "complete": false,
+    "protocol_ok": true,
+    "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+    "result_objective_consistent": false
+  },
+  "run_directory": "experiments\\rts24-recovery-20261004-account\\C-17",
+  "recovery": true
+}

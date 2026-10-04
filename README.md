@@ -107,6 +107,7 @@ C/D 各最多三次全新 Astra/max 子代理调用，需要 Codex 按 `subagent
 
 | 归档 | 结果 |
 |---|---|
+| [中断实验补跑](experiments/rts24-recovery-20261004-resume/README.md) | C／17、D／7、C／27、D／17 均按 1800 秒预算完成，数值审计通过；实时监测，累计恢复会话 17／18 次，完整响应为 2、1、2、2 次；先前失败、中断及全部结果保留 |
 | [最小必要性实验](experiments/rts24-minimal-20261003/analysis.md) | 15 个预定结果及 2 次标记补跑；数值审计通过，但 C／17 补跑、D／7 无模型响应，协同证据仍不足；全部 17 次尝试保留 |
 | [SA 基线](experiments/rts24-baseline-20261002/README.md) | 三轮后确定性／随机配置的参考成本差分别为 46.89%／32.70% |
 | [Astra burst](experiments/rts24-sa-llm-burst-20261002/report.md) | 5 次 SA、2 次 Astra；成本 889097.785912，参考差 0.455455%，达到严格 0.5% 目标 |

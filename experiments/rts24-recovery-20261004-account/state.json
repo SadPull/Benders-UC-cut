@@ -1,0 +1,7 @@
+{
+  "status": "failed",
+  "error_type": "RuntimeError",
+  "error": "independent model session failed; preserve attempt and stop remaining runs",
+  "controller_pid": 22328,
+  "finished_at": 1791089127.649389
+}
