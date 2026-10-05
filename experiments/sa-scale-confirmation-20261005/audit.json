@@ -1,0 +1,181 @@
+{
+  "passed": true,
+  "checks": {
+    "all_144_sampling_trials_completed": true,
+    "all_2880_sampling_calls_saved": true,
+    "all_46080_samples_saved": true,
+    "all_18_full_results_saved": true,
+    "source_archive_hashes_match": true,
+    "inputs_match": true,
+    "snapshot_hashes_match": true,
+    "all_24_qubos_identical_to_prior_round": true,
+    "all_full_results_physically_valid": true,
+    "under_one_hour": true,
+    "no_encoding_audit_failure": true,
+    "all_24_native_references_certified": true,
+    "report_source_matches": true
+  },
+  "execution_commit": "5d6cb71d999ab3df0f7a129dc8d7f32d78272db6",
+  "regression_evidence": {
+    "count": 147,
+    "code_unchanged_since_pass": true,
+    "log": "../sa-scale-screen-20261005/validation.txt"
+  },
+  "run_seconds": 1533.3614133000005,
+  "start_Asia_Shanghai": "2026-10-05T22:19:37.252037+08:00",
+  "full_result_statuses": {
+    "DUAL_CONVERGED": 3,
+    "INNER_NOT_CONVERGED": 14,
+    "TIME_LIMIT": 1
+  },
+  "full_max_residual_mw": 1.3642420526593924e-12,
+  "missing_reference": [
+    "n32-stoch"
+  ],
+  "prior_round_comparison": [
+    {
+      "id": "n3-det-h1-varying-7",
+      "prior_status": "DUAL_CONVERGED",
+      "current_status": "DUAL_CONVERGED",
+      "prior_cost": 125314.71241648376,
+      "current_cost": 125314.71241648376,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n3-det-h1-varying-100007",
+      "prior_status": "DUAL_CONVERGED",
+      "current_status": "DUAL_CONVERGED",
+      "prior_cost": 125314.71241648376,
+      "current_cost": 125314.71241648376,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n3-det-h1-varying-200007",
+      "prior_status": "DUAL_CONVERGED",
+      "current_status": "DUAL_CONVERGED",
+      "prior_cost": 125314.71241648376,
+      "current_cost": 125314.71241648376,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n10-det-h1-varying-7",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 363755.7347413779,
+      "current_cost": 363755.7347413779,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n10-det-h1-varying-100007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 363755.7347413779,
+      "current_cost": 363755.7347413779,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n10-det-h1-varying-200007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 363755.7347413779,
+      "current_cost": 363755.7347413779,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h1-varying-7",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h1-varying-100007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "TIME_LIMIT",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h1-varying-200007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h3-varying-7",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h3-varying-100007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h3-varying-200007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h3-fixed-7",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h3-fixed-100007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-det-h3-fixed-200007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 883727.892202252,
+      "current_cost": 883727.892202252,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-stoch-h3-varying-7",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 933522.2153666164,
+      "current_cost": 933522.2153666164,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-stoch-h3-varying-100007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 933522.2153666164,
+      "current_cost": 933522.2153666164,
+      "cost_difference": 0.0
+    },
+    {
+      "id": "n32-stoch-h3-varying-200007",
+      "prior_status": "INNER_NOT_CONVERGED",
+      "current_status": "INNER_NOT_CONVERGED",
+      "prior_cost": 933522.2153666164,
+      "current_cost": 933522.2153666164,
+      "cost_difference": 0.0
+    }
+  ]
+}

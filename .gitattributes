@@ -9,3 +9,5 @@ experiments/rts24-cd-desktop-*/** -text -whitespace
 experiments/rts24-temporal-*/** -text -whitespace
 experiments/sa-scale-screen-20261005/** -text -whitespace
 experiments/sa-scale-screen-20261005.zip* -text -whitespace
+experiments/sa-scale-confirmation-20261005/** -text -whitespace
+experiments/sa-scale-confirmation-20261005.zip* -text -whitespace
