@@ -15,17 +15,21 @@ from suc_benders.llm import LLMConfig, LLMAdviceResult, ask_llm_for_candidates
 from suc_benders.paper_model import CompactQubo
 from suc_benders.solver import BendersConfig, solve_benders
 from tests.test_capacity import one_hour_data
+from tests.solver_fixtures import keep_inner_running
 from tests.test_paper import candidate_point
 
 
 def configuration(seed, strategy, rounds=50):
-    return BendersConfig(max_iterations=rounds, stop_on_no_new_candidates=False,
+    return BendersConfig(max_iterations=20, max_inner_iterations=rounds,
         llm=LLMConfig(enabled=strategy == "sa_llm", api_format="chat_completions",
             base_url="https://api.deepseek.com", model="deepseek-flash", timeout_seconds=None,
             max_retries=1, collect_diagnostics=True))
 
 
 class DynamicSolverTests(unittest.TestCase):
+    def setUp(self):
+        keep_inner_running(self)
+
     def test_fixed_rounds_do_not_stop_on_duplicates_and_remove_llm_timeout(self):
         data=replace(one_hour_data(),base_load=np.full(3,30.))
         ss=[Scenario("tiny",1.,data.base_load)]
@@ -39,9 +43,9 @@ class DynamicSolverTests(unittest.TestCase):
             solve_benders(data,ss,config)
         self.assertEqual(sa.call_count,3)
         self.assertEqual(llm.call_count,3)
-        self.assertEqual(sum(e['kind']=='iteration' for e in events),3)
+        self.assertEqual(sum(e['kind']=='inner_iteration' for e in events),3)
         self.assertIsNone(config.time_limit_seconds)
-        self.assertFalse(config.stop_on_no_new_candidates)
+        self.assertIsNone(config.stop_on_no_new_candidates)
 
     def test_unlimited_http_timeout_and_no_retry_on_server_error(self):
         data=one_hour_data()
@@ -104,12 +108,12 @@ class DynamicSolverTests(unittest.TestCase):
             self.assertGreater(args[5].timeout_seconds, 180)
             self.assertLessEqual(args[5].timeout_seconds, 300)
             return LLMAdviceResult([proposal, proposal])
-        config = replace(configuration(7,"sa_llm"), max_iterations=2,
+        config = replace(configuration(7,"sa_llm"), max_inner_iterations=2,
                          time_limit_seconds=400, llm=replace(configuration(7,"sa_llm").llm, timeout_seconds=300), event_sink=events.append)
         optimize = gp.Model.optimize
         def continuous(model, *args, **kwargs):
             model.update()
-            self.assertTrue(all(v.VType == gp.GRB.CONTINUOUS for v in model.getVars()))
+            self.assertTrue(model.ModelName == "block_benchmark_integer_master" or all(v.VType == gp.GRB.CONTINUOUS for v in model.getVars()))
             return optimize(model,*args,**kwargs)
         with patch("suc_benders.solver._construct_feasible_candidate",return_value=seed), \
              patch("suc_benders.paper_solver.solve_qubo",return_value=[np.array([])]), \

@@ -67,13 +67,14 @@ class EndToEndTests(unittest.TestCase):
     def setUpClass(cls):
         cls.units, cls.scenarios = load_suc_data(ROOT / "data/rts24/units.json")
 
-    def test_two_iteration_rts24_run(self):
+    def test_two_inner_iteration_rts24_run(self):
         config = BendersConfig(
             max_iterations=2,
+            max_inner_iterations=2,
             quantum=QuantumConfig(initial_temperature=20, alpha=0.9, cutoff_temperature=0.1, iterations_per_temperature=2, candidate_pool_size=4),
         )
         result = solve_benders(self.units, self.scenarios, config)
-        self.assertIn(result.status, {"MAX_ITERATIONS", "NO_NEW_CANDIDATES"})
+        self.assertIn(result.status, {"MAX_ITERATIONS", "INNER_NOT_CONVERGED", "DUAL_CONVERGED", "TIME_LIMIT"})
         self.assertTrue(np.isfinite(result.objective))
         self.assertTrue(commitment_is_feasible(self.units, self.scenarios, result.u, result.v, result.w))
         self.assertEqual(len(result.scenarios), 3)

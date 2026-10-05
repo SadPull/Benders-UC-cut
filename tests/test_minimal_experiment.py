@@ -13,10 +13,12 @@ from suc_benders.paper_model import key
 from suc_benders.rule_advisor import ranked_moves, rule_candidates
 from suc_benders.solver import solve_benders
 from tests.test_capacity import one_hour_data
+from tests.solver_fixtures import keep_inner_running
 
 
 class MinimalExperimentTests(unittest.TestCase):
     def setUp(self):
+        keep_inner_running(self)
         data = one_hour_data()
         vectors = {k: np.repeat(v, 3) for k, v in vars(data).items()
                    if isinstance(v, np.ndarray) and k != "base_load"}
@@ -24,7 +26,7 @@ class MinimalExperimentTests(unittest.TestCase):
         self.scenarios = [Scenario("tiny", 1., self.data.base_load)]
 
     def test_changing_seeds_preserves_base_config_and_keeps_searching(self):
-        config = replace(configuration("B", 17, "unused"), max_iterations=4)
+        config = replace(configuration("B", 17, "unused"), max_inner_iterations=4)
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]) as sample:
             result = solve_benders(self.data, self.scenarios, config)
         self.assertEqual([c.args[1].kaiwu_seed for c in sample.call_args_list], [17, 18, 19, 20])
@@ -41,13 +43,13 @@ class MinimalExperimentTests(unittest.TestCase):
         self.assertEqual(result.status, "LLM_CALL_LIMIT")
 
     def test_rule_burst_has_same_trigger_and_continues_sa_after_quota(self):
-        config = replace(configuration("E", 7, "unused"), max_iterations=7)
+        config = replace(configuration("E", 7, "unused"), max_inner_iterations=7)
         events = []
         config.event_sink = events.append
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
             "suc_benders.paper_solver.ask_llm_for_candidates", side_effect=AssertionError("no LLM")):
             result = solve_benders(self.data, self.scenarios, config)
-        self.assertEqual([e["iteration"] for e in events if e["kind"] == "rule_start"], [3, 3, 3])
+        self.assertEqual([e["inner"] for e in events if e["kind"] == "rule_start"], [3, 3, 3])
         self.assertEqual(result.diagnostics["sa_calls"], 7)
         self.assertEqual(result.diagnostics["llm_call_count"], 0)
         self.assertEqual(result.diagnostics["rule_call_count"], 3)
@@ -70,7 +72,7 @@ class MinimalExperimentTests(unittest.TestCase):
         candidate = make_candidate(self.data, self.scenarios, np.array([[1, 1, 1], [0, 0, 0], [0, 0, 0]]))
         point = {key(kind, i, t): int(getattr(candidate, kind)[i, t])
                  for kind in ("u", "v", "w") for i in range(3) for t in range(3)}
-        config = replace(configuration("A", 7, "unused"), max_iterations=1)
+        config = replace(configuration("A", 7, "unused"), max_inner_iterations=1)
         events = []
         config.event_sink = events.append
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[[], []]), patch(
@@ -95,7 +97,7 @@ class MinimalExperimentTests(unittest.TestCase):
         self.assertEqual(report["sa_improvement_after_llm"], 10)
         self.assertEqual(report["late_evaluations_excluded"], 1)
 
-    def test_unlimited_iterations_really_ends_on_deadline(self):
+    def test_deadline_interrupts_inner_iterations(self):
         config = replace(configuration("A", 7, "unused"), time_limit_seconds=.2)
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]):
             result = solve_benders(self.data, self.scenarios, config)

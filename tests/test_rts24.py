@@ -128,7 +128,8 @@ class RTS24DataTests(unittest.TestCase):
 class RTS24ProtocolTests(unittest.TestCase):
     def test_fixed_protocol(self):
         config = experiment.configuration()
-        self.assertEqual((config.max_iterations, config.time_limit_seconds), (3, 600))
+        self.assertEqual((config.max_iterations, config.time_limit_seconds), (20, 600))
+        self.assertEqual((config.block_hours, config.max_inner_iterations), (3, 20))
         self.assertEqual((config.quantum.kaiwu_seed, config.quantum.candidate_pool_size), (7, 16))
         self.assertFalse(config.llm.enabled)
         self.assertTrue(config.quantum_candidates)

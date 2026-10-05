@@ -1,0 +1,51 @@
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp2dirxayu\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp9khapzii\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmp00gmpc6n\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpmhy3q_2c\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpzcpe4ga7\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmph1ec4pz8\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpw0m1h381\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpjor01xo3\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpafg1cx_4\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpafg1cx_4\run\calls\002
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpipe5a013\run\calls\001
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpipe5a013\run\calls\002
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpipe5a013\run\calls\003
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpipe5a013\run\calls\004
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpipe5a013\run\calls\005
+WAIT_SUBAGENT C:\Users\12433\AppData\Local\Temp\tmpipe5a013\run\calls\006
+HTTP_LLM_START call=1 round=3
+usage: astra_run [-h] [--data DATA] [--scenario-file SCENARIO_FILE]
+                 [--seed SEED] [--rounds ROUNDS] [--block-hours {1,2,3}]
+                 [--max-inner-iterations MAX_INNER_ITERATIONS]
+                 [--convergence-tolerance CONVERGENCE_TOLERANCE] --output-dir
+                 OUTPUT_DIR [--time-limit-seconds TIME_LIMIT_SECONDS]
+                 [--max-llm-calls MAX_LLM_CALLS] [--original-feedback]
+                 [--http-base-url HTTP_BASE_URL] [--http-model HTTP_MODEL]
+                 [--strategy {sa,fixed,stagnation,stagnation_burst,llm}]
+astra_run: error: HTTP base URL and model must be supplied together
+usage: astra_run [-h] [--data DATA] [--scenario-file SCENARIO_FILE]
+                 [--seed SEED] [--rounds ROUNDS] [--block-hours {1,2,3}]
+                 [--max-inner-iterations MAX_INNER_ITERATIONS]
+                 [--convergence-tolerance CONVERGENCE_TOLERANCE] --output-dir
+                 OUTPUT_DIR [--time-limit-seconds TIME_LIMIT_SECONDS]
+                 [--max-llm-calls MAX_LLM_CALLS] [--original-feedback]
+                 [--http-base-url HTTP_BASE_URL] [--http-model HTTP_MODEL]
+                 [--strategy {sa,fixed,stagnation,stagnation_burst,llm}]
+astra_run: error: HTTP base URL and model must be supplied together
+usage: astra_run [-h] [--data DATA] [--scenario-file SCENARIO_FILE]
+                 [--seed SEED] [--rounds ROUNDS] [--block-hours {1,2,3}]
+                 [--max-inner-iterations MAX_INNER_ITERATIONS]
+                 [--convergence-tolerance CONVERGENCE_TOLERANCE] --output-dir
+                 OUTPUT_DIR [--time-limit-seconds TIME_LIMIT_SECONDS]
+                 [--max-llm-calls MAX_LLM_CALLS] [--original-feedback]
+                 [--http-base-url HTTP_BASE_URL] [--http-model HTTP_MODEL]
+                 [--strategy {sa,fixed,stagnation,stagnation_burst,llm}]
+astra_run: error: HTTP runs require LLM_API_KEY in the environment
+----------------------------------------------------------------------
+Ran 138 tests in 83.490s
+
+OK

@@ -136,14 +136,14 @@ class PaperModelTests(unittest.TestCase):
         expected = solve_scenario(self.data, scenarios[0], c.u, c.v, c.w)
         self.assertAlmostEqual(r["recourse"], expected.objective, places=5)
 
-    def test_whole_horizon_search_uses_only_continuous_gurobi_models(self):
+    def test_search_uses_integer_gurobi_only_for_certification(self):
         self.data = replace(self.data, base_load=np.full(3, 30.))
         self.scenarios = [Scenario("tiny", 1., self.data.base_load)]
         original = gp.Model.optimize
         seen = []
         def guard(m, *args, **kwargs):
             m.update()
-            self.assertTrue(all(v.VType == gp.GRB.CONTINUOUS for v in m.getVars()))
+            self.assertTrue(m.ModelName == "block_benchmark_integer_master" or all(v.VType == gp.GRB.CONTINUOUS for v in m.getVars()))
             seen.append(m.ModelName)
             return original(m, *args, **kwargs)
         config = BendersConfig(
@@ -159,7 +159,9 @@ class PaperModelTests(unittest.TestCase):
         self.assertTrue(commitment_is_feasible(self.data, self.scenarios, result.u, result.v, result.w))
         self.assertEqual(result.diagnostics["evaluation_count"], len(result.diagnostics["evaluations"]))
 
-    def test_whole_horizon_reuses_local_evaluations_at_unchanged_prices(self):
+    def test_inner_loop_reuses_evaluations_at_unchanged_prices(self):
+        from tests.solver_fixtures import keep_inner_running
+        keep_inner_running(self)
         vectors = {k: np.repeat(v, 2) for k, v in vars(self.data).items()
                    if isinstance(v, np.ndarray) and k != "base_load"}
         d = replace(self.data, **vectors, n_units=2, base_load=np.full(3, 30.))
@@ -173,7 +175,7 @@ class PaperModelTests(unittest.TestCase):
             return candidate_point(c), 0.
         with patch.object(CompactQubo, "decode", repeat_seed):
             result = solve_benders(d, ss, config)
-        self.assertGreaterEqual(len(result.history), 2)
+        self.assertGreaterEqual(len(result.diagnostics["iterations"]), 2)
         self.assertEqual(result.diagnostics["local_evaluation_count"], 2)
         self.assertEqual(result.optimality_cuts, 2)
 

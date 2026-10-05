@@ -47,7 +47,8 @@ def summarize(events, result, budget, reference_cost):
         for p in entries:
             p = dict(p)
             identity = p.get("commitment_id")
-            p["duplicate"] = bool(identity and (identity in seen or p.get("duplicate") or p.get("outcome") == "duplicate"))
+            p["duplicate"] = bool(p.get("duplicate") or p.get("outcome") == "duplicate"
+                                  or ("block" not in p and identity and identity in seen))
             if identity:
                 seen.add(identity)
             proposals[p.get("origin", "llm")].append(p)
@@ -70,7 +71,11 @@ def summarize(events, result, budget, reference_cost):
             improving_count=sum(e["improved"] for e in valid),
             improvement_rate=sum(e["improved"] for e in valid)/len(measured) if measured else None)
     sa = [e for e in events if e["kind"] == "sa_start"]
-    return dict(objective=best, reference_difference=best/reference_cost-1 if best is not None and reference_cost else None,
+    diagnostic = result.get("diagnostics", {})
+    return dict(status=result.get("status"), dual_converged=result.get("status") == "DUAL_CONVERGED",
+        certified_lower_bound=diagnostic.get("reliable_lower"), primal_gap=diagnostic.get("primal_gap"),
+        coordination_upper=diagnostic.get("coordination_upper"), termination_reason=diagnostic.get("termination_reason"),
+        objective=best, reference_difference=best/reference_cost-1 if best is not None and reference_cost else None,
         checkpoints=checkpoints, threshold_seconds=thresholds, curve=curve, first_llm_improvement_seconds=first_llm,
         sa_improvement_after_llm=sa_after_llm, candidate_stages=stages, calls=calls,
         llm_started=sum(e["kind"] == "llm_start" for e in events),
@@ -122,7 +127,7 @@ def report(directory):
         publish(run / "summary.json", summary)
         rows.append(summary)
     complete = read(directory / "state.json").get("status") == "completed"
-    completed_searches = sum(r["state"].get("status") in {"TIME_LIMIT", "LLM_CALL_LIMIT"} for r in rows)
+    completed_searches = sum(r["state"].get("status") in {"TIME_LIMIT", "LLM_CALL_LIMIT", "EVALUATION_LIMIT", "DUAL_CONVERGED", "INNER_NOT_CONVERGED", "MAX_ITERATIONS"} for r in rows)
     passed = bool(complete and len(rows) == 15 and completed_searches == 15 and source_ok
         and cost and read(directory / "reference/audit.json").get("feasible_solution")
         and all(r["objective"] is not None for r in rows)
@@ -150,6 +155,11 @@ def report(directory):
         return "—" if x is None else f"{100*x:.4f}%" if percent else f"{x:.3f}"
     for r in sorted(rows, key=lambda r: (r["group"], r["seed"])):
         lines.append(f"| {r['group']} | {r['seed']} | {r['state'].get('status')} | {number(r['objective'])} | {number(r['reference_difference'], True)} | {number(r['threshold_seconds']['0.01'])} | {number(r['threshold_seconds']['0.005'])} | {r['sa_calls']}/{r['llm_started']}/{r['rule_started']} | {number(r['sa_improvement_after_llm'])} |")
+    lines += ["", "## 算法停止与认证间隙", "",
+              "DUAL_CONVERGED 只表示拉格朗日对偶协调收敛；其余正常结束状态分别表示内层/外层上限或资源终止。",
+              "| 组别/种子 | 对偶收敛 | 认证下界 | 原问题 gap | 协调上界 |", "|---|---|---:|---:|---:|"]
+    for r in sorted(rows, key=lambda r: (r["group"], r["seed"])):
+        lines.append(f"| {r['group']}/{r['seed']} | {r['dual_converged']} | {number(r['certified_lower_bound'])} | {number(r['primal_gap'], True)} | {number(r['coordination_upper'])} |")
     lines += ["", "## 固定时刻的最佳成本", "", "C 提前用完额度后，保持最后的已验证解；未达标以 — 表示。", "",
               "| 组别/种子 | 300 秒 | 600 秒 | 900 秒 | 1800 秒 |", "|---|---:|---:|---:|---:|"]
     for r in sorted(rows, key=lambda r: (r["group"], r["seed"])):

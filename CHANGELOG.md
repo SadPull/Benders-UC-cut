@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.19.0 — 2026-10-05
+
+- Default to 3-hour temporal decomposition (1/2/3 supported, including a short tail),
+  continuous-relaxation initialization, inner Benders/SA and outer Lagrangian cutting planes.
+- Certify native block master lower bounds from ObjBound through a bound-only interface;
+  never use the integer certificate solution as a candidate, cut source or SA start.
+- Use relative tolerance 1e-4, absolute tolerance 1e-5 and finite 20/20 outer/inner limits.
+  Distinguish dual convergence, inner nonconvergence, outer limit, failures and resource stops.
+- Rebuild price-dependent cuts and caches after multiplier changes. Preserve raw local u/v/w;
+  recover and physically validate full-day candidates separately using original costs.
+- Compute QP supporting cuts from a feasible dual objective; count Lagrangian constants once.
+- Keep measured full-day advisor feedback and global call numbering across blocks and iterations.
+- Retire target-cost, no-new-candidate and reference-gap stopping; update runners and reports.
+- Preserve prior experiment archives and frozen source bytes; add temporal acceptance evidence.
+- Pass all 138 regression tests. Both seed-7 RTS-24 SA acceptance runs stop at the
+  inner iteration limit with validated full-day incumbents, without claiming convergence.
+
 ## v0.18.0 — 2026-10-04
 
 - Add the frozen five-arm RTS-24 comparison: fixed-seed SA, changing-seed SA,

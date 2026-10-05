@@ -52,9 +52,8 @@ BUDGET = 600.0
 
 
 def configuration():
-    return BendersConfig(max_iterations=3,
+    return BendersConfig(max_iterations=20,
         time_limit_seconds=BUDGET,
-        stop_on_no_new_candidates=False,
         quantum=QuantumConfig(kaiwu_seed=7, candidate_pool_size=16), llm=LLMConfig(enabled=False))
 
 
@@ -180,6 +179,9 @@ def audit(directory):
         if best and bound is not None and bound > best["objective"] + 1e-3:
             raise AssertionError("reference lower bound exceeds validated SA cost")
         row = {"passed": passed, "states": states, "sa_completed": completed_sa,
+            "solver_status": sa_result.get("status") if sa_result else None,
+            "dual_converged": bool(sa_result and sa_result.get("status") == "DUAL_CONVERGED"),
+            "primal_gap": sa_result["diagnostics"].get("primal_gap") if sa_result else None,
             "completed_rounds": completed_rounds, "samples_processed": processed,
             "validated_candidates": len(checks), "sa_objective": best["objective"] if best else None,
             "reference_objective": ref["objective"] if ref else None, "reference_lower_bound": bound,
@@ -204,9 +206,13 @@ def audit(directory):
         lines.append(f"|{name}|{row['completed_rounds']}/{row['sa_completed']}|{number(row['sa_objective'])}|"
                      f"{number(row['reference_objective'])}|{number(row['relative_reference_cost_difference'], True)}|"
                      f"{number(row['certified_relative_error_bound'], True)}|")
-    lines += ["", "参考成本差 = SA成本 / Gurobi可行成本 − 1；认证误差上界 = (SA成本 − Gurobi下界) / Gurobi下界。",
+    lines += ["", "|配置|算法停止状态|对偶收敛|原问题 gap|", "|---|---|---|---:|"]
+    for name, row in report["profiles"].items():
+        lines.append(f"|{name}|{row['solver_status']}|{row['dual_converged']}|{number(row['primal_gap'], True)}|")
+    lines += ["", "DUAL_CONVERGED 仅指拉格朗日对偶收敛；内层/外层上限和资源终止不表示收敛。",
+        "", "参考成本差 = SA成本 / Gurobi可行成本 − 1；认证误差上界 = (SA成本 − Gurobi下界) / Gurobi下界。",
         "认证依赖 Gurobi 的数值容差与下界，不是 SA 独立证明。完整下界、状态、MIP gap、残差与成本复核见 audit.json。", "",
-        "每个配置仅一次 SA（种子7、动态整时域、候选池16、最多3轮/600秒）及一次独立 Gurobi参考",
+        "每个配置仅一次 SA（种子7、3小时分块、候选池16、最多20外层/20内层/600秒）及一次独立 Gurobi参考",
         "（单线程、种子7、求解时限600秒、MIPGap=1e-4）。先完成全部 SA，再求参考，不反馈参考解。",
         "SA保留确定性初始化与修复，关闭LLM、独立减开机和随机候选；无量子真机。",
         "SA使用端到端截止时间；Gurobi的600秒是求解时限，建模与输出开销另计。固定方案连续重求解仅用于验收。",

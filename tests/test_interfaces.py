@@ -38,12 +38,14 @@ class InterfaceTests(unittest.TestCase):
                 self.assertEqual(config.quantum_candidates, strategy != "llm")
                 self.assertEqual(config.llm.enabled, strategy != "sa")
                 self.assertEqual(config.advisor_only, strategy == "llm")
+                self.assertEqual((config.block_hours, config.max_iterations, config.max_inner_iterations), (3, 20, 20))
+                self.assertEqual(config.convergence_tolerance, 1e-4)
                 self.assertEqual(config.llm.api_format, "codex_subagent")
                 self.assertEqual(json.loads((root / "result.json").read_text())["objective"], 120.0)
 
     def test_retired_options_are_rejected_before_running(self):
         for args in (["--master-encoding", "legacy"], ["--decomposition", "temporal"],
-                     ["--no-decommit"], ["--suite", "attribution"]):
+                     ["--no-decommit"], ["--suite", "attribution"], ["--target-reference-gap", "0.005"]):
             with self.subTest(args=args), patch("sys.argv", ["suc_benders", "--output-dir", "unused", *args]), \
                  patch.object(astra_run, "solve_benders") as solve, \
                  contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:

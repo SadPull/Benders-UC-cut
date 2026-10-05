@@ -2,6 +2,7 @@
 from dataclasses import asdict
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -18,7 +19,10 @@ def main():
     parser.add_argument("--data", default="data/rts24/units.json")
     parser.add_argument("--scenario-file")
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--rounds", type=int, default=2)
+    parser.add_argument("--rounds", type=int, default=20, help="Maximum outer iterations")
+    parser.add_argument("--block-hours", type=int, choices=(1, 2, 3), default=3)
+    parser.add_argument("--max-inner-iterations", type=int, default=20)
+    parser.add_argument("--convergence-tolerance", type=float, default=1e-4)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--time-limit-seconds", type=float)
     parser.add_argument("--max-llm-calls", type=int)
@@ -27,7 +31,7 @@ def main():
     parser.add_argument("--http-model")
     parser.add_argument("--strategy", choices=("sa", "fixed", "stagnation", "stagnation_burst", "llm"), default="fixed")
     parser.add_argument("--target-reference-gap", type=float,
-                        help="Run until strictly below this relative Gurobi reference difference; ignores rounds")
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
     if bool(args.http_base_url) != bool(args.http_model):
         parser.error("HTTP base URL and model must be supplied together")
@@ -37,8 +41,10 @@ def main():
         parser.error("rounds and time limit must be positive")
     if args.max_llm_calls is not None and args.max_llm_calls < 0:
         parser.error("max LLM calls must be nonnegative")
-    if args.target_reference_gap is not None and (not 0 < args.target_reference_gap < 1 or args.time_limit_seconds is not None or args.max_llm_calls is not None):
-        parser.error("target gap must be in (0,1) and cannot be combined with time/call limits")
+    if args.target_reference_gap is not None:
+        parser.error("--target-reference-gap is retired; use --convergence-tolerance and --max-inner-iterations")
+    if args.max_inner_iterations < 1 or not math.isfinite(args.convergence_tolerance) or args.convergence_tolerance <= 0:
+        parser.error("inner iterations and convergence tolerance must be positive and finite")
     data, scenarios = load_suc_data(args.data, args.scenario_file)
     root = Path(args.output_dir).resolve()
     llm = LLMConfig(enabled=args.strategy != "sa", api_format="codex_subagent", model="gpt-6-astra",
@@ -50,9 +56,10 @@ def main():
         llm.api_format = "chat_completions"
         llm.base_url, llm.model = args.http_base_url, args.http_model
         llm.temperature = None
-    config = BendersConfig(max_iterations=args.rounds,
+    config = BendersConfig(max_iterations=args.rounds, block_hours=args.block_hours,
+        max_inner_iterations=args.max_inner_iterations, convergence_tolerance=args.convergence_tolerance,
         advisor_only=args.strategy == "llm", quantum_candidates=args.strategy != "llm",
-        stop_on_no_new_candidates=False, time_limit_seconds=args.time_limit_seconds,
+        time_limit_seconds=args.time_limit_seconds,
         quantum=QuantumConfig(kaiwu_seed=args.seed, candidate_pool_size=16), llm=llm)
     initialize(root, dict(arguments=vars(args), configuration=asdict(config),
         inputs={args.data: sha(args.data), **({args.scenario_file: sha(args.scenario_file)} if args.scenario_file else {})},
@@ -62,37 +69,6 @@ def main():
     source.mkdir()
     for path in Path(__file__).parent.glob("*.py"):
         shutil.copy2(path, source / path.name)
-    reference = None
-    if args.target_reference_gap is not None:
-        import gurobipy as gp
-        from .full_model import solve_full, FullConfig
-        from .validation import validate_schedule, schedule_object
-        gp.setParam("Threads", 1)
-        gp.setParam("Seed", args.seed)
-        full = solve_full(data, scenarios, FullConfig(time_limit=600, mip_gap=1e-6, output_flag=0))
-        reference = result_to_dict({k: v for k, v in vars(full).items() if k != "model"})
-        publish(root / "reference-raw.json", reference)
-        full.model.dispose()
-        # Re-solve dispatch with the rounded binary decisions fixed, using the
-        # same continuous models and physical tolerances as candidate evaluation.
-        from .subproblem import solve_scenario
-        checked = [solve_scenario(data, s, full.u, full.v, full.w,
-                    deadline=time.perf_counter()+60, threads=1) for s in scenarios]
-        if not all(r.feasible for r in checked):
-            raise ValueError("reference fixed commitment is not feasible")
-        reference["raw_objective"] = reference["objective"]
-        reference["expected_fuel_cost"] = sum(s.probability*r.objective for s, r in zip(scenarios, checked))
-        reference["objective"] = reference["fixed_cost"] + reference["expected_fuel_cost"]
-        reference["scenarios"] = result_to_dict([dict(name=s.name, probability=s.probability,
-            p=r.p, r=r.r, fuel_cost=r.objective) for s, r in zip(scenarios, checked)])
-        validation = validate_schedule(data, scenarios, schedule_object(reference))
-        publish(root / "reference.json", reference)
-        publish(root / "reference-validation.json", validation)
-        config.target_cost = reference["objective"] * (1 + args.target_reference_gap)
-        manifest = json.loads((root / "run.json").read_text(encoding="utf-8"))
-        manifest["configuration"] = asdict(config)
-        publish(root / "run.json", manifest)
-        print(f"REFERENCE cost={reference['objective']} lower={reference['lower_bound']} target_strictly_below={config.target_cost}", flush=True)
     started = time.perf_counter()
     publish(root / "state.json", dict(status="running"))
     http_call = None
@@ -102,7 +78,7 @@ def main():
             serialized = result_to_dict(row)
             if args.http_base_url:
                 if row["kind"] == "llm_start":
-                    call_number = row['call_index'] if config.llm.schedule == "stagnation_burst" else row['iteration']
+                    call_number = row['call_index']
                     http_call = root / "calls" / f"{call_number:03d}"
                     http_call.mkdir(parents=True, exist_ok=False)
                     publish(http_call / "started.json", serialized)
@@ -119,9 +95,6 @@ def main():
                         publish(http_call / "response.json", diagnostics["response"])
                 elif row["kind"] == "llm_feedback":
                     publish(http_call / "feedback.json", serialized["feedback"])
-            if reference is not None and row["kind"] == "evaluation" and row["feasible"]:
-                serialized["reference_difference"] = row["objective"] / reference["objective"] - 1
-                print(f"EVALUATED round={row['iteration']} cost={row['objective']:.6f} reference_difference={100*serialized['reference_difference']:.6f}%", flush=True)
             stream.write(json.dumps(serialized, ensure_ascii=False, allow_nan=False)+"\n")
             if row["kind"] == "evaluation" and row["improved"]:
                 publish(root / "best-checkpoint.json", serialized)
@@ -131,13 +104,12 @@ def main():
         try:
             result = solve_benders(data, scenarios, config)
             publish(root / "result.json", result_to_dict(result))
-            if reference is not None:
-                publish(root / "comparison.json", dict(reference_cost=reference["objective"],
-                    reference_lower_bound=reference["lower_bound"], objective=result.objective,
-                    reference_difference=result.objective/reference["objective"]-1,
-                    requested_difference=args.target_reference_gap,
-                    target_reached=result.objective < config.target_cost,
-                    reference_runtime=reference["runtime"], solver_runtime=result.runtime))
+            publish(root / "convergence.json", result_to_dict(dict(
+                status=result.status, dual_converged=result.status == "DUAL_CONVERGED",
+                feasible_cost=result.objective, certified_lower_bound=result.diagnostics.get("reliable_lower"),
+                primal_gap=result.diagnostics.get("primal_gap"),
+                coordination_upper=result.diagnostics.get("coordination_upper"),
+                termination_reason=result.diagnostics.get("termination_reason"))))
             publish(root / "state.json", dict(status=result.status, elapsed_seconds=time.perf_counter()-started))
         except BaseException as exc:
             publish(root / "state.json", dict(status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",

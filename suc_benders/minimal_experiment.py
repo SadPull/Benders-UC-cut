@@ -33,8 +33,8 @@ def configuration(group, seed, directory, rule_max_calls=3):
         collect_diagnostics=True, enhanced_feedback=True, exchange_dir=str(directory),
         max_calls=rule_max_calls if group == "E" else 3,
         schedule="fixed" if group == "C" else "stagnation_burst")
-    return BendersConfig(max_iterations=None, time_limit_seconds=BUDGET,
-        stop_on_no_new_candidates=False, advisor_only=group == "C",
+    return BendersConfig(max_iterations=20, time_limit_seconds=BUDGET,
+        advisor_only=group == "C",
         quantum_candidates=group != "C", sa_seed_per_call=group == "B",
         rule_advisor=group == "E", quantum=QuantumConfig(kaiwu_seed=seed, candidate_pool_size=16),
         llm=llm)

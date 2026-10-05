@@ -1,16 +1,14 @@
 # RTS-24 SUC：SA + LLM Benders
 
-本项目研究 IEEE RTS-24 派生随机机组组合问题：32 台机组、24 个小时，
-由 Kaiwu 本地模拟退火（SA）生成开停机候选，LLM 提供可选建议，
-Gurobi 求解连续调度子问题并生成 Benders 割。候选必须经过修复、去重和完整物理／成本校验。
-独立 Gurobi 完整模型提供参考解及下界。
+本项目研究 IEEE RTS-24 派生随机机组组合问题：32 台机组、24 个小时。
+默认采用连续松弛初始化 → 3 小时时间分块 → 块内 Benders／Kaiwu 本地 SA →
+拉格朗日切平面协调。Gurobi 求解连续调度，并仅用整数块主问题的 `ObjBound`
+认证下界；认证整数方案不会进入候选、割生成、SA 初始化或全天方案恢复。
+LLM／规则建议可选，全天候选仍按原成本调度并通过物理校验。
 
-当前仅维护 RTS-24 全时域动态 QUBO 流程。旧 10×24 数据、归因实验、
-静态／旧版主问题、时间分块与精确块对照、独立减开机搜索及旧实验归档已移除。
-
-当前版本为 `v0.18.0`，变更见 [CHANGELOG.md](CHANGELOG.md)。
-[项目阅读教材](docs/project-textbook.md)基于提交 `bae3200` 的历史源码快照编写，
-版本范围和文件哈希在教材中列明；后续实验入口及补跑结果见下方说明。
+当前版本为 `v0.19.0`，变更见 [CHANGELOG.md](CHANGELOG.md)。
+[项目阅读教材](docs/project-textbook.md)保留 `bae3200` 历史源码说明，
+新版入口见本文；已有归档、冻结源码和校验和保持原样。
 
 ## 安装
 
@@ -46,7 +44,7 @@ python data/rts24/convert.py --check
 纯 SA：
 
 ```powershell
-python -m suc_benders --strategy sa --rounds 3 --output-dir results/rts24-sa-new
+python -m suc_benders --strategy sa --rounds 20 --block-hours 3 --max-inner-iterations 20 --output-dir results/rts24-sa-new
 ```
 
 SA 与 Astra 固定交替（需在 Codex 中调度子代理）：
@@ -55,7 +53,7 @@ SA 与 Astra 固定交替（需在 Codex 中调度子代理）：
 python -m suc_benders --strategy fixed --rounds 2 --output-dir results/rts24-astra-new
 ```
 
-连续三轮 SA 降本不足 0.05% 后，顺序调用最多三次 LLM；每次调用后先验证并更新反馈：
+连续三个内层 SA 批次降本不足 0.05% 后，顺序调用最多三次 LLM；每次调用后先验证并更新反馈：
 
 ```powershell
 python -m suc_benders --strategy stagnation_burst --rounds 10 --http-base-url https://api.deepseek.com --http-model deepseek-flash --output-dir results/rts24-http-new
@@ -67,18 +65,34 @@ Codex 回传候选。两种方式均保存请求、响应、校验和反馈。
 | `--strategy` | 行为 |
 |---|---|
 | `sa` | 纯 SA |
-| `fixed` | 每轮 SA 后调用一次 LLM |
-| `stagnation` | 首轮调用，之后连续三轮 SA 改善不足时调用一次 |
-| `stagnation_burst` | 连续三轮 SA 改善不足时顺序调用三次 |
+| `fixed` | 每个内层 SA 批次后调用一次 LLM |
+| `stagnation` | 首个批次调用，之后连续三个 SA 批次改善不足时调用一次 |
+| `stagnation_burst` | 连续三个 SA 批次改善不足时顺序调用三次 |
 | `llm` | LLM 与连续子问题，无 SA |
 
 可设置 `--time-limit-seconds`、`--max-llm-calls`、`--seed`、`--scenario-file`。
 输出目录必须是新目录。`python -m suc_benders.astra_run` 使用同一入口。
 完整文件通信、取消、自动反馈及审计方式见 [运行说明](docs/astra-module.md)。
 
-`--target-reference-gap 0.005` 表示独立参考成本差严格小于 0.5% 才停止。
-该模式忽略轮数，不与时间／调用次数上限组合；参考成本用于停止判断和报告，
-不进入 LLM 输入或候选生成。参考解会先固定开停机并重新验证连续调度。
+默认 `--block-hours 3`（支持 1／2／3，保留短末块）、`--rounds 20`（外层上限）、
+`--max-inner-iterations 20`、`--convergence-tolerance 0.0001`，绝对容差固定为 `1e-5`。
+块内判据为 `U-L <= 1e-5 + tol*max(1,abs(U))`；外层判据为
+`m-L_best <= 1e-5 + tol*max(1,abs(L_best))`。旧 `target_cost`、
+`stop_on_no_new_candidates`、`--target-reference-gap` 和无限外层迭代明确拒绝。
+
+- `DUAL_CONVERGED`：仅表示拉格朗日对偶协调收敛，不保证原整数问题 gap 为零。
+- `INNER_NOT_CONVERGED`：某块达到内层上限，立即结束，不更新外层乘子。
+- `MAX_ITERATIONS`：达到外层上限。
+- `TIME_LIMIT`、`CANCELLED`、`EVALUATION_LIMIT`、`LLM_CALL_LIMIT`：资源或用户中断。
+- 初始化、松弛、认证、协调失败均报告具体阶段，保留此前验证的方案和下界。
+
+输出 `convergence.json` 与 `result.json` 分别列出全天可行成本、认证下界、原问题 gap、
+协调上界和终止原因；诊断记录外层／块／内层编号、乘子、块上下界和认证耗时。
+QUBO 能量、量化目标和认证器可行目标均不作为下界。各块成本含拉格朗日价格，不能用作全天成本。
+乘子变化后重建割与成本缓存，旧候选必须重新调度；跨块约束只进入协调，初始／终端条件不在块边界重置。
+
+[新版验收记录](experiments/rts24-temporal-20261005/README.md)包含枚举端到端测试及
+确定性／随机 RTS-24 各一次种子 7、禁用 LLM、60 秒预算的真实 SA 检查。
 
 ## 独立参考与基线验证
 
@@ -88,7 +102,7 @@ python -m suc_benders.rts24_experiment --output-dir results/rts24-baseline-new
 ```
 
 基线验证要求干净且已提交的工作区和新目录。它串行完成两个配置的 SA（种子 7、
-候选池 16、最多 3 轮／600 秒），再求独立参考（单线程、600 秒、MIPGap 1e-4），
+候选池 16、最多 20 外层／20 内层／600 秒），再求独立参考（单线程、600 秒、MIPGap 1e-4），
 并校验每个完整方案。该命令不会调用 LLM。
 
 ## 保留的 RTS-24 结果
@@ -102,7 +116,7 @@ python -m suc_benders.minimal_experiment --output-dir experiments/rts24-minimal-
 该入口冻结源码和输入后串行运行 A 固定种子 SA、B 逐轮换种子 SA、C LLM-only、
 D SA+LLM、E SA+规则启发式，各取种子 7/17/27，搜索预算 1800 秒。
 C/D 各最多三次全新 Astra/max 子代理调用，需要 Codex 按 `subagent.claim/receipt`
-调度；C 用完额度结束，其余组继续 SA 至截止。E 默认总共三轮规则提案，
+调度；C 用完额度结束，其余组继续至算法停止或预算截止。E 默认总共三轮规则提案，
 `--rule-max-calls 0` 可选择每次停滞均触发三轮；每轮至多四个不同候选。
 规则候选采用提示词中相同的收益表，尝试整段关机及两端修剪。
 运行过程中生成 `report.md`、`summary.json` 和 `curves.csv`，包括截止时刻成绩、
@@ -125,7 +139,7 @@ C/D 各最多三次全新 Astra/max 子代理调用，需要 Codex 按 `subagent
 ## 分块 SA 主问题微基准
 
 下面的独立入口比较全时域、3 小时和 6 小时块，固定经典价格和 Benders 主问题，
-不调用 LLM，不运行完整外层拉格朗日协调，也不改变默认求解流程：
+不调用 LLM，不运行完整外层拉格朗日协调，与默认的完整协调流程相互独立：
 
 ```powershell
 python -m suc_benders.block_master_experiment --output-dir experiments/rts24-block-master-new
@@ -143,7 +157,7 @@ python -m suc_benders.block_master_experiment --output-dir experiments/rts24-blo
 
 ## 实现与验证
 
-- `solver.py` 定义配置、结果和统一入口；`paper_solver.py` 实现当前动态全时域循环。
+- `solver.py` 定义配置、结果和统一入口；`paper_solver.py` 实现时间分块内外层循环，`coordination.py` 实现拉格朗日切平面。
 - `paper_model.py` 实现索引约束、连续松弛和紧凑 QUBO；文件名沿用既有实现。
 - `candidates.py` 负责确定性修复；`context.py` 保留供 LLM 使用的成本、对偶及减开机启发信息。
 - `llm.py`、`subagent.py`、`advisor_feedback.py` 负责候选通信和自动反馈。
