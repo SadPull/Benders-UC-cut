@@ -1,0 +1,15 @@
+test_five_hour_cli_option_is_accepted (tests.test_three_unit_block_experiment.ThreeUnitBlockTests) ... ok
+test_protocol_is_nine_fixed_runs_with_unchanged_search_settings (tests.test_three_unit_block_experiment.ThreeUnitBlockTests) ... ok
+test_report_preserves_timeout_and_missing_reference_without_fake_gaps (tests.test_three_unit_block_experiment.ThreeUnitBlockTests) ... ok
+test_trace_separates_blocks_and_prices_and_only_counts_completed_outer_rounds (tests.test_three_unit_block_experiment.ThreeUnitBlockTests) ... ok
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+Set parameter Threads to value 1
+Set parameter Seed to value 7
+test_worker_uses_manifest_five_hour_run_without_reference_input (tests.test_three_unit_block_experiment.ThreeUnitBlockTests) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.080s
+
+OK
