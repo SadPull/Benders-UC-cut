@@ -343,7 +343,7 @@ def worker(args):
     gp.setParam("Threads", 1)
     gp.setParam("Seed", 7)
     directory, identifier = args.output_dir, args.identifier
-    defs = definitions()
+    defs = read(directory / "manifest.json")
     if args.worker == "init":
         initialize(directory, identifier, args.deadline)
     elif args.worker == "reference":
@@ -358,7 +358,11 @@ def worker(args):
         definition = next(t for t in defs["runs"] if t["id"] == identifier)
         end_worker(directory, definition, directory / "end_to_end" / identifier, args.deadline)
     elif args.worker == "report":
-        report(directory)
+        if defs.get("protocol") == "three-unit-blocks":
+            from .three_unit_block_experiment import report as report_three_units
+            report_three_units(directory)
+        else:
+            report(directory)
     # Kaiwu may leave SDK housekeeping threads alive after all results are flushed.
     # Isolated workers have no further work; do not charge library teardown to trials.
     sys.stdout.flush()

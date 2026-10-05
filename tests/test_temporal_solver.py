@@ -111,7 +111,7 @@ class TemporalSolverTests(unittest.TestCase):
         self.assertFalse(converged(-math.inf, 1., 1e-4))
 
     def test_complete_nested_flow_with_enumerated_sampling(self):
-        for hours in (1, 2, 3):
+        for hours in (1, 2, 3, 5):
             data, scenarios = tiny()
             result = enumerated_run(data, scenarios, BendersConfig(block_hours=hours))
             self.assertEqual(result.status, "DUAL_CONVERGED", result.message)
@@ -119,6 +119,34 @@ class TemporalSolverTests(unittest.TestCase):
             self.assertEqual(result.diagnostics["block_count"], math.ceil(3/hours))
             self.assertTrue(all(b["converged"] for b in result.diagnostics["blocks"]))
             self.assertLessEqual(result.diagnostics["reliable_lower"], result.objective+1e-5)
+
+    def test_five_hour_blocks_cover_full_day_without_resetting_boundaries(self):
+        data, scenarios = tiny(24)
+        data = replace(data, min_up=np.array([4]), min_down=np.array([3]), initial_duration=np.array([1.]),
+                       initial_on=np.array([True]), initial_output=np.array([30.]))
+        uc = IndexedUC(data, scenarios)
+        blocks, cross = priced_blocks(uc, 5, [0.]*len(uc.rows))
+        self.assertEqual([len(b.times) for b in blocks], [5, 5, 5, 5, 4])
+        self.assertEqual([t for b in blocks for t in b.times], list(range(24)))
+        self.assertEqual(sorted([i for b in blocks for i in b.row_ids]+cross), list(range(len(uc.rows))))
+        self.assertEqual(set(k for b in blocks for k in b.keys), set(uc.bounds))
+        self.assertEqual({k[2] for b in blocks for r in b.rows if r.label == "initial" for k in r.a}, {0, 1, 2})
+        self.assertEqual({k[2] for b in blocks for r in b.rows if r.label == "terminal" for k in r.a}, {23})
+        self.assertTrue({"transition", "min_up", "min_down", "ramp_up", "ramp_down"} <= {uc.rows[i].label for i in cross})
+
+    def test_five_hour_partition_with_four_hour_tail_matches_full_optimum(self):
+        from suc_benders.full_model import FullConfig, solve_full
+        data, scenarios = tiny(9)
+        data = replace(data, min_up=np.array([4]), min_down=np.array([3]), initial_duration=np.array([1.]),
+                       initial_on=np.array([True]), initial_output=np.array([30.]))
+        uc = IndexedUC(data, scenarios)
+        blocks, cross = priced_blocks(uc, 5, [0.]*len(uc.rows))
+        self.assertEqual([len(b.times) for b in blocks], [5, 4])
+        full = solve_full(data, scenarios, FullConfig(time_limit=30, mip_gap=1e-9, output_flag=0))
+        try:
+            self.assertAlmostEqual(merged_optimum(uc, blocks, cross), full.objective, places=5)
+        finally:
+            full.model.dispose()
 
     def test_raw_uvw_not_repaired_inside_block(self):
         data, scenarios = tiny()

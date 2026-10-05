@@ -6,7 +6,7 @@
 认证下界；认证整数方案不会进入候选、割生成、SA 初始化或全天方案恢复。
 LLM／规则建议可选，全天候选仍按原成本调度并通过物理校验。
 
-当前版本为 `v0.19.0`，变更见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本为 `v0.19.1`，变更见 [CHANGELOG.md](CHANGELOG.md)。
 [项目阅读教材](docs/project-textbook.md)保留 `bae3200` 历史源码说明，
 新版入口见本文；已有归档、冻结源码和校验和保持原样。
 
@@ -74,7 +74,7 @@ Codex 回传候选。两种方式均保存请求、响应、校验和反馈。
 输出目录必须是新目录。`python -m suc_benders.astra_run` 使用同一入口。
 完整文件通信、取消、自动反馈及审计方式见 [运行说明](docs/astra-module.md)。
 
-默认 `--block-hours 3`（支持 1／2／3，保留短末块）、`--rounds 20`（外层上限）、
+默认 `--block-hours 3`（支持 1／2／3／5，保留短末块）、`--rounds 20`（外层上限）、
 `--max-inner-iterations 20`、`--convergence-tolerance 0.0001`，绝对容差固定为 `1e-5`。
 块内判据为 `U-L <= 1e-5 + tol*max(1,abs(U))`；外层判据为
 `m-L_best <= 1e-5 + tol*max(1,abs(L_best))`。旧 `target_cost`、
@@ -93,6 +93,21 @@ QUBO 能量、量化目标和认证器可行目标均不作为下界。各块成
 
 [新版验收记录](experiments/rts24-temporal-20261005/README.md)包含枚举端到端测试及
 确定性／随机 RTS-24 各一次种子 7、禁用 LLM、60 秒预算的真实 SA 检查。
+
+固定三机组的 1／3／5 小时分块对照：
+
+绘图额外需要 Matplotlib，本轮验证版本为 `3.10.3`：
+
+```powershell
+python -m pip install matplotlib==3.10.3
+python -m suc_benders.three_unit_block_experiment --output-dir results/three-unit-blocks-new
+```
+
+保留 24 小时时域，每组使用三个变化种子，每次预算 90 秒、内层 60 次、外层 20 次。
+输出逐块收敛记录与曲线；加 `--report-only` 可从原始结果重建报告。
+
+[三机组分块实测报告](experiments/three-unit-blocks-20261005-232743/README.md)：
+1 小时三个种子均收敛；3、5 小时各两个种子完成对偶收敛，5 小时三个种子均找到独立参考最优方案。
 
 ## 独立参考与基线验证
 
