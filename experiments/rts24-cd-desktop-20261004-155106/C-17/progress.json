@@ -1,0 +1,20 @@
+{
+  "kind": "iteration",
+  "elapsed_seconds": 1016.064008100002,
+  "sa_calls": 0,
+  "iteration": 3,
+  "incumbent": 888637.8764314257,
+  "reliable_lower": null,
+  "timings": {
+    "qubo": 0.0,
+    "annealing": 0.0,
+    "relaxation": 0.0,
+    "local_dispatch": 2.312186000010115,
+    "repair": 0.04169009999895934,
+    "subproblems": 67.80187039999146,
+    "llm": 945.4642137000155,
+    "context": 0.01611120000234223,
+    "heuristic": 0.0,
+    "validation": 0.013132500000210712
+  }
+}

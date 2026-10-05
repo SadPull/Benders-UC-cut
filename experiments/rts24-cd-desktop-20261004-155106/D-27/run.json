@@ -1,0 +1,48 @@
+{
+  "group": "D",
+  "seed": 27,
+  "configuration": {
+    "max_iterations": null,
+    "penalty": 1000000.0,
+    "theta_step": 1.0,
+    "reserve_scale": 100.0,
+    "quantum_candidates": true,
+    "advisor_only": false,
+    "target_cost": null,
+    "quantum": {
+      "backend": "kaiwu-local",
+      "kaiwu_seed": 27,
+      "candidate_pool_size": 16,
+      "initial_temperature": 100.0,
+      "alpha": 0.98,
+      "cutoff_temperature": 0.01,
+      "iterations_per_temperature": 5
+    },
+    "llm": {
+      "enabled": true,
+      "max_candidates": 4,
+      "timeout_seconds": null,
+      "temperature": 0.2,
+      "max_tokens": null,
+      "reasoning_effort": "max",
+      "max_retries": 1,
+      "retry_backoff_seconds": 30.0,
+      "api_format": "codex_subagent",
+      "base_url": null,
+      "model": "gpt-6-astra",
+      "collect_diagnostics": true,
+      "exchange_dir": "C:\\Users\\12433\\Desktop\\LLM-benders-SUC\\experiments\\rts24-cd-desktop-20261004-155106\\D-27",
+      "enhanced_feedback": true,
+      "schedule": "stagnation_burst",
+      "max_calls": 3
+    },
+    "max_candidate_evaluations": null,
+    "time_limit_seconds": 1800.0,
+    "stop_on_no_new_candidates": false,
+    "sa_seed_per_call": false,
+    "rule_advisor": false,
+    "event_sink": null
+  },
+  "run_id": "fc0ab3cd9e2f475db1a30f22347cb189",
+  "created_at": 1791100503.3361664
+}

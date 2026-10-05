@@ -1,0 +1,11 @@
+{
+  "agent_id": "/root/c17_call3",
+  "actual_turn_completed": true,
+  "status": "completed",
+  "evidence_source": "desktop collaboration tool notification observed by coordinator",
+  "message": "Completed: wrote four candidate schedules to C-17/calls/003/candidates.json.",
+  "finished_at": 1791109406.0301094,
+  "usage": null,
+  "late_or_closed": false,
+  "receipt_published": true
+}

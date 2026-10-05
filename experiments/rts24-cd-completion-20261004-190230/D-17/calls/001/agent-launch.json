@@ -1,0 +1,8 @@
+{
+  "agent_id": "/root/fill_d17_1",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "fork_turns": "none",
+  "launched_at": 1791124289.0201623,
+  "transport": "collaboration.spawn_agent"
+}

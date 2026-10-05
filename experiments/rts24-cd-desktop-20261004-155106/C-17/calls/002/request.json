@@ -1,0 +1,15 @@
+{
+  "run_id": "1fd24f354e9c47b3b0a3313a6a19050c",
+  "call_id": "1fd24f354e9c47b3b0a3313a6a19050c:2",
+  "iteration": 2,
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "fork_turns": "none",
+  "max_candidates": 4,
+  "input_sha256": {
+    "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+    "user.txt": "de9fca784f6fd931f463d9f97810e9db3371bc50ec6882e212ba9c6a178c06b2"
+  },
+  "created_at": 1791108760.9886975,
+  "status": "pending"
+}

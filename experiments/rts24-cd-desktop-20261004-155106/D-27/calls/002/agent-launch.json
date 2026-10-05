@@ -1,0 +1,8 @@
+{
+  "agent_id": "/root/d27_call2",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "fork_turns": "none",
+  "launched_at": 1791101633.9998531,
+  "transport": "collaboration.spawn_agent"
+}

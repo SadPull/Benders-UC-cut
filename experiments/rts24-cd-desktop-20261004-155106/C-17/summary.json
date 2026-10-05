@@ -1,0 +1,193 @@
+{
+  "objective": 888637.8764314257,
+  "reference_difference": 0.0040349184787076275,
+  "checkpoints": {
+    "300": 1220423.7732883145,
+    "600": 902429.0607247831,
+    "900": 892249.5526624286,
+    "1800": 888637.8764314257
+  },
+  "threshold_seconds": {
+    "0.01": 697.0984984999996,
+    "0.005": 1016.0285153000004
+  },
+  "curve": [
+    {
+      "seconds": 6.443329800000356,
+      "objective": 1220423.7732883145,
+      "source": "fallback",
+      "gain": null
+    },
+    {
+      "seconds": 338.6640923999985,
+      "objective": 926339.2851617123,
+      "source": "llm",
+      "gain": 294084.48812660214
+    },
+    {
+      "seconds": 345.00403039999946,
+      "objective": 902429.0607247831,
+      "source": "llm",
+      "gain": 23910.224436929217
+    },
+    {
+      "seconds": 678.1798357000007,
+      "objective": 898760.3796026746,
+      "source": "llm",
+      "gain": 3668.681122108479
+    },
+    {
+      "seconds": 684.4917145,
+      "objective": 898726.6163247356,
+      "source": "llm",
+      "gain": 33.763277939055115
+    },
+    {
+      "seconds": 697.0984984999996,
+      "objective": 892249.5526624286,
+      "source": "llm",
+      "gain": 6477.063662306988
+    },
+    {
+      "seconds": 1009.4878778999991,
+      "objective": 889901.4906783251,
+      "source": "llm",
+      "gain": 2348.0619841035223
+    },
+    {
+      "seconds": 1016.0285153000004,
+      "objective": 888637.8764314257,
+      "source": "llm",
+      "gain": 1263.6142468993785
+    }
+  ],
+  "first_llm_improvement_seconds": 338.6640923999985,
+  "sa_improvement_after_llm": 0.0,
+  "candidate_stages": {
+    "llm": {
+      "raw_count": 12,
+      "raw_feasible_count": 3,
+      "raw_feasible_rate": 0.25,
+      "repaired_count": 11,
+      "repair_bits": [
+        3,
+        3,
+        3,
+        2,
+        0,
+        1,
+        0,
+        0,
+        3,
+        3,
+        3
+      ],
+      "repair_bits_mean": 1.9090909090909092,
+      "repair_bits_min": 0,
+      "repair_bits_max": 3,
+      "repaired_duplicates": 1,
+      "repaired_duplicate_rate": 0.09090909090909091,
+      "unique_repaired": 10,
+      "full_evaluated": 10,
+      "full_feasible": 10,
+      "full_feasible_rate": 1.0,
+      "improving_count": 7,
+      "improvement_rate": 0.7
+    }
+  },
+  "calls": [
+    {
+      "kind": "llm_end",
+      "failed": false,
+      "usage": null,
+      "message": "ok"
+    },
+    {
+      "kind": "llm_end",
+      "failed": false,
+      "usage": null,
+      "message": "ok"
+    },
+    {
+      "kind": "llm_end",
+      "failed": false,
+      "usage": null,
+      "message": "ok"
+    }
+  ],
+  "llm_started": 3,
+  "rule_started": 0,
+  "sa_calls": 0,
+  "sa_seeds": [],
+  "timings": {
+    "qubo": 0.0,
+    "annealing": 0.0,
+    "relaxation": 0.0,
+    "local_dispatch": 2.312186000010115,
+    "repair": 0.04169009999895934,
+    "subproblems": 67.80187039999146,
+    "llm": 945.4642137000155,
+    "context": 0.01611120000234223,
+    "heuristic": 0.0,
+    "validation": 0.013132500000210712,
+    "other": 0.41559379997852375
+  },
+  "time_limit_overshoot": 0.0,
+  "incomplete_evaluations": 0,
+  "sa_returned_raw": 0,
+  "sa_returned_raw_feasible": 0,
+  "sa_returned_after_deadline": 0,
+  "late_evaluations_excluded": 0,
+  "group": "C",
+  "seed": 17,
+  "state": {
+    "status": "LLM_CALL_LIMIT",
+    "elapsed_seconds": 1016.0647976999971
+  },
+  "llm_responses_consumed": 3,
+  "llm_transport_status": "all_three_received",
+  "handoffs": [
+    {
+      "call": "001",
+      "status": "completed",
+      "receipt_status": "completed",
+      "actual_turn_completed": true,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 0.47490715980529785,
+      "receipt_delay_after_file_seconds": 90.9984757900238,
+      "usage": null
+    },
+    {
+      "call": "002",
+      "status": "completed",
+      "receipt_status": "completed",
+      "actual_turn_completed": true,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 0.5331552028656006,
+      "receipt_delay_after_file_seconds": 75.89637565612793,
+      "usage": null
+    },
+    {
+      "call": "003",
+      "status": "completed",
+      "receipt_status": "completed",
+      "actual_turn_completed": true,
+      "output_excluded": false,
+      "dispatch_delay_seconds": 0.43056726455688477,
+      "receipt_delay_after_file_seconds": 50.99639940261841,
+      "usage": null
+    }
+  ],
+  "post_llm_sa": {
+    "calls": 0,
+    "complete_evaluations": 0
+  },
+  "audit": {
+    "physical_checked": 11,
+    "errors": [],
+    "complete": true,
+    "protocol_ok": true,
+    "initial_hash": "6cfddb648044b5e2989f614e49e5bc29dd6141abb4bba50078fec0bd6d5cf6c2",
+    "result_objective_consistent": true
+  }
+}

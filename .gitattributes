@@ -3,3 +3,7 @@ experiments/rts24-minimal-20261003/** -text -whitespace
 experiments/rts24-minimal-20261003.zip* -text -whitespace
 experiments/rts24-recovery-20261004*/** -text -whitespace
 experiments/rts24-recovery-20261004-bundle.zip* -text -whitespace
+experiments/rts24-block-master-*/** -text -whitespace
+experiments/rts24-cd-completion-*/** -text -whitespace
+experiments/rts24-cd-desktop-*/** -text -whitespace
+experiments/rts24-temporal-*/** -text -whitespace

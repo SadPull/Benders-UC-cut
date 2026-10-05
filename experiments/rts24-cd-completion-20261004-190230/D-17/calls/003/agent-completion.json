@@ -1,0 +1,11 @@
+{
+  "agent_id": "/root/fill_d17_3",
+  "actual_turn_completed": true,
+  "status": "completed",
+  "evidence_source": "desktop collaboration tool notification observed by coordinator",
+  "message": "Wrote four candidate schedules to D-17/calls/003/candidates.json. No solvers or external APIs were used.",
+  "finished_at": 1791125161.4626522,
+  "usage": null,
+  "late_or_closed": false,
+  "receipt_published": true
+}

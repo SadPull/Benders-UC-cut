@@ -1,0 +1,10 @@
+{
+  "reserve_fraction": 0.0,
+  "scenarios": [
+    {
+      "name": "base",
+      "probability": 1.0,
+      "load_factor": 1.0
+    }
+  ]
+}

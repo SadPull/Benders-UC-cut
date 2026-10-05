@@ -1,0 +1,8 @@
+{
+  "agent_id": "/root/c7_call1",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "fork_turns": "none",
+  "launched_at": 1791105017.1677523,
+  "transport": "collaboration.spawn_agent"
+}
