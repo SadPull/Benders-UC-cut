@@ -39,7 +39,14 @@ PHASE_SECONDS = {"A": 480, "B": 1080, "C": 1620, "D": 420}
 
 
 def read(path):
-    return json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else {}
+    for attempt in range(6):
+        try:
+            return json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else {}
+        except PermissionError:
+            # Windows can briefly deny a reader during an atomic file replacement.
+            if attempt == 5:
+                raise
+            time.sleep(.01)
 
 
 def save(path, value):
@@ -511,15 +518,24 @@ def report(directory):
     return summary
 
 
-def run(directory):
+def run(directory, prior_attempt=None):
     if directory.exists():
         raise ValueError("output directory already exists; use a new directory")
     directory.mkdir(parents=True)
     started = time.perf_counter()
-    global_deadline = started+3600
+    prior_seconds = 0.
+    if prior_attempt is not None:
+        previous = read(prior_attempt / "state.json")
+        if previous.get("status") != "infrastructure_aborted":
+            raise ValueError("only an explicitly archived infrastructure abort can debit this run")
+        prior_seconds = previous["seconds"]
+        if not 0 <= prior_seconds < 3600:
+            raise ValueError("prior attempt has exhausted the experiment budget")
+    global_deadline = started+3600-prior_seconds
     manifest = dict(**definitions(), commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         phase_seconds=PHASE_SECONDS, seeds=SEEDS, subsets=SUBSETS, config=asdict(config()),
         started_unix=time.time(), started_clock=started, global_deadline=global_deadline,
+        prior_attempt=str(prior_attempt) if prior_attempt else None, prior_seconds=prior_seconds,
         python=sys.version, dependencies={k: importlib.metadata.version(k) for k in ("numpy", "gurobipy", "kaiwu")},
         source_sha256={str(p.relative_to(ROOT)).replace("\\", "/"): sha(p)
                        for p in list((ROOT / "suc_benders").glob("*.py")) + list((ROOT / "data/rts24").glob("*.json"))})
@@ -563,7 +579,7 @@ def run(directory):
             supervise(directory, directory / "report-worker", "report", "all", seconds, deadline)
         save(directory / f"phase-{phase}.json", dict(seconds=time.perf_counter()-phase_started, limit=seconds))
     save(directory / "state.json", dict(status="completed" if (directory / "summary.json").exists() else "report_incomplete",
-         seconds=time.perf_counter()-started,
+         seconds=time.perf_counter()-started, total_attempt_seconds=prior_seconds+time.perf_counter()-started,
          within_total_budget=time.perf_counter() <= global_deadline))
     checksum(directory)
 
@@ -577,6 +593,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--prior-attempt", type=Path, help="debit an archived infrastructure-aborted attempt from the 3600-second cap")
     parser.add_argument("--worker", choices=("init", "reference", "native", "qubo", "sample", "end", "report"), help=argparse.SUPPRESS)
     parser.add_argument("--identifier", help=argparse.SUPPRESS)
     parser.add_argument("--deadline", type=float, help=argparse.SUPPRESS)
@@ -588,7 +605,7 @@ def main():
         report(args.output_dir)
         checksum(args.output_dir)
     else:
-        run(args.output_dir)
+        run(args.output_dir, args.prior_attempt.resolve() if args.prior_attempt else None)
 
 
 if __name__ == "__main__":

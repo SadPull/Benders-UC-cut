@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 
 from suc_benders.sa_scale_experiment import (SUBSETS, case_input, completed_in_time, config,
-    definitions, frozen_sampler_input, seed_for, trial_statistics, events, supervise)
+    definitions, frozen_sampler_input, seed_for, trial_statistics, events, supervise, read)
 
 
 class ScaleProtocolTests(unittest.TestCase):
@@ -69,6 +69,13 @@ class ScaleProtocolTests(unittest.TestCase):
             self.assertEqual(state["status"], "phase_budget_exhausted")
             (p / "partial.jsonl").write_text('{"call":0}\n{"call":')
             self.assertEqual(events(p / "partial.jsonl"), [{"call": 0}])
+
+    def test_transient_windows_replace_race_retries_without_losing_deadline(self):
+        with patch.object(Path, "exists", return_value=True), patch.object(Path, "read_text",
+                side_effect=[PermissionError(), PermissionError(), '{"deadline":5}']), patch(
+                "suc_benders.sa_scale_experiment.time.sleep") as pause:
+            self.assertEqual(read(Path("active.json")), {"deadline": 5})
+            self.assertEqual(pause.call_count, 2)
 
     def test_metric_denominators_and_missing_feasibility(self):
         reference = {"certified": True, "objective": -10., "native_checks": {"feasible": True}}
