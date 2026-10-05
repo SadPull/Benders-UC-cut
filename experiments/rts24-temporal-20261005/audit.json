@@ -1,0 +1,89 @@
+{
+  "passed": true,
+  "runs": [
+    {
+      "profile": "deterministic",
+      "status": "INNER_NOT_CONVERGED",
+      "runtime": 11.141142900007253,
+      "objective": 883727.892202252,
+      "lower_bound": 815439.9031823768,
+      "primal_gap": 0.07727264197772626,
+      "sa_calls": 20,
+      "block_count": 8,
+      "coupling_count": 4668,
+      "local_lower": -35661.16800000507,
+      "local_upper": -18308.79848228683,
+      "validation": {
+        "feasible_solution": true,
+        "trace_valid": true,
+        "max_residual_mw": 9.094947017729282e-13,
+        "scenario_residuals": {
+          "base": {
+            "balance": 9.094947017729282e-13,
+            "reserve": 0.0,
+            "pmin": 0.0,
+            "startup_capacity": 0.0,
+            "shutdown_capacity": 0.0,
+            "ramp_up": 0.0,
+            "ramp_down": 0.0,
+            "nonnegative": 0.0
+          }
+        },
+        "cost_residual": 6.984919309616089e-10
+      },
+      "source_hashes_match": true
+    },
+    {
+      "profile": "stochastic",
+      "status": "INNER_NOT_CONVERGED",
+      "runtime": 21.47468139999546,
+      "objective": 933522.2153666164,
+      "lower_bound": 841376.5231773071,
+      "primal_gap": 0.09870755154243595,
+      "sa_calls": 20,
+      "block_count": 8,
+      "coupling_count": 5620,
+      "local_lower": -65858.30450008267,
+      "local_upper": -58388.7071288904,
+      "validation": {
+        "feasible_solution": true,
+        "trace_valid": true,
+        "max_residual_mw": 1.3642420526593924e-12,
+        "scenario_residuals": {
+          "low": {
+            "balance": 1.3642420526593924e-12,
+            "reserve": 0.0,
+            "pmin": 0.0,
+            "startup_capacity": 0.0,
+            "shutdown_capacity": 0.0,
+            "ramp_up": 0.0,
+            "ramp_down": 0.0,
+            "nonnegative": 0.0
+          },
+          "base": {
+            "balance": 1.3642420526593924e-12,
+            "reserve": 0.0,
+            "pmin": 0.0,
+            "startup_capacity": 0.0,
+            "shutdown_capacity": 0.0,
+            "ramp_up": 0.0,
+            "ramp_down": 0.0,
+            "nonnegative": 0.0
+          },
+          "high": {
+            "balance": 4.547473508864641e-13,
+            "reserve": 0.0,
+            "pmin": 0.0,
+            "startup_capacity": 0.0,
+            "shutdown_capacity": 0.0,
+            "ramp_up": 0.0,
+            "ramp_down": 0.0,
+            "nonnegative": 0.0
+          }
+        },
+        "cost_residual": 6.984919309616089e-10
+      },
+      "source_hashes_match": true
+    }
+  ]
+}
