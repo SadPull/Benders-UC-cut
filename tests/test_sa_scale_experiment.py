@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 
 from suc_benders.sa_scale_experiment import (SUBSETS, case_input, completed_in_time, config,
-    definitions, frozen_sampler_input, seed_for, trial_statistics, events, supervise, read)
+    definitions, frozen_sampler_input, seed_for, trial_statistics, events, supervise, read, save, screening_verdict)
 
 
 class ScaleProtocolTests(unittest.TestCase):
@@ -76,6 +76,21 @@ class ScaleProtocolTests(unittest.TestCase):
                 "suc_benders.sa_scale_experiment.time.sleep") as pause:
             self.assertEqual(read(Path("active.json")), {"deadline": 5})
             self.assertEqual(pause.call_count, 2)
+
+    def test_transient_windows_write_race_retries_the_same_payload(self):
+        with tempfile.TemporaryDirectory() as temp, patch(
+                "suc_benders.sa_scale_experiment.publish", side_effect=[PermissionError(), None]) as writer, patch(
+                "suc_benders.sa_scale_experiment.time.sleep"):
+            save(Path(temp)/"active.json", {"deadline": 5})
+            self.assertEqual(writer.call_count, 2)
+            self.assertEqual(writer.call_args_list[0], writer.call_args_list[1])
+
+    def test_failed_or_censored_trial_cannot_pass_a_three_seed_screen(self):
+        good = {"reference_certified": True, "samples": 16, "relative_gap": .001,
+                "state": {"status": "completed"}}
+        self.assertEqual(screening_verdict([good]*3), "passed")
+        self.assertEqual(screening_verdict([good, good, {**good, "state": {"status": "failed"}}]), "inconclusive")
+        self.assertEqual(screening_verdict([good, good, {**good, "relative_gap": None}]), "not_passed")
 
     def test_metric_denominators_and_missing_feasibility(self):
         reference = {"certified": True, "objective": -10., "native_checks": {"feasible": True}}

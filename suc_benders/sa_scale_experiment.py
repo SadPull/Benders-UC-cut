@@ -52,7 +52,16 @@ def read(path):
 def save(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    publish(path, result_to_dict(value))
+    payload = result_to_dict(value)
+    for attempt in range(6):
+        try:
+            publish(path, payload)
+            return
+        except PermissionError:
+            # A Windows reader may still hold the destination during replace().
+            if attempt == 5:
+                raise
+            time.sleep(.01)
 
 
 def append(stream, row):
@@ -384,6 +393,15 @@ def trial_statistics(samples, batches, reference):
         best_raw_objective=best, reference_certified=certified, absolute_gap=absolute, relative_gap=relative)
 
 
+def screening_verdict(trials):
+    complete = len(trials) == 3 and all(t.get("reference_certified") and t.get("samples", 0) > 0
+        and t["state"]["status"] in ("completed", "sampling_budget_exhausted") for t in trials)
+    if not complete:
+        return "inconclusive"
+    return "passed" if all(t.get("relative_gap") is not None and -1e-6 <= t["relative_gap"] <= .01
+                           for t in trials) else "not_passed"
+
+
 def end_statistics(directory, definition):
     folder = directory / "end_to_end" / definition["id"]
     result, rows = read(folder / "result.json"), events(folder / "events.jsonl")
@@ -431,8 +449,11 @@ def report(directory):
     from collections import Counter
     manifest = read(directory / "manifest.json")
     for path, digest in manifest["source_sha256"].items():
-        if sha(ROOT / path) != digest:
-            raise ValueError(f"source changed during experiment: {path}")
+        if sha(directory / "source" / path) != digest:
+            raise ValueError(f"archived execution source mismatch: {path}")
+        # Reporting fixes may follow a run; the solver/encoding/data must still match.
+        if path != "suc_benders/sa_scale_experiment.py" and sha(ROOT / path) != digest:
+            raise ValueError(f"solver/encoding source differs from execution: {path}")
     for path, digest in manifest["input_sha256"].items():
         if sha(directory / path) != digest:
             raise ValueError(f"input changed during experiment: {path}")
@@ -483,23 +504,24 @@ def report(directory):
     for s in manifest["snapshots"]:
         for mode in ("fixed", "varying"):
             selected = [t for t in trials if t["snapshot"] == s["id"] and t["mode"] == mode]
-            known = all(t.get("reference_certified") and t.get("samples", 0) > 0 for t in selected)
             gaps = [t["relative_gap"] for t in selected if t.get("relative_gap") is not None]
-            passed = known and len(gaps) == 3 and all(-1e-6 <= g <= .01 for g in gaps)
-            groups.append(dict(snapshot=s["id"], mode=mode, verdict="passed" if passed else "not_passed" if known else "inconclusive",
+            groups.append(dict(snapshot=s["id"], mode=mode, verdict=screening_verdict(selected),
                 feasible_seeds=sum(t.get("best_raw_objective") is not None for t in selected),
                 median_gap=float(np.median(gaps)) if gaps else None, worst_gap=max(gaps) if gaps else None,
                 median_unique=float(np.median([t.get("unique_uvw", 0) for t in selected])),
                 median_native_rate=float(np.median([t["native_feasible_rate"] for t in selected
                                                   if t.get("native_feasible_rate") is not None]))
                 if any(t.get("native_feasible_rate") is not None for t in selected) else None))
-    summary = dict(protocol_complete=len(trials) == 144 and len(runs) == 18, snapshot_errors=errors,
+    summary = dict(all_slots_accounted_for=len(trials) == 144 and len(runs) == 18, snapshot_errors=errors,
+                   execution_commit=manifest["commit"], report_generator_sha256=sha(Path(__file__)),
+                   trial_states=dict(Counter(t["state"]["status"] for t in trials)),
                    references=references,
                    groups=groups, trials=trials, end_to_end=runs,
                    warning="Three-seed screening; failures and censored runs retained. Subset composition changes with scale.")
     save(directory / "summary.json", summary)
     lines = ["# 纯 SA 分级诊断：固定协议初筛", "", f"源码提交：`{manifest['commit']}`。",
-             "3 个种子；24 小时；固定参数。初筛不代表统计显著性。完整原始结果见 summary.json。", "",
+             "3 个种子；24 小时；固定参数。初筛不代表统计显著性。完整原始结果见 summary.json。",
+             "写入失败或进程包络超时的试验保留已有样本，但对应三种子初筛判定为结论不足。统计展示所有按时保存的样本。", "",
              "原始主问题可行率不包含辅助变量重优化或修复。NA 表示没有可行样本或参考未认证。", "",
              "| 快照 | 种子策略 | 有可行解种子 | 主问题可行率中位数 | 误差中位数 | 最差误差 | 初筛 |",
              "|---|---|---:|---:|---:|---:|---|"]
