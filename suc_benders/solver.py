@@ -31,6 +31,9 @@ class BendersConfig:
     time_limit_seconds: float | None = None
     stop_on_no_new_candidates: bool | None = None
     sa_seed_per_call: bool = False
+    native_fallback_patience: int | None = None
+    defer_full_recovery: bool = False
+    gap_experiment_variant: str | None = None
     rule_advisor: bool = False
     event_sink: Callable[[dict], None] | None = field(default=None, repr=False)
 
@@ -136,11 +139,29 @@ def solve_benders(
         raise ValueError("convergence_tolerance must be positive and finite")
     if config.rule_advisor and (config.llm.enabled or config.advisor_only):
         raise ValueError("rule advisor requires SA and LLM disabled")
+    variants = ("sa_strict", "sa_flow", "sa_compact", "sa_full", "native_diagnostic")
+    if config.gap_experiment_variant is not None:
+        if config.gap_experiment_variant not in variants:
+            raise ValueError("unknown pure-SA gap experiment variant")
+        if config.llm.enabled or config.advisor_only or config.rule_advisor:
+            raise ValueError("gap experiment variants disable all advisors")
+        if config.gap_experiment_variant.startswith("sa_") and (
+                not config.quantum_candidates or config.native_fallback_patience is not None):
+            raise ValueError("pure-SA search forbids native integer candidates")
+        if config.gap_experiment_variant == "native_diagnostic" and (
+                config.quantum_candidates or config.native_fallback_patience != 1):
+            raise ValueError("native diagnostic requires native-only candidates")
     if config.sa_seed_per_call and config.quantum.kaiwu_seed is None:
         raise ValueError("changing SA seeds requires a starting seed")
     if config.advisor_only and (not config.llm.enabled or config.quantum_candidates):
         raise ValueError("advisor_only requires LLM enabled and SA disabled")
-    if not config.quantum_candidates and not config.advisor_only:
+    if config.native_fallback_patience is not None and (
+            type(config.native_fallback_patience) is not int or config.native_fallback_patience < 1):
+        raise ValueError("native_fallback_patience must be a positive integer or None")
+    if type(config.defer_full_recovery) is not bool or (config.defer_full_recovery and
+            (config.llm.enabled or config.advisor_only or config.rule_advisor)):
+        raise ValueError("deferred full recovery requires a boolean flag and LLM/rule advisors disabled")
+    if not config.quantum_candidates and not config.advisor_only and config.native_fallback_patience is None:
         raise ValueError("enable SA or select advisor_only")
     if config.time_limit_seconds is not None and (not math.isfinite(config.time_limit_seconds) or config.time_limit_seconds <= 0):
         raise ValueError("time limit must be positive and finite")

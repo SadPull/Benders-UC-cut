@@ -1,0 +1,754 @@
+{
+  "report_only_identical": true,
+  "source_hashes_valid": true,
+  "original_checksums": 175,
+  "revised_checksums": 241,
+  "cached_reference_hash_valid": true,
+  "best_schedule_checks": {
+    "sanity-n3-det-h1-sa_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 5.684341886080802e-14,
+      "scenario_residuals": {
+        "base": {
+          "balance": 5.684341886080802e-14,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 0.0
+    },
+    "sanity-n3-det-h1-sa_only-100007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 5.684341886080802e-14,
+      "scenario_residuals": {
+        "base": {
+          "balance": 5.684341886080802e-14,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 0.0
+    },
+    "sanity-n3-det-h1-sa_only-200007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 5.684341886080802e-14,
+      "scenario_residuals": {
+        "base": {
+          "balance": 5.684341886080802e-14,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 0.0
+    },
+    "sanity-n3-det-h1-sa_fallback-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 5.684341886080802e-14,
+      "scenario_residuals": {
+        "base": {
+          "balance": 5.684341886080802e-14,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 0.0
+    },
+    "sanity-n3-det-h1-sa_fallback-100007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 5.684341886080802e-14,
+      "scenario_residuals": {
+        "base": {
+          "balance": 5.684341886080802e-14,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 0.0
+    },
+    "sanity-n3-det-h1-sa_fallback-200007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 5.684341886080802e-14,
+      "scenario_residuals": {
+        "base": {
+          "balance": 5.684341886080802e-14,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 0.0
+    },
+    "deterministic-n10-det-h1-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 2.2737367544323206e-13,
+      "scenario_residuals": {
+        "base": {
+          "balance": 2.2737367544323206e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 1.1641532182693481e-10
+    },
+    "deterministic-n32-det-h1-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 6.984919309616089e-10
+    },
+    "screening-n32-stoch-h1-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "screening-n32-stoch-h2-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "screening-n32-stoch-h3-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 8.149072527885437e-10
+    },
+    "screening-n32-stoch-h5-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 1.1641532182693481e-09
+    },
+    "native_confirmation-n32-stoch-hselected-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "comparison-n32-stoch-hselected-sa_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "comparison-n32-stoch-hselected-sa_only-100007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.8189894035458565e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.8189894035458565e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 1.1641532182693481e-09
+    },
+    "comparison-n32-stoch-hselected-sa_only-200007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.8189894035458565e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.8189894035458565e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 1.0477378964424133e-09
+    },
+    "comparison-n32-stoch-hselected-sa_fallback-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 6.984919309616089e-10
+    },
+    "comparison-n32-stoch-hselected-sa_fallback-100007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "comparison-n32-stoch-hselected-sa_fallback-200007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "comparison-n32-stoch-hselected-native_only-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 9.094947017729282e-13,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "confirmation-n32-stoch-hselected-sa_fallback-7": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 6.984919309616089e-10
+    },
+    "confirmation-n32-stoch-hselected-sa_fallback-100007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    },
+    "confirmation-n32-stoch-hselected-sa_fallback-200007": {
+      "feasible_solution": true,
+      "trace_valid": true,
+      "max_residual_mw": 1.3642420526593924e-12,
+      "scenario_residuals": {
+        "low": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "base": {
+          "balance": 9.094947017729282e-13,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        },
+        "high": {
+          "balance": 1.3642420526593924e-12,
+          "reserve": 0.0,
+          "pmin": 0.0,
+          "startup_capacity": 0.0,
+          "shutdown_capacity": 0.0,
+          "ramp_up": 0.0,
+          "ramp_down": 0.0,
+          "nonnegative": 0.0
+        }
+      },
+      "cost_residual": 9.313225746154785e-10
+    }
+  },
+  "display_curve_endpoints": [
+    {
+      "seed": 7,
+      "last_certificate_seconds": 247.56674059999932,
+      "carry_until_stop_seconds": 333.19008290000056,
+      "lower": 841376.5240214842
+    },
+    {
+      "seed": 100007,
+      "last_certificate_seconds": 243.24237370000083,
+      "carry_until_stop_seconds": 338.39699120000114,
+      "lower": 841376.5240214842
+    },
+    {
+      "seed": 200007,
+      "last_certificate_seconds": 247.42255990000012,
+      "carry_until_stop_seconds": 340.45521109999936,
+      "lower": 841376.5240214842
+    }
+  ],
+  "confirmation_allocations": [
+    600.0,
+    600.0,
+    600.0
+  ],
+  "execution_seconds": 5648.608347900001,
+  "audit_started_clock": 15225.5856416,
+  "excluded_post_regression_seconds": 79.65669300000081,
+  "audit_seconds": 488.2979097999978,
+  "total_experiment_seconds": 6136.906257699999,
+  "within_7200_seconds": true
+}

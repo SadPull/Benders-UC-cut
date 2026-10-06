@@ -133,7 +133,30 @@ def continuous_relaxation(indexed, deadline):
     return result
 
 
-def solve_master(block, cuts, deadline, *, integral=True, bound_only=False):
+def block_dual_floor(block, local_prices):
+    """A box-minimized dual bound, with current cross prices and fixed local prices."""
+    linear = dict(block.costs)
+    value = block.constant
+    for i in block.row_ids:
+        row, price = block.uc.rows[i], float(local_prices[i])
+        if not math.isfinite(price) or (not row.equality and price < -TOL):
+            raise ValueError("invalid local dual price")
+        if not row.equality:
+            price = max(0., price)
+        value += price*row.c
+        for k, coefficient in row.a.items():
+            linear[k] += price*coefficient
+    for k, coefficient in linear.items():
+        lo, hi = block.uc.bounds[k]
+        if k in block.fixed:
+            lo = hi = block.fixed[k]
+        quadratic = block.uc.quadratic.get(k, 0.)
+        minimizer = min(hi, max(lo, -coefficient/(2*quadratic))) if quadratic else lo if coefficient >= 0 else hi
+        value += coefficient*minimizer + quadratic*minimizer**2
+    return value-1e-5
+
+
+def solve_master(block, cuts, deadline, *, integral=True, bound_only=False, max_seconds=60.):
     """Native master oracle; constant restored, but never used as an SA start."""
     gp = require_gurobi()
     model = gp.Model("block_benchmark_integer_master" if integral else "block_benchmark_lp_master")
@@ -141,7 +164,7 @@ def solve_master(block, cuts, deadline, *, integral=True, bound_only=False):
     model.Params.Threads = 1
     model.Params.Seed = 7
     model.Params.MIPGap = 1e-6
-    model.Params.TimeLimit = max(.001, min(60., deadline-time.perf_counter()))
+    model.Params.TimeLimit = max(.001, min(max_seconds, deadline-time.perf_counter()))
     x = {k: model.addVar(lb=block.fixed.get(k, 0.), ub=block.fixed.get(k, 1.),
                         vtype=gp.GRB.BINARY if integral else gp.GRB.CONTINUOUS, name=name(k)) for k in block.bkeys}
     qlo, _ = block.objective_bounds(block.costs, True)

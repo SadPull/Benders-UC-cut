@@ -15,3 +15,7 @@ kaiwu-*.whl
 !experiments/rts24-block-master-*/**/*.log
 !experiments/rts24-cd-completion-*/**/*.log
 !experiments/rts24-cd-desktop-*/**/*.log
+
+# Publish selected regression logs with curated gap experiment reports.
+!experiments/rts24-gap-closure-20261006/**/*.log
+!experiments/rts24-pure-sa-gap-v3-20261006/**/*.log

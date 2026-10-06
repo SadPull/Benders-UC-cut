@@ -1,12 +1,41 @@
 # RTS-24 SUC：SA + LLM Benders
 
+## 纯 SA 主问题与 Gap v3 实验
+
+`v0.20.0` 为实验预发布，主目标尚未达成。新增纯 SA 主问题搜索与独立离线整数认证，
+默认关闭新协议；保留原算法和此前实验。详见 [发布与归档说明](docs/releases/v0.20.0.md)
+和 [冻结实验协议](docs/pure-sa-gap-v3-protocol.md)。
+
+```powershell
+python -m suc_benders.pure_sa_gap_experiment --output-dir results/pure-sa-gap-new --previous-dir <已解压旧实验目录>/revised
+python -m suc_benders.pure_sa_gap_experiment --output-dir <已解压完整v3实验目录> --report-only
+```
+
+四种随机 SUC 分块筛查均被数值审计排除，因此后续消融与三种子 1200 秒确认未运行。
+纯 SA 在线整数主问题调用为零；有效经典诊断最好 Gap 为 4.496%，不能宣称达到论文相近量级。
+[结果解读](experiments/rts24-pure-sa-gap-v3-20261006.findings.md)记录乘子尺度、采样过滤及审计偏差。
+
+完整原始包、复核包与 SHA256 见 [GitHub v0.20.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.20.0)。
+Git 展示目录是精简报告；重建与复现实验应使用 Release 中的完整冻结包。
+
+## Gap 补足实验
+
+`python -m suc_benders.gap_closure_experiment --output-dir results/gap-closure-new --historical-dir <原始规模确认目录>`
+运行冻结的两小时补足协议：32 机组随机 SUC，比较纯 SA、经典分解和 SA＋经典候选兜底。
+历史目录需包含 `inputs/` 和 `references/`，用于核验已有的确定性参考；随机参考重新独立认证。
+完整预算、选块与验收规则见 [实验协议](docs/gap-closure-protocol.md)。
+
+`BendersConfig.native_fallback_patience=None` 默认关闭；设置为 3 时，连续三次内层局部上界未改善后
+调用经典主问题候选，候选经过原调度和恢复流程。经典候选与认证下界分别记录。
+`--report-only` 可在相同冻结源码上重建报告。所有迟到结果和失败保留，计分仅使用截止前结果。
+
 本项目研究 IEEE RTS-24 派生随机机组组合问题：32 台机组、24 个小时。
 默认采用连续松弛初始化 → 3 小时时间分块 → 块内 Benders／Kaiwu 本地 SA →
 拉格朗日切平面协调。Gurobi 求解连续调度，并仅用整数块主问题的 `ObjBound`
 认证下界；认证整数方案不会进入候选、割生成、SA 初始化或全天方案恢复。
 LLM／规则建议可选，全天候选仍按原成本调度并通过物理校验。
 
-当前版本为 `v0.19.1`，变更见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本为 `v0.20.0`（实验预发布），变更见 [CHANGELOG.md](CHANGELOG.md)。
 [项目阅读教材](docs/project-textbook.md)保留 `bae3200` 历史源码说明，
 新版入口见本文；已有归档、冻结源码和校验和保持原样。
 

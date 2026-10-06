@@ -1,0 +1,11 @@
+{
+  "execution_seconds": 5648.608347900001,
+  "post_audit_and_archive_seconds": 492.95278999999937,
+  "excluded_post_regression_seconds": 79.65669300000081,
+  "total_experiment_seconds": 6141.5611371999985,
+  "archive_sha256": "ee8d3458e483e42d9bd0f448ab1e78f5109dffb6b59b91bda5300221449a3896",
+  "archive_crc_passed": true,
+  "archive_bytes_match": true,
+  "report_only_identical": true,
+  "within_7200_seconds": true
+}

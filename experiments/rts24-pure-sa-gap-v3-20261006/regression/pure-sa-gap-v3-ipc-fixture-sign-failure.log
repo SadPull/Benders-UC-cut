@@ -1,0 +1,30 @@
+search ipc-smoke: failed, 0.24s
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+Set parameter Threads to value 1
+Set parameter Seed to value 7
+Traceback (most recent call last):
+  File "C:\Users\12433\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\12433\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Users\12433\AppData\Local\Temp\pure-sa-ipc-95totgit\source\suc_benders\pure_sa_gap_experiment.py", line 648, in <module>
+    main()
+  File "C:\Users\12433\AppData\Local\Temp\pure-sa-ipc-95totgit\source\suc_benders\pure_sa_gap_experiment.py", line 636, in main
+    worker(args)
+  File "C:\Users\12433\AppData\Local\Temp\pure-sa-ipc-95totgit\source\suc_benders\pure_sa_gap_experiment.py", line 615, in worker
+    search_worker(args.output_dir, output, definition, args.deadline)
+Traceback (most recent call last):
+  File "<stdin>", line 26, in <module>
+  File "C:\Users\12433\AppData\Local\Temp\pure-sa-ipc-95totgit\source\suc_benders\pure_sa_gap_experiment.py", line 71, in search_worker
+    data, scenarios = load_case(directory, definition["case"])
+  File "C:\Users\12433\AppData\Local\Temp\pure-sa-ipc-95totgit\source\suc_benders\sa_scale_experiment.py", line 118, in load_case
+    return load_suc_data(directory / "inputs" / case / "units.json",
+  File "C:\Users\12433\AppData\Local\Temp\pure-sa-ipc-95totgit\source\suc_benders\data.py", line 189, in load_suc_data
+    units = _load_units(data_path)
+  File "C:\Users\12433\AppData\Local\Temp\pure-sa-ipc-95totgit\source\suc_benders\data.py", line 102, in _load_units
+    raise DataError("online initial_output must lie between Pmin and Pmax")
+suc_benders.data.DataError: online initial_output must lie between Pmin and Pmax
+
+AssertionError: search worker produced no result
