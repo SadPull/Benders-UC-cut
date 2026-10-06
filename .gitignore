@@ -12,3 +12,6 @@ kaiwu-*.whl
 # Keep audited logs in the frozen experiment archives.
 !experiments/rts24-minimal-20261003/**/*.log
 !experiments/rts24-recovery-20261004*/**/*.log
+!experiments/rts24-block-master-*/**/*.log
+!experiments/rts24-cd-completion-*/**/*.log
+!experiments/rts24-cd-desktop-*/**/*.log

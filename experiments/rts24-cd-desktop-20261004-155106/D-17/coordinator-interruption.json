@@ -1,0 +1,6 @@
+{
+  "reason": "Coordinator turn interrupted by user; resumed after worker deadline. Completed model output was not handed off before cutoff and is excluded.",
+  "resumed_at": 1791104737,
+  "worker_clock_preserved": true,
+  "automatic_rerun": false
+}

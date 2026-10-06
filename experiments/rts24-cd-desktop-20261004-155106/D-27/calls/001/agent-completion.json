@@ -1,0 +1,11 @@
+{
+  "agent_id": "/root/d27_call1",
+  "actual_turn_completed": true,
+  "status": "completed",
+  "evidence_source": "desktop collaboration tool notification observed by coordinator",
+  "message": "Wrote four candidate schedules to D-27/calls/001/candidates.json.",
+  "finished_at": 1791101103.9863243,
+  "usage": null,
+  "late_or_closed": false,
+  "receipt_published": true
+}

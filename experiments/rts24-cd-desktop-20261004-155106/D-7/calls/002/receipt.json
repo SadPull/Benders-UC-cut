@@ -1,0 +1,14 @@
+{
+  "run_id": "49df81fecd5d4e6b902c161ea24b25cd",
+  "call_id": "49df81fecd5d4e6b902c161ea24b25cd:2",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "input_sha256": {
+    "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+    "user.txt": "ac8b55074cab7aab40e7ba1c735636a7c934ce096a82803663bc20142f3ecd2f"
+  },
+  "agent_id": "/root/d7_call2",
+  "status": "completed",
+  "completed_at": 1791110407.4258404,
+  "output_sha256": "cb15931585cd24ff744d6eb82eee16cea5fd81655e6833a59138704c2aff4282"
+}

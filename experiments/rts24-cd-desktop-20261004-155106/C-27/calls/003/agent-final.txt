@@ -1,0 +1,1 @@
+已将 4 个候选方案写入指定的 candidates.json，未调用求解器或外部 API。

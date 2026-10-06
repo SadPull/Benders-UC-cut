@@ -1,0 +1,402 @@
+{
+  "call_id": "d5b8af19efb14cd28092b93a9213419d:3",
+  "failed": false,
+  "message": "ok",
+  "proposals": [
+    {
+      "proposal_id": "d5b8af19efb14cd28092b93a9213419d:3:0",
+      "commitment_id": "662f5b10bd5b8b5acf8b213a5b0432115edcd17c10f59c8e35f167d1a2f80db4",
+      "proposed_changes": [
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 3,
+      "outcome": "duplicate",
+      "duplicate": true,
+      "cache_hit": true,
+      "continuous_dispatch_completed": true,
+      "local_feasible": null,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 888480.3555368402,
+        "fixed": 179799.6677,
+        "expected_fuel": 708680.6878368402
+      },
+      "costs": {
+        "total": 888480.3555368402,
+        "fixed": 179799.6677,
+        "expected_fuel": 708680.6878368402
+      },
+      "cost_change": {
+        "total": 0.0,
+        "fixed": 0.0,
+        "expected_fuel": 0.0
+      },
+      "refreshed_incumbent": false
+    },
+    {
+      "proposal_id": "d5b8af19efb14cd28092b93a9213419d:3:1",
+      "commitment_id": "f4bded9adfd3ba3e95550792c5bdaa44b447d073352f43324d3ad57dc19af9b5",
+      "proposed_changes": [
+        {
+          "unit": 3,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 4,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 1,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 1,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 3,
+      "outcome": "accepted",
+      "duplicate": false,
+      "cache_hit": false,
+      "continuous_dispatch_completed": true,
+      "local_feasible": true,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 888480.3555368402,
+        "fixed": 179799.6677,
+        "expected_fuel": 708680.6878368402
+      },
+      "costs": {
+        "total": 886336.3096892012,
+        "fixed": 179430.4397,
+        "expected_fuel": 706905.8699892012
+      },
+      "cost_change": {
+        "total": -2144.045847638976,
+        "fixed": -369.2280000000028,
+        "expected_fuel": -1774.817847638973
+      },
+      "refreshed_incumbent": true
+    },
+    {
+      "proposal_id": "d5b8af19efb14cd28092b93a9213419d:3:2",
+      "commitment_id": "0830cfe2a2fe9f4f303309c5c4067f211dac52534c78a8ced9156dbbb3649187",
+      "proposed_changes": [
+        {
+          "unit": 3,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 4,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 20,
+          "start_hour": 1,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 10,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 3,
+      "outcome": "accepted",
+      "duplicate": false,
+      "cache_hit": false,
+      "continuous_dispatch_completed": true,
+      "local_feasible": true,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 888480.3555368402,
+        "fixed": 179799.6677,
+        "expected_fuel": 708680.6878368402
+      },
+      "costs": {
+        "total": 885702.9665521041,
+        "fixed": 178297.1421,
+        "expected_fuel": 707405.824452104
+      },
+      "cost_change": {
+        "total": -2777.388984736055,
+        "fixed": -1502.5255999999936,
+        "expected_fuel": -1274.8633847361198
+      },
+      "refreshed_incumbent": true
+    },
+    {
+      "proposal_id": "d5b8af19efb14cd28092b93a9213419d:3:3",
+      "commitment_id": "b72360b22adbb1a30edc890bcd4700d3c03b4c474fd14d65dd75e3848242beba",
+      "proposed_changes": [
+        {
+          "unit": 3,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 4,
+          "start_hour": 1,
+          "end_hour": 7,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 7,
+          "start_hour": 1,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 8,
+          "start_hour": 1,
+          "end_hour": 8,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 10,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 11,
+          "start_hour": 23,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 1.0,
+          "to": 0.0
+        },
+        {
+          "unit": 13,
+          "start_hour": 23,
+          "end_hour": 23,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_changes": [
+        {
+          "unit": 12,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        },
+        {
+          "unit": 13,
+          "start_hour": 24,
+          "end_hour": 24,
+          "from": 0.0,
+          "to": 1.0
+        }
+      ],
+      "repair_bits": 2,
+      "outcome": "accepted",
+      "duplicate": false,
+      "cache_hit": false,
+      "continuous_dispatch_completed": true,
+      "local_feasible": true,
+      "validation_completed": true,
+      "feasible": true,
+      "repair_reason": null,
+      "infeasibility_reason": null,
+      "baseline_cost": {
+        "total": 888480.3555368402,
+        "fixed": 179799.6677,
+        "expected_fuel": 708680.6878368402
+      },
+      "costs": {
+        "total": 886428.2527211773,
+        "fixed": 177969.8707,
+        "expected_fuel": 708458.3820211773
+      },
+      "cost_change": {
+        "total": -2052.10281566286,
+        "fixed": -1829.7969999999914,
+        "expected_fuel": -222.30581566283945
+      },
+      "refreshed_incumbent": false
+    }
+  ]
+}

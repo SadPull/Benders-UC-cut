@@ -1,0 +1,11 @@
+{
+  "agent_id": "/root/c17_call1",
+  "actual_turn_completed": true,
+  "status": "completed",
+  "evidence_source": "desktop collaboration tool notification observed by coordinator",
+  "message": "已写入 4 个候选方案至 C-17/calls/001/candidates.json。",
+  "finished_at": 1791108735.577103,
+  "usage": null,
+  "late_or_closed": false,
+  "receipt_published": true
+}

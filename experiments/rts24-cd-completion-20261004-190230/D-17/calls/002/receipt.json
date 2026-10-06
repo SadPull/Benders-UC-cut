@@ -1,0 +1,14 @@
+{
+  "run_id": "a898374fce724ac395f42ce4f4a48a36",
+  "call_id": "a898374fce724ac395f42ce4f4a48a36:2",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "max",
+  "input_sha256": {
+    "system.txt": "9dc1563cf48218eb52f505105b68ee1f726c0c07e173e364f194efbb7ef58f5e",
+    "user.txt": "e0abd81bf1119f1708764b1b9e6aaed9100d86b4db23b17e7034ab366487e6e2"
+  },
+  "agent_id": "/root/fill_d17_2",
+  "status": "completed",
+  "completed_at": 1791124896.752311,
+  "output_sha256": "400e22f91f962ab5a0b4561b4051661abad48b6ac0e4cde7ef2dcbaca72a395e"
+}
