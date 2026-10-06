@@ -18,6 +18,7 @@ from .block_master_model import continuous_relaxation, priced_blocks, partition_
 from .coordination import converged, cutting_plane, coordinate, ABSOLUTE_TOLERANCE
 from .quantum import solve_qubo
 from .subproblem import solve_scenario
+from .pure_sa import active_cuts, interval_fixed_binary
 
 
 def project(candidate, block):
@@ -34,6 +35,7 @@ def solve_paper(data, scenarios, config):
     variant = config.gap_experiment_variant
     pure_sa = variant is not None and variant.startswith("sa_")
     inexact = variant is not None and variant != "sa_strict"
+    compact = variant in ("sa_compact", "sa_full")
     retained = 4 if inexact else 16
     defer_recovery = config.defer_full_recovery or inexact
     integer_certifications = 0
@@ -194,6 +196,9 @@ def solve_paper(data, scenarios, config):
             status = "LLM_CALL_LIMIT"
             break
         blocks, _ = priced_blocks(uc, config.block_hours, multipliers)
+        if compact:
+            for block in blocks:
+                block.fixed = interval_fixed_binary(block.integer_rows, block.fixed)
         current_bounds = [block.objective_bounds(block.costs)[0]+block.constant for block in blocks]
         if inexact:
             current_bounds = [max(bound, block_dual_floor(block, initial_local_prices))
@@ -213,6 +218,7 @@ def solve_paper(data, scenarios, config):
                 break
             # All price-dependent cuts and costs are rebuilt for every multiplier.
             cuts, cache, pool = [], {}, []
+            previous_samples = []
             stalled_inner = 0
             analytic_lo, analytic_hi = block.objective_bounds(block.costs)
             lb, ub = current_bounds[b], float("inf")
@@ -292,7 +298,9 @@ def solve_paper(data, scenarios, config):
                 if config.quantum_candidates:
                     phase = time.perf_counter()
                     # Remove the constant for encoding, restore only in reported bounds.
-                    master = CompactQubo(block, block.costs, cuts, lb-block.constant,
+                    encoded_cuts = active_cuts(cuts, min(pool, key=lambda r:r["cost"])["point"]
+                                              if pool else None, previous_samples) if compact else cuts
+                    master = CompactQubo(block, block.costs, encoded_cuts, lb-block.constant,
                         min(ub-block.constant, analytic_hi), config)
                     build_seconds = time.perf_counter()-phase
                     timings["qubo"] += build_seconds
@@ -314,7 +322,8 @@ def solve_paper(data, scenarios, config):
                     sampling_seconds = time.perf_counter()-phase
                     timings["annealing"] += sampling_seconds
                     emit("sa_end", status="completed", outer=outer, block=b, inner=inner)
-                    decoded = [master.decode(bits)[0] for bits in binaries]
+                    previous_samples = [master.decode(bits) for bits in binaries]
+                    decoded = [x for x, _ in previous_samples]
                     row = dict(iteration=outer, outer=outer, block=b, inner=inner, bits=len(master.names),
                         commitment_bits=len(master.vars), objective_bits=len(master.weights),
                         decision_bits=len(master.vars)+len(master.weights),
@@ -324,6 +333,8 @@ def solve_paper(data, scenarios, config):
                         lower=master.lower, upper=master.upper, lp_lower=lp_value,
                         build_seconds=build_seconds, sampling_seconds=sampling_seconds, cuts=len(cuts),
                         elapsed_seconds=time.perf_counter()-started)
+                    if variant:
+                        row.update(active_cuts=len(encoded_cuts), fixed_binaries=len(block.fixed))
                     diagnostics["sampling"].append(row)
                     emit("sampling", **{k:v for k,v in row.items() if k != "elapsed_seconds"})
                     for x in decoded:
