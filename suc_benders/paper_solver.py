@@ -18,7 +18,7 @@ from .block_master_model import continuous_relaxation, priced_blocks, partition_
 from .coordination import converged, cutting_plane, coordinate, ABSOLUTE_TOLERANCE
 from .quantum import solve_qubo
 from .subproblem import solve_scenario
-from .pure_sa import active_cuts, interval_fixed_binary
+from .pure_sa import active_cuts, diverse_candidates, interval_fixed_binary
 
 
 def project(candidate, block):
@@ -324,6 +324,11 @@ def solve_paper(data, scenarios, config):
                     emit("sa_end", status="completed", outer=outer, block=b, inner=inner)
                     previous_samples = [master.decode(bits) for bits in binaries]
                     decoded = [x for x, _ in previous_samples]
+                    selected, rejections = set(range(len(decoded))), {}
+                    if variant == "sa_full":
+                        phase = time.perf_counter()
+                        selected, rejections = diverse_candidates(block, cuts, previous_samples, cache)
+                        timings["heuristic"] += time.perf_counter()-phase
                     row = dict(iteration=outer, outer=outer, block=b, inner=inner, bits=len(master.names),
                         commitment_bits=len(master.vars), objective_bits=len(master.weights),
                         decision_bits=len(master.vars)+len(master.weights),
@@ -334,16 +339,23 @@ def solve_paper(data, scenarios, config):
                         build_seconds=build_seconds, sampling_seconds=sampling_seconds, cuts=len(cuts),
                         elapsed_seconds=time.perf_counter()-started)
                     if variant:
-                        row.update(active_cuts=len(encoded_cuts), fixed_binaries=len(block.fixed))
+                        row.update(active_cuts=len(encoded_cuts), fixed_binaries=len(block.fixed),
+                                   dispatch_candidates=len(selected))
                     diagnostics["sampling"].append(row)
                     emit("sampling", **{k:v for k,v in row.items() if k != "elapsed_seconds"})
-                    for x in decoded:
+                    for sample_index, x in enumerate(decoded):
                         checks = block.discrete_checks(x)
                         proposal = dict(outer=outer, block=b, inner=inner, origin="sa",
                             proposal_id=f"sa:{sa_calls}:{len(diagnostics['proposals'])}",
                             raw_uvw=[int(x[k]) for k in block.bkeys], raw_discrete_feasible=checks["feasible"],
                             duplicate=tuple(x[k] for k in block.bkeys) in cache, accepted=checks["feasible"])
-                        local_evaluate(x, inner, "sa")
+                        if variant == "sa_full":
+                            proposal.update(accepted=sample_index in selected,
+                                            rejection=rejections.get(sample_index))
+                        if sample_index in selected:
+                            entry = local_evaluate(x, inner, "sa")
+                            if variant == "sa_full" and entry is None:
+                                proposal.update(accepted=False, rejection="deadline" if not available() else "not_evaluated")
                         result = cache.get(tuple(x[k] for k in block.bkeys))
                         candidate = recover([result["point"]], outer, "sa", result["sources"]) if result and result["feasible"] and not defer_recovery else None
                         proposal["full_recovery_deferred"] = defer_recovery

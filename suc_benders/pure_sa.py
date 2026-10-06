@@ -1,5 +1,8 @@
 """Fixed preprocessing and candidate policies for the pure-SA gap experiment."""
 from fractions import Fraction
+import math
+
+from .block_master_model import fixed_master_value
 
 
 def interval_fixed_binary(rows, initial):
@@ -56,3 +59,42 @@ def active_cuts(cuts, best=None, samples=(), limit=16):
     for item in sorted(indexed, key=violation, reverse=True):
         add(item)
     return [c for _, c in sorted(selected)]
+
+
+def diverse_candidates(block, cuts, samples, cached, limit=4):
+    """Select novel SA points without modifying their integer decisions."""
+    reasons, eligible, seen = {}, [], set(cached)
+    for i, (point, _) in enumerate(samples):
+        signature = tuple(point[k] for k in block.bkeys)
+        if not block.discrete_checks(point)["feasible"]:
+            reasons[i] = "hard_constraints"
+        elif any(c.value(point) > 1e-6 for c in cuts if not c.feasible):
+            reasons[i] = "known_feasibility_cut"
+        elif signature in seen:
+            reasons[i] = "duplicate"
+        else:
+            seen.add(signature)
+            score = fixed_master_value(block, cuts, point)
+            if score is None or not math.isfinite(score):
+                reasons[i] = "invalid_master_value"
+            else:
+                eligible.append((score, signature, i, point))
+    eligible.sort(key=lambda entry: entry[:3])
+    selected = eligible[:1]
+    free = [k for k in block.bkeys if k not in block.fixed]
+    distance = max(1, math.ceil(.05*len(free)))
+    for entry in eligible[1:]:
+        if len(selected) == limit:
+            break
+        if all(sum(entry[3][k] != other[3][k] for k in free) >= distance for other in selected):
+            selected.append(entry)
+    for entry in eligible:
+        if len(selected) == limit:
+            break
+        if entry[2] not in {item[2] for item in selected}:
+            selected.append(entry)
+    indices = {item[2] for item in selected}
+    for entry in eligible:
+        if entry[2] not in indices:
+            reasons[entry[2]] = "batch_limit"
+    return indices, reasons

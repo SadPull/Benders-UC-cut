@@ -3,10 +3,11 @@ import time
 import unittest
 import itertools
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from suc_benders.block_master_model import block_dual_floor, continuous_relaxation, priced_blocks
 from suc_benders.paper_model import Cut, IndexedUC, Row, key
-from suc_benders.pure_sa import active_cuts, interval_fixed_binary
+from suc_benders.pure_sa import active_cuts, diverse_candidates, interval_fixed_binary
 from suc_benders.pure_sa_gap_experiment import PHASE_SECONDS, TOTAL_SECONDS, configuration, definitions
 from suc_benders.solver import BendersConfig, solve_benders
 from suc_benders.validation import validate_schedule
@@ -145,6 +146,41 @@ class PureSACompressionTests(unittest.TestCase):
         self.assertTrue(cuts)
         self.assertTrue(all(set(r["cut"]) == {"a", "c", "feasible"} for r in cuts))
         self.assertEqual(result.diagnostics["online_integer_master_calls"], 0)
+
+
+class PureSADiversityTests(unittest.TestCase):
+    def test_selection_checks_full_cuts_deduplicates_and_prefers_diversity(self):
+        keys = [key("u", i, 0) for i in range(40)]
+        base = dict.fromkeys(keys, 0)
+        near = {**base, keys[0]: 1}
+        diverse = {**base, keys[1]: 1, keys[2]: 1}
+        prohibited = {**base, keys[3]: 1}
+        block = SimpleNamespace(bkeys=keys, fixed={}, constant=0., costs=dict.fromkeys(keys, 1.),
+            discrete_checks=lambda p: {"feasible": True}, objective_bounds=lambda *a: (0., 100.))
+        cuts = [Cut({keys[3]: 1.}, -.5, False)]
+        samples = [(base, 0.), (near, 0.), (diverse, 0.), (prohibited, 0.), (base, 0.)]
+        indices, reasons = diverse_candidates(block, cuts, samples, {}, limit=2)
+        self.assertEqual(indices, {0, 2})
+        self.assertEqual(reasons[3], "known_feasibility_cut")
+        self.assertEqual(reasons[4], "duplicate")
+        self.assertEqual(reasons[1], "batch_limit")
+        indices, reasons = diverse_candidates(block, cuts, samples, {tuple(base[k] for k in keys)}, limit=4)
+        self.assertNotIn(0, indices)
+        self.assertEqual(reasons[0], "duplicate")
+        self.assertLessEqual(len(indices), 4)
+
+    def test_full_variant_preserves_purity_and_records_rejected_duplicates(self):
+        data, scenarios = tiny(3)
+        emitted = []
+        with patch("suc_benders.paper_solver.certify_master", side_effect=AssertionError("integer certificate")):
+            result = enumerated_run(data, scenarios, BendersConfig(block_hours=1, max_iterations=2,
+                gap_experiment_variant="sa_full", event_sink=emitted.append))
+        validate_schedule(data, scenarios, result)
+        self.assertEqual(result.diagnostics["online_integer_master_calls"], 0)
+        self.assertTrue(all(r["dispatch_candidates"] <= 4 for r in emitted if r["kind"] == "sampling"))
+        self.assertTrue(any(r.get("rejection") == "duplicate" for r in emitted if r["kind"] == "proposal"))
+        for outer in range(1, 3):
+            self.assertLessEqual(sum(r["iteration"] == outer for r in emitted if r["kind"] == "evaluation"), 2)
 
 
 if __name__ == "__main__":
