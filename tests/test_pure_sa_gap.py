@@ -3,10 +3,12 @@ import time
 import unittest
 from unittest.mock import patch
 
+from suc_benders.block_master_model import block_dual_floor, continuous_relaxation, priced_blocks
+from suc_benders.paper_model import IndexedUC
 from suc_benders.pure_sa_gap_experiment import PHASE_SECONDS, TOTAL_SECONDS, configuration, definitions
 from suc_benders.solver import BendersConfig, solve_benders
 from suc_benders.validation import validate_schedule
-from tests.test_temporal_solver import enumerated_run, tiny
+from tests.test_temporal_solver import EnumeratedQubo, enumerate_points, enumerated_run, tiny
 
 
 class PureSAIsolationTests(unittest.TestCase):
@@ -54,6 +56,52 @@ class PureSAIsolationTests(unittest.TestCase):
         final = [r for r in runs if r["stage"] == "confirmation"]
         self.assertEqual([r["seed"] for r in final], [7, 100007, 200007])
         self.assertTrue(all(r["seconds"] == 1200 and r["audit_seconds"] == 600 for r in final))
+
+
+class PureSAFlowTests(unittest.TestCase):
+    def test_analytic_dual_floors_under_price_changes_by_enumeration(self):
+        data, scenarios = tiny(3)
+        uc = IndexedUC(data, scenarios)
+        relaxation = continuous_relaxation(uc, time.perf_counter()+30)
+        initial = relaxation["multipliers"]
+        blocks, cross = priced_blocks(uc, 1, initial)
+        self.assertGreaterEqual(sum(block_dual_floor(b, initial) for b in blocks),
+                                relaxation["lower_bound"]-1e-3)
+        changed = list(initial)
+        for i in cross:
+            changed[i] = -3. if uc.rows[i].equality else 2.
+        for prices in (initial, changed):
+            blocks, _ = priced_blocks(uc, 1, prices)
+            for block in blocks:
+                candidates = [block.dispatch(x, block.costs, time.perf_counter()+30)
+                              for x in enumerate_points(block)]
+                optimum = min(r["cost"]+block.constant for r in candidates if r and r["feasible"])
+                floor = block_dual_floor(block, initial)
+                self.assertTrue(math.isfinite(floor))
+                self.assertLessEqual(floor, optimum+1e-5)
+
+    def test_inexact_round_visits_all_blocks_without_false_inner_convergence(self):
+        data, scenarios = tiny(3)
+        emitted = []
+        with patch("suc_benders.paper_solver.CompactQubo", EnumeratedQubo), patch(
+                "suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
+                "suc_benders.paper_solver.converged", return_value=False), patch(
+                "suc_benders.paper_solver.certify_master", side_effect=AssertionError("integer certification")):
+            result = solve_benders(data, scenarios, BendersConfig(block_hours=1, max_iterations=2,
+                max_inner_iterations=200, gap_experiment_variant="sa_flow", event_sink=emitted.append))
+        validate_schedule(data, scenarios, result)
+        self.assertEqual(result.diagnostics["sa_calls"], 2*3*8)
+        self.assertEqual(len(result.diagnostics["blocks"]), 6)
+        self.assertTrue(all(not b["converged"] for b in result.diagnostics["blocks"]))
+        self.assertEqual(len([r for r in emitted if r["kind"] == "multiplier_update"]), 2)
+        approximate = [r for r in emitted if r["kind"] == "approximate_outer"]
+        self.assertEqual(len(approximate), 2)
+        self.assertTrue(all(not r["all_inner_converged"] for r in approximate))
+        for outer in (1, 2):
+            self.assertLessEqual(sum(r["iteration"] == outer for r in
+                                     emitted if r["kind"] == "evaluation"), 2)
+        self.assertTrue(all("candidate_origins" in r for r in emitted if r["kind"] == "evaluation"))
+        self.assertEqual(result.diagnostics["online_integer_master_calls"], 0)
 
 
 if __name__ == "__main__":

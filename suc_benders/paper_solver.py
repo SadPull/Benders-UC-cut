@@ -14,7 +14,7 @@ from .context import LLMContextInput, CandidateEvaluation, build_llm_context
 from .llm import ask_llm_for_candidates
 from .rule_advisor import rule_candidates
 from .paper_model import IndexedUC, CompactQubo, key
-from .block_master_model import continuous_relaxation, priced_blocks, partition_rows, certify_master, solve_master, point_record
+from .block_master_model import continuous_relaxation, priced_blocks, partition_rows, certify_master, solve_master, point_record, block_dual_floor
 from .coordination import converged, cutting_plane, coordinate, ABSOLUTE_TOLERANCE
 from .quantum import solve_qubo
 from .subproblem import solve_scenario
@@ -33,6 +33,9 @@ def solve_paper(data, scenarios, config):
     native_enabled = config.native_fallback_patience is not None
     variant = config.gap_experiment_variant
     pure_sa = variant is not None and variant.startswith("sa_")
+    inexact = variant is not None and variant != "sa_strict"
+    retained = 4 if inexact else 16
+    defer_recovery = config.defer_full_recovery or inexact
     integer_certifications = 0
     native_calls, best_sources = 0, set()
     uc = IndexedUC(data, scenarios)
@@ -142,13 +145,18 @@ def solve_paper(data, scenarios, config):
         candidate = repair_commitment(data, scenarios, u)
         timings["repair"] += time.perf_counter()-phase
         if candidate is not None:
-            if native_enabled:
+            if native_enabled or variant:
                 sources = set(sources or [source])
                 covered = {k for point in points for k in point if k[0] == "u"}
                 if len(covered) < data.n_units*data.horizon:
                     sources.update(best_sources)
                 if "native_master" in sources:
                     source = "mixed_native" if "sa" in sources else "native_master"
+                elif variant:
+                    changed = bool(np.any(candidate.u != u))
+                    if changed:
+                        sources.add("deterministic_repair")
+                    source = ("sa_repaired" if changed else "sa") if "sa" in sources else "initialization"
             candidate.source = source
         evaluate(candidate, outer, sources)
         return candidate
@@ -160,6 +168,9 @@ def solve_paper(data, scenarios, config):
             relaxation = continuous_relaxation(uc, deadline)
             timings["relaxation"] += time.perf_counter()-phase
             multipliers = relaxation["multipliers"]
+            initial_local_prices = list(multipliers)
+            if variant:
+                emit("initial_dual_prices", multipliers=initial_local_prices)
             # The relaxed optimum bounds the integer primal even if no block finishes.
             reliable_lower = relaxation["lower_bound"] - ABSOLUTE_TOLERANCE
             diagnostics["initialization"] = {k: relaxation[k] for k in ("objective", "lower_bound", "seconds")}
@@ -184,6 +195,9 @@ def solve_paper(data, scenarios, config):
             break
         blocks, _ = priced_blocks(uc, config.block_hours, multipliers)
         current_bounds = [block.objective_bounds(block.costs)[0]+block.constant for block in blocks]
+        if inexact:
+            current_bounds = [max(bound, block_dual_floor(block, initial_local_prices))
+                              for block, bound in zip(blocks, current_bounds)]
         if variant:
             emit("multiplier_epoch", outer=outer, multipliers=list(multipliers),
                  blocks=[dict(block=j, times=list(block.times), constant=block.constant,
@@ -201,7 +215,7 @@ def solve_paper(data, scenarios, config):
             cuts, cache, pool = [], {}, []
             stalled_inner = 0
             analytic_lo, analytic_hi = block.objective_bounds(block.costs)
-            lb, ub = analytic_lo + block.constant, float("inf")
+            lb, ub = current_bounds[b], float("inf")
             block_record = dict(outer=outer, block=b, times=list(block.times), constant=block.constant,
                                 lower=lb, upper=ub, converged=False, inner_iterations=0,
                                 certification_seconds=0.)
@@ -248,7 +262,8 @@ def solve_paper(data, scenarios, config):
             for point in previous_points[b]:
                 local_evaluate(point, 0, "previous_candidate",
                                previous_sources[b].get(tuple(point[k] for k in block.bkeys)))
-            for inner in range(1, config.max_inner_iterations+1):
+            inner_limit = min(8, config.max_inner_iterations) if inexact else config.max_inner_iterations
+            for inner in range(1, inner_limit+1):
                 if not available():
                     break
                 if config.advisor_only and config.llm.max_calls is not None and llm_calls >= config.llm.max_calls:
@@ -265,6 +280,10 @@ def solve_paper(data, scenarios, config):
                     failure_message = str(exc)
                 timings["relaxation"] += time.perf_counter()-phase
                 if lp_value is None:
+                    if variant and not available():
+                        emit("computation_incomplete", outer=outer, block=b, inner=inner,
+                             reason="continuous_relaxation_deadline")
+                        break
                     status, failure_stage = "RELAXATION_FAILED", f"outer={outer}/block={b}/inner={inner}/relaxation"
                     break
                 lb = max(lb, lp_value + block.constant - ABSOLUTE_TOLERANCE)
@@ -315,9 +334,9 @@ def solve_paper(data, scenarios, config):
                             duplicate=tuple(x[k] for k in block.bkeys) in cache, accepted=checks["feasible"])
                         local_evaluate(x, inner, "sa")
                         result = cache.get(tuple(x[k] for k in block.bkeys))
-                        candidate = recover([result["point"]], outer, "sa", result["sources"]) if result and result["feasible"] and not config.defer_full_recovery else None
-                        proposal["full_recovery_deferred"] = config.defer_full_recovery
-                        proposal.update(repaired_discrete_feasible=None if config.defer_full_recovery else candidate is not None,
+                        candidate = recover([result["point"]], outer, "sa", result["sources"]) if result and result["feasible"] and not defer_recovery else None
+                        proposal["full_recovery_deferred"] = defer_recovery
+                        proposal.update(repaired_discrete_feasible=None if defer_recovery else candidate is not None,
                             commitment_id=commitment_hash(candidate) if candidate else None,
                             hamming_u=sum(int(candidate.u[i,t]) != x[key("u",i,t)]
                                           for i in range(data.n_units) for t in block.times) if candidate else None)
@@ -325,7 +344,7 @@ def solve_paper(data, scenarios, config):
                         emit("proposal", **proposal)
                 # Full-horizon validation is independent of local priced evaluation.
                 base_for_llm = []
-                for entry in ([] if config.defer_full_recovery else sorted(pool, key=lambda r: r["cost"])[:16]):
+                for entry in ([] if defer_recovery else sorted(pool, key=lambda r: r["cost"])[:16]):
                     candidate = recover([entry["point"]], outer, "pool" if config.advisor_only else "sa", entry["sources"])
                     if candidate is not None:
                         base_for_llm.append(candidate)
@@ -424,7 +443,7 @@ def solve_paper(data, scenarios, config):
                                 native_record["duplicate"] = signature in cache
                                 entry = local_evaluate(point, inner, "native_master")
                                 native_record["accepted"] = entry is not None
-                                if entry and entry["feasible"] and not config.defer_full_recovery:
+                                if entry and entry["feasible"] and not defer_recovery:
                                     recover([entry["point"]], outer, "native_master", entry["sources"])
                         except Exception as exc:
                             native_record["rejection"] = type(exc).__name__
@@ -484,20 +503,26 @@ def solve_paper(data, scenarios, config):
                     break
             block_record.update(lower=lb, upper=ub)
             pool.sort(key=lambda r: r["cost"])
-            if config.defer_full_recovery:
+            if defer_recovery and not inexact:
                 emit("deferred_recovery_start", outer=outer, block=b, candidates=min(16, len(pool)))
                 for entry in pool[:16]:
                     if not available():
                         break
                     recover([entry["point"]], outer, "sa", entry["sources"])
                 emit("deferred_recovery_end", outer=outer, block=b)
-            previous_points[b] = [{k:r["point"][k] for k in block.bkeys} for r in pool[:16]]
-            previous_sources[b] = {tuple(r["point"][k] for k in block.bkeys): r["sources"] for r in pool[:16]}
-            if not block_record["converged"] or not available():
+            previous_points[b] = [{k:r["point"][k] for k in block.bkeys} for r in pool[:retained]]
+            previous_sources[b] = {tuple(r["point"][k] for k in block.bkeys): r["sources"] for r in pool[:retained]}
+            if variant:
+                emit("block_bound", outer=outer, block=b, inner=block_record["inner_iterations"],
+                     lower=lb, upper=ub, converged=block_record["converged"])
+            if failure_stage or not available() or (not block_record["converged"] and not inexact):
                 if status == "MAX_ITERATIONS" and available():
                     status = "INNER_NOT_CONVERGED"
                 break
-            pools.append(pool[:16])
+            if not pool:
+                status, failure_stage = "LOCAL_POOL_EMPTY", f"outer={outer}/block={b}/local_pool"
+                break
+            pools.append(pool[:retained])
             lower_bounds.append(lb)
             upper_bounds.append(ub)
             outer_record["completed_blocks"] = len(pools)
@@ -505,7 +530,7 @@ def solve_paper(data, scenarios, config):
             break
         reliable_lower = max(reliable_lower, sum(lower_bounds))
         outer_record["dual_interval"] = [sum(lower_bounds), sum(upper_bounds)]
-        for rank in range(min(16, max(map(len, pools)))):
+        for rank in range(0 if inexact else min(16, max(map(len, pools)))):
             entries = [pool[min(rank, len(pool)-1)] for pool in pools]
             recover([entry["point"] for entry in entries], outer, "stitched",
                     set().union(*(entry["sources"] for entry in entries)))
@@ -522,6 +547,18 @@ def solve_paper(data, scenarios, config):
         except Exception as exc:
             status, failure_stage, failure_message = "COORDINATION_FAILED", f"outer={outer}/coordination", str(exc)
             break
+        if inexact:
+            # Coordination uses feasible upper planes even when inner solves are inexact.
+            emit("approximate_outer", outer=outer, lower=reliable_lower,
+                 upper=coordination_upper, all_inner_converged=all(
+                     r["converged"] for r in diagnostics["blocks"] if r["outer"] == outer))
+            for rank in range(min(2, max(map(len, pools)))):
+                if not available():
+                    break
+                entries = [pool[min(rank, len(pool)-1)] for pool in pools]
+                recover([entry["point"] for entry in entries], outer, "stitched",
+                        set().union(*(entry["sources"] for entry in entries)))
+            coordination_upper = min(coordination_upper, incumbent)
         done = converged(reliable_lower, coordination_upper, config.convergence_tolerance, reference=reliable_lower)
         outer_record.update(reliable_lower=reliable_lower, coordination_upper=coordination_upper,
                             converged=done, elapsed_seconds=time.perf_counter()-started)
@@ -537,6 +574,9 @@ def solve_paper(data, scenarios, config):
             status = "DUAL_CONVERGED"
             break
         multipliers = coordination["multipliers"]
+        if variant:
+            emit("multiplier_update", outer=outer, next_outer=outer+1,
+                 max_abs_price=max(map(abs, multipliers), default=0.))
     status = resource_status() or status
     runtime = time.perf_counter()-started
     diagnostics.update(evaluation_count=len(evaluated), local_evaluation_count=total_local,

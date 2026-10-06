@@ -133,6 +133,29 @@ def continuous_relaxation(indexed, deadline):
     return result
 
 
+def block_dual_floor(block, local_prices):
+    """A box-minimized dual bound, with current cross prices and fixed local prices."""
+    linear = dict(block.costs)
+    value = block.constant
+    for i in block.row_ids:
+        row, price = block.uc.rows[i], float(local_prices[i])
+        if not math.isfinite(price) or (not row.equality and price < -TOL):
+            raise ValueError("invalid local dual price")
+        if not row.equality:
+            price = max(0., price)
+        value += price*row.c
+        for k, coefficient in row.a.items():
+            linear[k] += price*coefficient
+    for k, coefficient in linear.items():
+        lo, hi = block.uc.bounds[k]
+        if k in block.fixed:
+            lo = hi = block.fixed[k]
+        quadratic = block.uc.quadratic.get(k, 0.)
+        minimizer = min(hi, max(lo, -coefficient/(2*quadratic))) if quadratic else lo if coefficient >= 0 else hi
+        value += coefficient*minimizer + quadratic*minimizer**2
+    return value-1e-5
+
+
 def solve_master(block, cuts, deadline, *, integral=True, bound_only=False, max_seconds=60.):
     """Native master oracle; constant restored, but never used as an SA start."""
     gp = require_gurobi()
