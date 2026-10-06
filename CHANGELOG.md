@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.20.0 — 2026-10-06 (prerelease)
+
+- Add optional native candidate fallback and the audited two-hour RTS-24 gap-closure
+  protocol; retain default behavior and provenance throughout dispatch and recovery.
+- Add four pure-SA experiment variants, inexact outer rounds, same-price analytic
+  floors, exact binary propagation, active-cut encoding and diverse candidate screening.
+- Isolate pure-SA search from online integer masters. Certify only saved cuts in a
+  separate bound-only process, including deadline snapshots and report reconstruction.
+- Preserve both executed source commits and publish immutable full experiment ZIPs
+  as Release assets; keep curated reports, inputs, references and schedules in Git.
+- Pass 184 regression tests. Pure-SA search integer-master calls are zero. All four
+  32-unit screening configurations fail numerical audits, so all 11 subsequent
+  ablation/comparison/confirmation slots are skipped. The <=1% goal is not achieved.
+- Valid independent classical diagnostics reach 4.495790% (3h) and 4.810266% (5h).
+  Numerical failures and timeouts do not establish an unreachable decomposition ceiling.
+- Record 3410.28s formal execution/archiving and 3746.37s including supplementary review,
+  below the 14400s total budget; review extends the 300s audit allowance by 100.23s.
+
 ## v0.19.1 — 2026-10-05
 
 - Add the fixed SA scale/seed diagnostic: 24 frozen QUBOs, 144 sampling trials and

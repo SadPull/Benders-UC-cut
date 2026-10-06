@@ -1,0 +1,24 @@
+test_active_cuts_deduplicate_only_for_encoding_and_include_violations (tests.test_pure_sa_gap.PureSACompressionTests) ... ok
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+test_compact_search_keeps_complete_unquantized_cut_records (tests.test_pure_sa_gap.PureSACompressionTests) ... ok
+test_long_row_interval_propagation_preserves_all_binary_solutions (tests.test_pure_sa_gap.PureSACompressionTests) ... ok
+test_full_variant_preserves_purity_and_records_rejected_duplicates (tests.test_pure_sa_gap.PureSADiversityTests) ... ok
+test_selection_checks_full_cuts_deduplicates_and_prefers_diversity (tests.test_pure_sa_gap.PureSADiversityTests) ... ok
+test_analytic_dual_floors_under_price_changes_by_enumeration (tests.test_pure_sa_gap.PureSAFlowTests) ... ok
+test_inexact_round_visits_all_blocks_without_false_inner_convergence (tests.test_pure_sa_gap.PureSAFlowTests) ... ok
+test_fixed_matrix_and_budget (tests.test_pure_sa_gap.PureSAIsolationTests) ... ok
+test_pure_search_never_calls_integer_oracles (tests.test_pure_sa_gap.PureSAIsolationTests) ... ok
+test_pure_variant_rejects_native_candidate_configuration (tests.test_pure_sa_gap.PureSAIsolationTests) ... ok
+test_committed_snapshot_ignores_late_and_uncommitted_data (tests.test_pure_sa_gap.PureSAProtocolTests) ... ok
+test_late_integer_bound_is_discarded (tests.test_pure_sa_gap.PureSAProtocolTests) ... ok
+test_missing_integer_bound_retains_only_valid_continuous_floors (tests.test_pure_sa_gap.PureSAProtocolTests) ... ok
+test_offline_rebuild_matches_report_and_never_reads_reference_in_search (tests.test_pure_sa_gap.PureSAProtocolTests) ... ok
+test_offline_unions_only_identical_effective_prices (tests.test_pure_sa_gap.PureSAProtocolTests) ... ok
+test_prespecified_selection_and_unknown_dual_ceiling (tests.test_pure_sa_gap.PureSAProtocolTests) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 5.855s
+
+OK

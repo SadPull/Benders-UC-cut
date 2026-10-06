@@ -1,5 +1,23 @@
 # RTS-24 SUC：SA + LLM Benders
 
+## 纯 SA 主问题与 Gap v3 实验
+
+`v0.20.0` 为实验预发布，主目标尚未达成。新增纯 SA 主问题搜索与独立离线整数认证，
+默认关闭新协议；保留原算法和此前实验。详见 [发布与归档说明](docs/releases/v0.20.0.md)
+和 [冻结实验协议](docs/pure-sa-gap-v3-protocol.md)。
+
+```powershell
+python -m suc_benders.pure_sa_gap_experiment --output-dir results/pure-sa-gap-new --previous-dir <已解压旧实验目录>/revised
+python -m suc_benders.pure_sa_gap_experiment --output-dir <已解压完整v3实验目录> --report-only
+```
+
+四种随机 SUC 分块筛查均被数值审计排除，因此后续消融与三种子 1200 秒确认未运行。
+纯 SA 在线整数主问题调用为零；有效经典诊断最好 Gap 为 4.496%，不能宣称达到论文相近量级。
+[结果解读](experiments/rts24-pure-sa-gap-v3-20261006.findings.md)记录乘子尺度、采样过滤及审计偏差。
+
+完整原始包、复核包与 SHA256 见 [GitHub v0.20.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.20.0)。
+Git 展示目录是精简报告；重建与复现实验应使用 Release 中的完整冻结包。
+
 ## Gap 补足实验
 
 `python -m suc_benders.gap_closure_experiment --output-dir results/gap-closure-new --historical-dir <原始规模确认目录>`
@@ -17,7 +35,7 @@
 认证下界；认证整数方案不会进入候选、割生成、SA 初始化或全天方案恢复。
 LLM／规则建议可选，全天候选仍按原成本调度并通过物理校验。
 
-当前版本为 `v0.19.1`，变更见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本为 `v0.20.0`（实验预发布），变更见 [CHANGELOG.md](CHANGELOG.md)。
 [项目阅读教材](docs/project-textbook.md)保留 `bae3200` 历史源码说明，
 新版入口见本文；已有归档、冻结源码和校验和保持原样。
 

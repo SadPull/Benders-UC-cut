@@ -1,0 +1,45 @@
+Set parameter Username
+Set parameter LicenseID to value 2822179
+Academic license - for non-commercial use only - expires 2027-05-14
+test_analytic_dual_floors_under_price_changes_by_enumeration (tests.test_pure_sa_gap.PureSAFlowTests) ... ok
+test_inexact_round_visits_all_blocks_without_false_inner_convergence (tests.test_pure_sa_gap.PureSAFlowTests) ... ok
+test_fixed_matrix_and_budget (tests.test_pure_sa_gap.PureSAIsolationTests) ... ok
+test_pure_search_never_calls_integer_oracles (tests.test_pure_sa_gap.PureSAIsolationTests) ... ok
+test_pure_variant_rejects_native_candidate_configuration (tests.test_pure_sa_gap.PureSAIsolationTests) ... ok
+test_advisor_call_numbers_increase_across_blocks_and_outer_iterations (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_complete_nested_flow_with_enumerated_sampling (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_constant_is_removed_from_qubo_and_restored_in_certificate (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_duplicate_does_not_converge_and_no_coordination_on_inner_limit (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_equality_multiplier_is_free (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_five_hour_blocks_cover_full_day_without_resetting_boundaries (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_five_hour_partition_with_four_hour_tail_matches_full_optimum (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_initialization_and_coordination_failures_preserve_stage (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_integer_primal_outputs_cannot_enter_search (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_llm_only_quota_is_resource_stop_even_when_candidates_are_optimal (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_missing_certification_bound_reports_stage (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_partitions_one_two_three_hours_and_short_tail_recombine (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_price_change_rebuilds_cuts_and_redispatches_old_candidates (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_priced_bounds_planes_and_constants_by_enumeration (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_raw_uvw_not_repaired_inside_block (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_retired_options_and_infinite_outer_are_rejected (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_timeout_cancellation_and_evaluation_limit_are_not_convergence (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_tolerance_boundary_and_inconsistent_bounds (tests.test_temporal_solver.TemporalSolverTests) ... ok
+test_checkpoint_rejects_late_values_and_incomplete_evaluations (tests.test_gap_closure.GapClosureProtocolTests) ... ok
+test_fixed_matrix_budget_and_arm_configuration (tests.test_gap_closure.GapClosureProtocolTests) ... ok
+test_reference_requires_complete_on_time_certification_and_physical_validation (tests.test_gap_closure.GapClosureProtocolTests) ... ok
+test_report_rebuild_and_late_invalid_bound_handling (tests.test_gap_closure.GapClosureProtocolTests) ... ok
+test_selection_uses_certified_upper_and_never_treats_timeout_as_ceiling (tests.test_gap_closure.GapClosureProtocolTests) ... ok
+test_worker_does_not_read_reference_data (tests.test_gap_closure.GapClosureProtocolTests) ... ok
+test_deferred_recovery_preserves_bounds_and_runs_after_inner_work (tests.test_gap_closure.NativeFallbackTests) ... ok
+test_disabled_path_never_requests_classical_point (tests.test_gap_closure.NativeFallbackTests) ... ok
+test_local_improvement_resets_three_round_stagnation (tests.test_gap_closure.NativeFallbackTests) ... ok
+test_missing_native_point_is_recorded_without_manufacturing_progress (tests.test_gap_closure.NativeFallbackTests) ... ok
+test_native_only_uses_real_dispatch_and_certification_without_sa (tests.test_gap_closure.NativeFallbackTests) ... ok
+test_patience_validation_rejects_zero_negative_bool_and_float (tests.test_gap_closure.NativeFallbackTests) ... ok
+test_provenance_survives_price_changes_and_stitching (tests.test_gap_closure.NativeFallbackTests) ... ok
+test_third_stalled_iteration_and_reset_after_attempt (tests.test_gap_closure.NativeFallbackTests) ... ok
+
+----------------------------------------------------------------------
+Ran 37 tests in 1.117s
+
+OK

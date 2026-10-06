@@ -1,0 +1,40 @@
+{
+  "version": "v0.20.0",
+  "status": "prerelease_research_diagnostics",
+  "release_url": "https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.20.0",
+  "primary_goal_achieved": false,
+  "source_branch": "codex/pure-sa-gap-v3",
+  "experiments": [
+    {
+      "name": "rts24-gap-closure-20261006",
+      "source_commit": "1c16bdd01213c56f8925255753794a08d3fa10ee",
+      "source_tag": "gap-closure-source-20261006-1c16bdd",
+      "goal_achieved": false
+    },
+    {
+      "name": "rts24-pure-sa-gap-v3-20261006",
+      "source_commit": "6f5b0d58bd5d860757d0d580aa8a3e42f1bfd297",
+      "source_tag": "pure-sa-gap-v3-source-20261006-154410",
+      "goal_achieved": false,
+      "stop_reason": "no_eligible_block_length"
+    }
+  ],
+  "assets": [
+    {
+      "name": "rts24-gap-closure-20261006.zip",
+      "bytes": 11350385,
+      "sha256": "ee8d3458e483e42d9bd0f448ab1e78f5109dffb6b59b91bda5300221449a3896"
+    },
+    {
+      "name": "rts24-pure-sa-gap-v3-20261006.zip",
+      "bytes": 100917783,
+      "sha256": "fe4e03b7e3bbb32145476f9349435209d92072c07dc6041980951dfa8866171f"
+    },
+    {
+      "name": "rts24-pure-sa-gap-v3-20261006-review.zip",
+      "bytes": 49791,
+      "sha256": "a84d13d564d4cdc09bfd47e39e856bd616a7ef149a9648d12d80499c12d553b4"
+    }
+  ],
+  "distribution": "This Git tree is curated. Release ZIPs contain complete immutable original records; extract each archive according to its documented layout."
+}

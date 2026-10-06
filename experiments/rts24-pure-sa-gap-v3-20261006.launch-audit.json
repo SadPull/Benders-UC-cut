@@ -1,0 +1,11 @@
+{
+  "output_dir": "C:\\Users\\12433\\Desktop\\LLM-benders-SUC\\experiments\\rts24-pure-sa-gap-v3-20261006",
+  "started_clock": 24750.1810155,
+  "budget_seconds": 14400,
+  "commit": "6f5b0d58bd5d860757d0d580aa8a3e42f1bfd297",
+  "status": "completed",
+  "finished_clock": 28160.5420452,
+  "wall_seconds": 3410.3610297000014,
+  "exit_code": 0,
+  "within_total_budget": true
+}
