@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.19.1 — 2026-10-05
+
+- Add the fixed SA scale/seed diagnostic: 24 frozen QUBOs, 144 sampling trials and
+  18 full runs across RTS-derived systems, with isolated references and retained failures.
+- Retry transient Windows state-file read/write conflicts without losing deadlines;
+  archive the complete confirmation run and preserve the earlier interrupted evidence.
+- Support explicit 5-hour blocks with a short final block; retain the 3-hour production default.
+- Add the fixed three-unit, 24-hour comparison of 1/3/5-hour blocks using three varying
+  seeds, 90-second run budgets and 60/20 inner/outer limits. Save per-block bounds,
+  separate dual/cost results, convergence plots and a report-only reconstruction command.
+- Complete all nine new runs in 124.13 seconds. Dual convergence counts are 3/3, 2/3
+  and 2/3; reference-optimal full-day cost counts are 3/3, 2/3 and 3/3. The 5-hour
+  seed-200007 run reaches optimal cost but stops at the last block's inner iteration limit.
+- Validate 154 regression tests and five report tests. All nine returned schedules pass
+  physical/cost checks; preserve 105 raw archive files with decompressed-byte SHA256 validation.
+- Larger 10/32-unit cases still make no improvement over initialization. Three seeds
+  support screening only; dual convergence and cost gaps remain distinct metrics.
+
 ## v0.19.0 — 2026-10-05
 
 - Default to 3-hour temporal decomposition (1/2/3 supported, including a short tail),

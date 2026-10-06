@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--scenario-file")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--rounds", type=int, default=20, help="Maximum outer iterations")
-    parser.add_argument("--block-hours", type=int, choices=(1, 2, 3), default=3)
+    parser.add_argument("--block-hours", type=int, choices=(1, 2, 3, 5), default=3)
     parser.add_argument("--max-inner-iterations", type=int, default=20)
     parser.add_argument("--convergence-tolerance", type=float, default=1e-4)
     parser.add_argument("--output-dir", required=True)

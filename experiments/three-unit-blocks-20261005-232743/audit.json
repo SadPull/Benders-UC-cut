@@ -1,0 +1,54 @@
+{
+  "passed": true,
+  "all_nine_slots_recorded": true,
+  "all_returned_schedules_valid": true,
+  "full_results_saved": 9,
+  "source_and_input_hashes_valid": true,
+  "block_lengths": {
+    "1": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "3": [
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3
+    ],
+    "5": [
+      5,
+      5,
+      5,
+      5,
+      4
+    ]
+  },
+  "max_residual_mw": 5.684341886080802e-14,
+  "baseline_reproduced": true
+}

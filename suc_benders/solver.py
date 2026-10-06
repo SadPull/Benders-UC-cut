@@ -130,8 +130,8 @@ def solve_benders(
     if any(not isinstance(v, int) or isinstance(v, bool) or v < 1
            for v in (config.max_iterations, config.max_inner_iterations)):
         raise ValueError("max_iterations and max_inner_iterations must be positive finite integers")
-    if type(config.block_hours) is not int or config.block_hours not in (1, 2, 3):
-        raise ValueError("block_hours must be 1, 2 or 3")
+    if type(config.block_hours) is not int or config.block_hours not in (1, 2, 3, 5):
+        raise ValueError("block_hours must be 1, 2, 3 or 5")
     if not math.isfinite(config.convergence_tolerance) or config.convergence_tolerance <= 0:
         raise ValueError("convergence_tolerance must be positive and finite")
     if config.rule_advisor and (config.llm.enabled or config.advisor_only):
