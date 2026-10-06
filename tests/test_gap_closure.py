@@ -45,6 +45,20 @@ class NativeFallbackTests(unittest.TestCase):
         self.assertGreater(result.diagnostics["native_calls"], 0)
         self.assertLessEqual(result.diagnostics["reliable_lower"], result.objective+1e-5)
 
+    def test_deferred_recovery_preserves_bounds_and_runs_after_inner_work(self):
+        data, scenarios = tiny()
+        emitted = []
+        result = solve_benders(data, scenarios, BendersConfig(block_hours=1, quantum_candidates=False,
+            native_fallback_patience=1, defer_full_recovery=True, event_sink=emitted.append))
+        self.assertEqual(result.status, "DUAL_CONVERGED")
+        from suc_benders.validation import validate_schedule
+        validate_schedule(data, scenarios, result)
+        for start in [r for r in emitted if r['kind'] == 'deferred_recovery_start']:
+            previous = [r for r in emitted if r['kind'] == 'inner_iteration' and
+                        (r['outer'], r['block']) == (start['outer'], start['block'])]
+            self.assertTrue(previous)
+            self.assertLessEqual(previous[-1]['clock'], start['clock'])
+
     def test_missing_native_point_is_recorded_without_manufacturing_progress(self):
         data, scenarios = tiny()
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
@@ -155,6 +169,7 @@ class GapClosureProtocolTests(unittest.TestCase):
             cfg = configuration({**run, "hours": run["hours"] or 1})
             self.assertFalse(cfg.llm.enabled)
             self.assertEqual(cfg.quantum.candidate_pool_size, 16)
+            self.assertEqual(cfg.defer_full_recovery, not (run['stage']=='sanity' and run['method']=='sa_only'))
             self.assertEqual(cfg.native_fallback_patience,
                              {"sa_only": None, "native_only": 1, "sa_fallback": 3}[run["method"]])
 

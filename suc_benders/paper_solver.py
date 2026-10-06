@@ -301,8 +301,9 @@ def solve_paper(data, scenarios, config):
                             duplicate=tuple(x[k] for k in block.bkeys) in cache, accepted=checks["feasible"])
                         local_evaluate(x, inner, "sa")
                         result = cache.get(tuple(x[k] for k in block.bkeys))
-                        candidate = recover([result["point"]], outer, "sa", result["sources"]) if result and result["feasible"] else None
-                        proposal.update(repaired_discrete_feasible=candidate is not None,
+                        candidate = recover([result["point"]], outer, "sa", result["sources"]) if result and result["feasible"] and not config.defer_full_recovery else None
+                        proposal["full_recovery_deferred"] = config.defer_full_recovery
+                        proposal.update(repaired_discrete_feasible=None if config.defer_full_recovery else candidate is not None,
                             commitment_id=commitment_hash(candidate) if candidate else None,
                             hamming_u=sum(int(candidate.u[i,t]) != x[key("u",i,t)]
                                           for i in range(data.n_units) for t in block.times) if candidate else None)
@@ -310,7 +311,7 @@ def solve_paper(data, scenarios, config):
                         emit("proposal", **proposal)
                 # Full-horizon validation is independent of local priced evaluation.
                 base_for_llm = []
-                for entry in sorted(pool, key=lambda r: r["cost"])[:16]:
+                for entry in ([] if config.defer_full_recovery else sorted(pool, key=lambda r: r["cost"])[:16]):
                     candidate = recover([entry["point"]], outer, "pool" if config.advisor_only else "sa", entry["sources"])
                     if candidate is not None:
                         base_for_llm.append(candidate)
@@ -407,7 +408,7 @@ def solve_paper(data, scenarios, config):
                                 native_record["duplicate"] = signature in cache
                                 entry = local_evaluate(point, inner, "native_master")
                                 native_record["accepted"] = entry is not None
-                                if entry and entry["feasible"]:
+                                if entry and entry["feasible"] and not config.defer_full_recovery:
                                     recover([entry["point"]], outer, "native_master", entry["sources"])
                         except Exception as exc:
                             native_record["rejection"] = type(exc).__name__
@@ -457,6 +458,13 @@ def solve_paper(data, scenarios, config):
                     break
             block_record.update(lower=lb, upper=ub)
             pool.sort(key=lambda r: r["cost"])
+            if config.defer_full_recovery:
+                emit("deferred_recovery_start", outer=outer, block=b, candidates=min(16, len(pool)))
+                for entry in pool[:16]:
+                    if not available():
+                        break
+                    recover([entry["point"]], outer, "sa", entry["sources"])
+                emit("deferred_recovery_end", outer=outer, block=b)
             previous_points[b] = [{k:r["point"][k] for k in block.bkeys} for r in pool[:16]]
             previous_sources[b] = {tuple(r["point"][k] for k in block.bkeys): r["sources"] for r in pool[:16]}
             if not block_record["converged"] or not available():

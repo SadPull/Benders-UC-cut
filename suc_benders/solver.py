@@ -32,6 +32,7 @@ class BendersConfig:
     stop_on_no_new_candidates: bool | None = None
     sa_seed_per_call: bool = False
     native_fallback_patience: int | None = None
+    defer_full_recovery: bool = False
     rule_advisor: bool = False
     event_sink: Callable[[dict], None] | None = field(default=None, repr=False)
 
@@ -144,6 +145,9 @@ def solve_benders(
     if config.native_fallback_patience is not None and (
             type(config.native_fallback_patience) is not int or config.native_fallback_patience < 1):
         raise ValueError("native_fallback_patience must be a positive integer or None")
+    if type(config.defer_full_recovery) is not bool or (config.defer_full_recovery and
+            (config.llm.enabled or config.advisor_only or config.rule_advisor)):
+        raise ValueError("deferred full recovery requires a boolean flag and LLM/rule advisors disabled")
     if not config.quantum_candidates and not config.advisor_only and config.native_fallback_patience is None:
         raise ValueError("enable SA or select advisor_only")
     if config.time_limit_seconds is not None and (not math.isfinite(config.time_limit_seconds) or config.time_limit_seconds <= 0):

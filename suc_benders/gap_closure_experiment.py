@@ -55,6 +55,7 @@ def configuration(definition, seconds=None):
         max_inner_iterations=60 if sanity else 200, block_hours=definition["hours"],
         convergence_tolerance=1e-4, quantum_candidates=method != "native_only",
         native_fallback_patience={"sa_only": None, "native_only": 1, "sa_fallback": 3}[method],
+        defer_full_recovery=not (sanity and method == "sa_only"),
         sa_seed_per_call=True, quantum=QuantumConfig(kaiwu_seed=definition["seed"]),
         time_limit_seconds=seconds if seconds is not None else definition["seconds"])
 
@@ -263,7 +264,7 @@ def select_hours(runs, reference_cost):
     return dict(chosen_hours=chosen, rule="largest_on_time_certified_lower_then_shortest_hours", excluded=excluded)
 
 
-def freeze(directory, historical):
+def freeze(directory, historical, prior=None):
     directory.mkdir(parents=True)
     for case in ("n3-det", "n10-det", "n32-det", "n32-stoch"):
         save(directory / "inputs" / case / "units.json", case_input(int(case.split('-')[0][1:])))
@@ -284,7 +285,7 @@ def freeze(directory, historical):
         target = directory / "source" / path.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
-    return dict(protocol="gap-closure-v1", runs=definitions(), seeds=SEEDS, hours=HOURS,
+    manifest = dict(protocol="gap-closure-v2-deferred-recovery", runs=definitions(), seeds=SEEDS, hours=HOURS,
         total_seconds=TOTAL_SECONDS, phase_seconds=PHASE_SECONDS, primary_gap=.01, challenge_gap=.005,
         commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         dirty_paths=subprocess.check_output(["git", "status", "--short"], cwd=ROOT, text=True).splitlines(),
@@ -294,6 +295,35 @@ def freeze(directory, historical):
         historical_sha256={p.relative_to(directory).as_posix(): sha(p) for p in (directory / "historical").rglob("*.json")},
         configs={r["id"]: asdict(configuration(r)) for r in definitions()},
         selected_hours_pending=True)
+    if prior is not None:
+        previous = read(prior / "manifest.json")
+        prior_state = read(prior / "state.json")
+        prior_seconds = prior_state["seconds"]
+        if not 0 <= prior_seconds < TOTAL_SECONDS:
+            raise ValueError("prior attempt exhausted the total budget")
+        for filename in ("units.json", "scenarios.json"):
+            if read(prior / "inputs/n32-stoch" / filename) != read(directory / "inputs/n32-stoch" / filename):
+                raise ValueError("cached stochastic reference input mismatch")
+        if previous["source_sha256"]["suc_benders/full_model.py"] != sha(ROOT / "suc_benders/full_model.py"):
+            raise ValueError("cached stochastic reference model mismatch")
+        if not reference_record(prior, "n32-stoch")["certified"]:
+            raise ValueError("prior stochastic reference is not certified")
+        for filename in ("result.json", "state.json"):
+            target = directory / "references/n32-stoch" / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(prior / "references/n32-stoch" / filename, target)
+        row = read(directory / "references/n32-stoch/result.json")
+        data, scenarios = load_case(directory, "n32-stoch")
+        row["validation"] = validate_schedule(data, scenarios, schedule_object(row))
+        save(directory / "references/n32-stoch/result.json", row)
+        manifest.update(prior_attempt=str(prior), prior_seconds=prior_seconds,
+            prior_archive_sha256=sha(prior / "SHA256SUMS.txt"),
+            cached_reference_sha256=sha(prior / "references/n32-stoch/result.json"),
+            available_seconds=TOTAL_SECONDS-prior_seconds,
+            amendment="User authorized deferred full-day evaluation; original attempts retained and budget debited.")
+    else:
+        manifest.update(prior_seconds=0., available_seconds=TOTAL_SECONDS)
+    return manifest
 
 
 def validate_historical(directory):
@@ -416,20 +446,21 @@ def report(directory):
     return summary
 
 
-def run(directory, historical):
+def run(directory, historical, prior=None):
     if directory.exists():
         raise ValueError("use a new output directory")
     started = time.perf_counter()
-    deadline = started+TOTAL_SECONDS
-    manifest = freeze(directory, historical)
+    manifest = freeze(directory, historical, prior)
+    deadline = started+manifest["available_seconds"]
     manifest.update(started_clock=started, started_unix=time.time(), deadline=deadline)
     save(directory / "manifest.json", manifest)
     save(directory / "state.json", dict(status="running", within_total_budget=True))
     stop_reason = None
     try:
         validate_historical(directory)
-        supervise(directory, directory / "references/n32-stoch", "reference", "n32-stoch", 600,
-                  min(deadline-180, started+PHASE_SECONDS["reference"]))
+        if prior is None:
+            supervise(directory, directory / "references/n32-stoch", "reference", "n32-stoch", 600,
+                      min(deadline-180, started+PHASE_SECONDS["reference"]))
         if not reference_record(directory, "n32-stoch")["certified"]:
             stop_reason = "reference_not_certified"
         cumulative_budget = 0
@@ -437,7 +468,7 @@ def run(directory, historical):
             cumulative_budget += budget
             if stage in ("reference", "audit") or stop_reason:
                 continue
-            phase_deadline = min(deadline-180, started+cumulative_budget)
+            phase_deadline = min(deadline-180, started+cumulative_budget-manifest["prior_seconds"])
             for definition in [r for r in manifest["runs"] if r["stage"] == stage]:
                 save(directory / "progress.json", dict(stage=stage, run=definition["id"], started_clock=time.perf_counter()))
                 supervise(directory, directory / "runs" / definition["id"], "run", definition["id"],
@@ -462,11 +493,14 @@ def run(directory, historical):
         if not state_path.exists():
             save(state_path, dict(status="skipped", reason=stop_reason or "budget"))
     save(directory / "state.json", dict(status="search_finished", stop_reason=stop_reason,
-        seconds=time.perf_counter()-started, within_total_budget=time.perf_counter() <= deadline))
+        seconds=time.perf_counter()-started, total_attempt_seconds=manifest["prior_seconds"]+time.perf_counter()-started,
+        within_total_budget=time.perf_counter() <= deadline))
     supervise(directory, directory / "report-worker", "report", "all", 180, deadline)
     report_state = read(directory / "report-worker/state.json")
     state = dict(status="completed" if report_state.get("status") == "completed" else "report_incomplete",
-        stop_reason=stop_reason, seconds=time.perf_counter()-started, within_total_budget=time.perf_counter() <= deadline)
+        stop_reason=stop_reason, seconds=time.perf_counter()-started,
+        total_attempt_seconds=manifest["prior_seconds"]+time.perf_counter()-started,
+        within_total_budget=time.perf_counter() <= deadline)
     save(directory / "state.json", state)
     # Update the controller envelope without rerunning expensive physical checks.
     summary, audit = read(directory / "summary.json"), read(directory / "audit.json")
@@ -490,6 +524,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--historical-dir", type=Path, help="raw SA confirmation archive containing inputs/ and references/")
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--prior-attempt", type=Path, help="retained attempt to debit; reuse its independently certified identical stochastic reference")
     parser.add_argument("--worker", choices=("reference", "run", "report"), help=argparse.SUPPRESS)
     parser.add_argument("--identifier", help=argparse.SUPPRESS)
     parser.add_argument("--deadline", type=float, help=argparse.SUPPRESS)
@@ -503,7 +538,7 @@ def main():
     else:
         if args.historical_dir is None:
             parser.error("--historical-dir is required for frozen deterministic references")
-        run(args.output_dir, args.historical_dir.resolve())
+        run(args.output_dir, args.historical_dir.resolve(), args.prior_attempt.resolve() if args.prior_attempt else None)
 
 
 if __name__ == "__main__":
