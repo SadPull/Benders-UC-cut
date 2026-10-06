@@ -1,5 +1,16 @@
 # RTS-24 SUC：SA + LLM Benders
 
+## Gap 补足实验
+
+`python -m suc_benders.gap_closure_experiment --output-dir results/gap-closure-new --historical-dir <原始规模确认目录>`
+运行冻结的两小时补足协议：32 机组随机 SUC，比较纯 SA、经典分解和 SA＋经典候选兜底。
+历史目录需包含 `inputs/` 和 `references/`，用于核验已有的确定性参考；随机参考重新独立认证。
+完整预算、选块与验收规则见 [实验协议](docs/gap-closure-protocol.md)。
+
+`BendersConfig.native_fallback_patience=None` 默认关闭；设置为 3 时，连续三次内层局部上界未改善后
+调用经典主问题候选，候选经过原调度和恢复流程。经典候选与认证下界分别记录。
+`--report-only` 可在相同冻结源码上重建报告。所有迟到结果和失败保留，计分仅使用截止前结果。
+
 本项目研究 IEEE RTS-24 派生随机机组组合问题：32 台机组、24 个小时。
 默认采用连续松弛初始化 → 3 小时时间分块 → 块内 Benders／Kaiwu 本地 SA →
 拉格朗日切平面协调。Gurobi 求解连续调度，并仅用整数块主问题的 `ObjBound`

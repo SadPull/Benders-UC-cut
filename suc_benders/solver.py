@@ -31,6 +31,7 @@ class BendersConfig:
     time_limit_seconds: float | None = None
     stop_on_no_new_candidates: bool | None = None
     sa_seed_per_call: bool = False
+    native_fallback_patience: int | None = None
     rule_advisor: bool = False
     event_sink: Callable[[dict], None] | None = field(default=None, repr=False)
 
@@ -140,7 +141,10 @@ def solve_benders(
         raise ValueError("changing SA seeds requires a starting seed")
     if config.advisor_only and (not config.llm.enabled or config.quantum_candidates):
         raise ValueError("advisor_only requires LLM enabled and SA disabled")
-    if not config.quantum_candidates and not config.advisor_only:
+    if config.native_fallback_patience is not None and (
+            type(config.native_fallback_patience) is not int or config.native_fallback_patience < 1):
+        raise ValueError("native_fallback_patience must be a positive integer or None")
+    if not config.quantum_candidates and not config.advisor_only and config.native_fallback_patience is None:
         raise ValueError("enable SA or select advisor_only")
     if config.time_limit_seconds is not None and (not math.isfinite(config.time_limit_seconds) or config.time_limit_seconds <= 0):
         raise ValueError("time limit must be positive and finite")

@@ -14,7 +14,7 @@ from .context import LLMContextInput, CandidateEvaluation, build_llm_context
 from .llm import ask_llm_for_candidates
 from .rule_advisor import rule_candidates
 from .paper_model import IndexedUC, CompactQubo, key
-from .block_master_model import continuous_relaxation, priced_blocks, partition_rows, certify_master
+from .block_master_model import continuous_relaxation, priced_blocks, partition_rows, certify_master, solve_master
 from .coordination import converged, cutting_plane, coordinate, ABSOLUTE_TOLERANCE
 from .quantum import solve_qubo
 from .subproblem import solve_scenario
@@ -30,6 +30,8 @@ def solve_paper(data, scenarios, config):
     started = time.perf_counter()
     deadline = started + (config.time_limit_seconds if config.time_limit_seconds is not None else float("inf"))
     sa_calls = llm_calls = stalled = batches = 0
+    native_enabled = config.native_fallback_patience is not None
+    native_calls, best_sources = 0, set()
     uc = IndexedUC(data, scenarios)
     local_rows, cross = partition_rows(uc, config.block_hours)
     diagnostics = {k: [] for k in ("evaluations", "proposals", "sampling", "iterations", "llm_calls", "outer", "blocks", "local_evaluations")}
@@ -39,6 +41,9 @@ def solve_paper(data, scenarios, config):
     optimality_count = feasibility_count = total_local = 0
     reliable_lower, coordination_upper = -float("inf"), float("inf")
     previous_points = [[] for _ in local_rows]
+    previous_sources = [{} for _ in local_rows]
+    diagnostics["native_candidates"] = []
+    timings["native_master"] = 0.
     planes = [[] for _ in local_rows]
     previous_feedback = None
     status, failure_stage, failure_message = "MAX_ITERATIONS", None, ""
@@ -49,7 +54,7 @@ def solve_paper(data, scenarios, config):
 
     def emit(kind, **payload):
         if config.event_sink is not None:
-            config.event_sink({"kind": kind, "elapsed_seconds": time.perf_counter()-started,
+            config.event_sink({"kind": kind, "clock": time.perf_counter(), "elapsed_seconds": time.perf_counter()-started,
                                "sa_calls": sa_calls, **payload})
 
     def resource_status():
@@ -64,8 +69,8 @@ def solve_paper(data, scenarios, config):
     def available():
         return resource_status() is None
 
-    def evaluate(candidate, outer):
-        nonlocal incumbent, best, best_solutions, best_results
+    def evaluate(candidate, outer, sources=None):
+        nonlocal incumbent, best, best_solutions, best_results, best_sources
         if candidate is None or not available():
             return False
         signature = commitment_key(candidate.u, candidate.v, candidate.w)
@@ -107,6 +112,7 @@ def solve_paper(data, scenarios, config):
         if objective < incumbent:
             incumbent, best = objective, candidate
             best_solutions, best_results = solutions, results
+            best_sources = set(sources or [candidate.source])
         context_evaluations.append(CandidateEvaluation(candidate.source, objective, fixed, fuel,
             {s.name:r.objective for s,r in zip(scenarios, results)}, feasible, 0, 0, None))
         diagnostics["evaluations"].append({"iteration": outer, "evaluation_count": len(evaluated),
@@ -115,11 +121,13 @@ def solve_paper(data, scenarios, config):
             "improved": incumbent < before, "fixed_cost": fixed, "expected_fuel_cost": fuel,
             "commitment_hash": commitment_hash(candidate), "commitment_id": str(signature), "u": candidate.u, "v": candidate.v, "w": candidate.w,
             "subproblem_seconds": elapsed, "sa_calls": sa_calls})
+        if native_enabled:
+            diagnostics["evaluations"][-1]["candidate_origins"] = sorted(sources or [candidate.source])
         emit("evaluation", **{k:v for k,v in diagnostics["evaluations"][-1].items() if k != "elapsed_seconds"},
              scenarios=solutions)
         return True
 
-    def recover(points, outer, source):
+    def recover(points, outer, source, sources=None):
         if best is None or not available():
             return None
         u = best.u.copy()
@@ -131,8 +139,15 @@ def solve_paper(data, scenarios, config):
         candidate = repair_commitment(data, scenarios, u)
         timings["repair"] += time.perf_counter()-phase
         if candidate is not None:
+            if native_enabled:
+                sources = set(sources or [source])
+                covered = {k for point in points for k in point if k[0] == "u"}
+                if len(covered) < data.n_units*data.horizon:
+                    sources.update(best_sources)
+                if "native_master" in sources:
+                    source = "mixed_native" if "sa" in sources else "native_master"
             candidate.source = source
-        evaluate(candidate, outer)
+        evaluate(candidate, outer, sources)
         return candidate
 
     emit("started", deadline_clock=deadline, block_count=len(local_rows), block_hours=config.block_hours)
@@ -145,6 +160,8 @@ def solve_paper(data, scenarios, config):
             # The relaxed optimum bounds the integer primal even if no block finishes.
             reliable_lower = relaxation["lower_bound"] - ABSOLUTE_TOLERANCE
             diagnostics["initialization"] = {k: relaxation[k] for k in ("objective", "lower_bound", "seconds")}
+            emit("bound_update", outer=0, block=None, inner=0, reliable_lower=reliable_lower,
+                 bound_source="continuous_relaxation", coordination_upper=None)
             u = np.array([[round(relaxation["point"][key("u", i, t)]) for t in range(data.horizon)] for i in range(data.n_units)])
             rounded = repair_commitment(data, scenarios, u)
             if rounded is not None:
@@ -175,14 +192,16 @@ def solve_paper(data, scenarios, config):
                 break
             # All price-dependent cuts and costs are rebuilt for every multiplier.
             cuts, cache, pool = [], {}, []
+            stalled_inner = 0
             analytic_lo, analytic_hi = block.objective_bounds(block.costs)
             lb, ub = analytic_lo + block.constant, float("inf")
             block_record = dict(outer=outer, block=b, times=list(block.times), constant=block.constant,
                                 lower=lb, upper=ub, converged=False, inner_iterations=0,
                                 certification_seconds=0.)
             diagnostics["blocks"].append(block_record)
+            emit("block_start", **block_record)
 
-            def local_evaluate(x, inner, origin):
+            def local_evaluate(x, inner, origin, sources=None):
                 nonlocal ub, total_local, optimality_count, feasibility_count
                 x = {k: x[k] for k in block.bkeys}
                 signature = tuple(x[k] for k in block.bkeys)
@@ -192,8 +211,9 @@ def solve_paper(data, scenarios, config):
                 emit("dispatch_start", scope="block", outer=outer, block=b, inner=inner, origin=origin)
                 result = block.dispatch(x, block.costs, deadline)
                 timings["local_dispatch"] += time.perf_counter()-phase
-                if result is None:
+                if result is None or not available():
                     return
+                result["sources"] = set(sources or [origin])
                 total_local += 1
                 cache[signature] = result
                 cuts.append(result["cut"])
@@ -208,10 +228,12 @@ def solve_paper(data, scenarios, config):
                     origin=origin, feasible=result["feasible"],
                     cost=result["cost"]+block.constant if result["feasible"] else None,
                     local_evaluation_count=total_local, elapsed_seconds=time.perf_counter()-started))
+                return result
 
-            local_evaluate(project(best, block), 0, "incumbent_projection")
+            local_evaluate(project(best, block), 0, "incumbent_projection", best_sources)
             for point in previous_points[b]:
-                local_evaluate(point, 0, "previous_candidate")
+                local_evaluate(point, 0, "previous_candidate",
+                               previous_sources[b].get(tuple(point[k] for k in block.bkeys)))
             for inner in range(1, config.max_inner_iterations+1):
                 if not available():
                     break
@@ -220,6 +242,7 @@ def solve_paper(data, scenarios, config):
                     break
                 batches += 1
                 sa_before = incumbent
+                local_before = ub
                 phase = time.perf_counter()
                 try:
                     lp_value = block.relaxation(block.costs, cuts, deadline)
@@ -278,7 +301,7 @@ def solve_paper(data, scenarios, config):
                             duplicate=tuple(x[k] for k in block.bkeys) in cache, accepted=checks["feasible"])
                         local_evaluate(x, inner, "sa")
                         result = cache.get(tuple(x[k] for k in block.bkeys))
-                        candidate = recover([result["point"]], outer, "sa") if result and result["feasible"] else None
+                        candidate = recover([result["point"]], outer, "sa", result["sources"]) if result and result["feasible"] else None
                         proposal.update(repaired_discrete_feasible=candidate is not None,
                             commitment_id=commitment_hash(candidate) if candidate else None,
                             hamming_u=sum(int(candidate.u[i,t]) != x[key("u",i,t)]
@@ -288,7 +311,7 @@ def solve_paper(data, scenarios, config):
                 # Full-horizon validation is independent of local priced evaluation.
                 base_for_llm = []
                 for entry in sorted(pool, key=lambda r: r["cost"])[:16]:
-                    candidate = recover([entry["point"]], outer, "pool" if config.advisor_only else "sa")
+                    candidate = recover([entry["point"]], outer, "pool" if config.advisor_only else "sa", entry["sources"])
                     if candidate is not None:
                         base_for_llm.append(candidate)
                 if (config.llm.enabled or config.rule_advisor) and available():
@@ -357,6 +380,48 @@ def solve_paper(data, scenarios, config):
                 if config.advisor_only and config.llm.max_calls is not None and llm_calls >= config.llm.max_calls:
                     status = "LLM_CALL_LIMIT"
                     break
+                native_record = None
+                if native_enabled:
+                    stalled_inner = 0 if ub < local_before-ABSOLUTE_TOLERANCE else stalled_inner+1
+                    if not config.quantum_candidates or stalled_inner >= config.native_fallback_patience:
+                        native_calls += 1
+                        native_record = dict(outer=outer, block=b, inner=inner, call=native_calls,
+                            reason="stagnation" if config.quantum_candidates else "native_only",
+                            lower_before=lb, upper_before=ub, accepted=False, duplicate=False)
+                        phase = time.perf_counter()
+                        emit("native_start", **native_record)
+                        try:
+                            oracle = solve_master(block, cuts, deadline, bound_only=False)
+                            native_record["seconds"] = time.perf_counter()-phase
+                            timings["native_master"] += native_record["seconds"]
+                            native_record.update(status=oracle["status"], oracle_seconds=oracle["seconds"],
+                                objective=oracle.get("objective"), mip_gap=oracle.get("mip_gap"))
+                            point = oracle.get("point")
+                            if not available():
+                                native_record["rejection"] = "deadline"
+                            elif point is None:
+                                native_record["rejection"] = "missing_point"
+                            else:
+                                signature = tuple(point[k] for k in block.bkeys)
+                                native_record["raw_uvw"] = list(signature)
+                                native_record["duplicate"] = signature in cache
+                                entry = local_evaluate(point, inner, "native_master")
+                                native_record["accepted"] = entry is not None
+                                if entry and entry["feasible"]:
+                                    recover([entry["point"]], outer, "native_master", entry["sources"])
+                        except Exception as exc:
+                            native_record["rejection"] = type(exc).__name__
+                            native_record["error"] = str(exc)
+                        if "seconds" not in native_record:
+                            native_record["seconds"] = time.perf_counter()-phase
+                            timings["native_master"] += native_record["seconds"]
+                        stalled_inner = 0
+                        diagnostics["native_candidates"].append(native_record)
+                if not available():
+                    if native_record is not None:
+                        native_record.update(lower_after=lb, upper_after=ub)
+                        emit("native_candidate", **native_record)
+                    break
                 try:
                     certificate = certify_master(block, cuts, deadline)
                     timings["certification"] += certificate["seconds"]
@@ -370,10 +435,19 @@ def solve_paper(data, scenarios, config):
                 except Exception as exc:
                     status, failure_stage = "CERTIFICATION_FAILED", f"outer={outer}/block={b}/inner={inner}/certification"
                     failure_message = str(exc)
+                    if native_record is not None:
+                        native_record.update(lower_after=lb, upper_after=ub, certification_error=str(exc))
+                        emit("native_candidate", **native_record)
                     break
                 done = converged(lb, ub, config.convergence_tolerance)
                 current_bounds[b] = lb
                 reliable_lower = max(reliable_lower, sum(current_bounds))
+                if native_record is not None:
+                    native_record.update(lower_after=lb, upper_after=ub)
+                    emit("native_candidate", **native_record)
+                emit("bound_update", outer=outer, block=b, inner=inner, reliable_lower=reliable_lower,
+                     bound_source="same_multiplier_block_certificates", block_bounds=list(current_bounds),
+                     lower=lb, upper=ub, coordination_upper=None)
                 row = dict(outer=outer, block=b, inner=inner, lower=lb, upper=ub, converged=done,
                            cuts=len(cuts), certificate=certificate)
                 diagnostics["iterations"].append(row)
@@ -384,6 +458,7 @@ def solve_paper(data, scenarios, config):
             block_record.update(lower=lb, upper=ub)
             pool.sort(key=lambda r: r["cost"])
             previous_points[b] = [{k:r["point"][k] for k in block.bkeys} for r in pool[:16]]
+            previous_sources[b] = {tuple(r["point"][k] for k in block.bkeys): r["sources"] for r in pool[:16]}
             if not block_record["converged"] or not available():
                 if status == "MAX_ITERATIONS" and available():
                     status = "INNER_NOT_CONVERGED"
@@ -397,7 +472,9 @@ def solve_paper(data, scenarios, config):
         reliable_lower = max(reliable_lower, sum(lower_bounds))
         outer_record["dual_interval"] = [sum(lower_bounds), sum(upper_bounds)]
         for rank in range(min(16, max(map(len, pools)))):
-            recover([pool[min(rank, len(pool)-1)]["point"] for pool in pools], outer, "stitched")
+            entries = [pool[min(rank, len(pool)-1)] for pool in pools]
+            recover([entry["point"] for entry in entries], outer, "stitched",
+                    set().union(*(entry["sources"] for entry in entries)))
         if not available():
             break
         try:
@@ -420,6 +497,8 @@ def solve_paper(data, scenarios, config):
             llm_failed=any(a.failed for a in round_advice)))
         emit("iteration", iteration=outer, incumbent=incumbent, reliable_lower=reliable_lower,
              coordination_upper=coordination_upper, dual_interval=outer_record["dual_interval"], timings=dict(timings))
+        emit("bound_update", outer=outer, block=None, inner=None, reliable_lower=reliable_lower,
+             bound_source="completed_outer", coordination_upper=coordination_upper)
         if done:
             status = "DUAL_CONVERGED"
             break
@@ -432,7 +511,7 @@ def solve_paper(data, scenarios, config):
         primal_gap=(incumbent-reliable_lower)/max(1., abs(incumbent)) if math.isfinite(incumbent) and math.isfinite(reliable_lower) else None,
         block_hours=config.block_hours, block_count=len(local_rows), coupling_count=len(cross),
         termination_reason=status, failure_stage=failure_stage, failure_message=failure_message,
-        sa_calls=sa_calls, llm_call_count=0 if config.rule_advisor else llm_calls,
+        sa_calls=sa_calls, native_calls=native_calls, llm_call_count=0 if config.rule_advisor else llm_calls,
         rule_call_count=llm_calls if config.rule_advisor else 0)
     timings["other"] = max(0., runtime-sum(timings.values()))
     empty = np.empty((0, 0), dtype=int)
