@@ -193,11 +193,34 @@ class Block:
                     continue
                 return None
             value = float(m.ObjVal)
+            # Recompute the dual objective over the variable box. Using the
+            # primal objective as a cut intercept would overstate a lower cut
+            # whenever the QP still has a small primal-dual numerical gap.
+            prices = [float(c.Pi) if c.Sense == "=" else min(0., float(c.Pi)) for c, _, _ in records]
+            if elastic:
+                by_index = {c.index: price for (c, _, _), price in zip(records, prices)}
+                load = max((sum(col.getCoeff(j)*by_index[col.getConstr(j).index]
+                                for j in range(col.size())) for col in (m.getCol(v) for v in slacks)), default=1.)
+                prices = [price/max(1., load) for price in prices]
+            linear = {k: 0. if elastic else costs[k] for k in self.ckeys}
+            variable_keys = {v.index:k for k,v in y.items()}
+            dual_value = 0.
             beta = {}
-            for c, bx, sign in records:
+            for (c, bx, sign), price in zip(records, prices):
+                dual_value += price*float(c.RHS)
+                expression = m.getRow(c)
+                for j in range(expression.size()):
+                    k = variable_keys.get(expression.getVar(j).index)
+                    if k is not None:
+                        linear[k] -= price*expression.getCoeff(j)
                 for k, v in bx.items():
-                    beta[k] = beta.get(k, 0.) + sign*float(c.Pi)*v
-            cut = Cut(beta, value-sum(v*x[k] for k, v in beta.items()), not elastic)
+                    beta[k] = beta.get(k, 0.) + sign*price*v
+            for k, coefficient in linear.items():
+                lo, hi = self.uc.bounds[k]
+                quadratic = 0. if elastic else self.uc.quadratic.get(k, 0.)
+                minimizer = min(hi, max(lo, -coefficient/(2*quadratic))) if quadratic else lo if coefficient >= 0 else hi
+                dual_value += coefficient*minimizer + quadratic*minimizer**2
+            cut = Cut(beta, dual_value-sum(v*x[k] for k, v in beta.items()), not elastic)
             point = {**x, **{k: float(v.X) for k, v in y.items()}}
             m.dispose()
             return {"feasible": not elastic, "cut": cut, "point": point,

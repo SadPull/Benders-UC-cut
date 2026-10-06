@@ -28,34 +28,36 @@ python -u -m suc_benders.astra_run --data data/rts24/units.json --seed 7 --round
 本次 RTS-24 三场景实验命令（种子 7、候选池 16）：
 
 ```powershell
-python -u -m suc_benders.astra_run --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --seed 7 --strategy stagnation_burst --target-reference-gap 0.005 --output-dir results/rts24-sa-llm-burst-new
+python -u -m suc_benders.astra_run --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --seed 7 --strategy stagnation_burst --rounds 20 --convergence-tolerance 0.0001 --output-dir results/rts24-sa-llm-burst-new
 ```
 
 同协议 HTTP 模型对照可同时传入 `--http-base-url` 和 `--http-model`，密钥仅从进程环境 `LLM_API_KEY` 读取。下例使用 DeepSeek 官方 Chat Completions 接口；不设置温度和输出 token 上限，使用 `reasoning_effort=max`，每次仅一次 HTTP 请求，无重试。模型列表和参数兼容性应先以独立试请求核对，试请求不能计作正式优化调用。
 
 ```powershell
-python -u -m suc_benders.astra_run --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --seed 7 --strategy stagnation_burst --target-reference-gap 0.005 --http-base-url https://api.deepseek.com --http-model deepseek-flash --output-dir results/rts24-deepseek-new
+python -u -m suc_benders.astra_run --data data/rts24/units.json --scenario-file data/rts24/stochastic.json --seed 7 --strategy stagnation_burst --rounds 20 --convergence-tolerance 0.0001 --http-base-url https://api.deepseek.com --http-model deepseek-flash --output-dir results/rts24-deepseek-new
 ```
 
 HTTP 调用自动运行；每次的提示词、无认证头请求体、响应、模型/用量、解析修复诊断和验证反馈保存在 `calls/`。配置、提示词和求解/停止规则沿用原实验。不同服务的默认生成参数和传输/调度开销仍可能不同；总耗时不能直接当作纯模型推理速度对比。
 
-任意候选完成全部场景调度及物理/成本验证后，参考差严格小于 0.5% 立即停止；等于 0.5% 继续。无需完成该候选后的候选或本组三次调用。目标模式不设 SA 轮数、总时间或调用次数上限；参考求解仍有独立的 600 秒时限。
+默认以 3 小时分块，在每个块的内层 SA 批次后调度建议；事件记录外层／块／内层编号。
+调用目录始终按全局调用编号递增，跨块和外层不重用编号。输入反馈只来自全天实测调度，
+建议投影到当前块后需按当前乘子重新调度。全天恢复与原成本验证独立执行。
 
-无 SA 模式复用同一连续评估流程，不构建或采样 QUBO，独立入口为上述 `--strategy llm`。该模式不报告认证下界。轮数不是跨策略的等价资源预算；正式比较应另行冻结端到端预算。
+无 SA 模式不构建或采样 QUBO，但仍运行整数块主问题的下界认证；其整数方案不返回搜索。
+调用额度耗尽返回 `LLM_CALL_LIMIT`，不是收敛。轮数不是跨策略的等价资源预算。
 
 ## Codex 调度约定
 
-### 按参考成本达标停止
+### 收敛与资源限制
 
 ```powershell
-python -u -m suc_benders.astra_run --data data/rts24/units.json --seed 7 --strategy fixed --target-reference-gap 0.001 --output-dir results/astra-target-new
+python -u -m suc_benders.astra_run --seed 7 --strategy fixed --block-hours 3 --rounds 20 --max-inner-iterations 20 --convergence-tolerance 0.0001 --time-limit-seconds 1800 --output-dir results/astra-temporal-new
 ```
 
-该模式重新求解同一算例的 Gurobi 完整模型（单线程、同种子、MIPGap=1e-6，参考求解最多 600 秒），再固定其开停机方案重算连续调度并通过原有物理验证。原始与复核结果分别保存为 `reference-raw.json` 和 `reference.json`；保留独立下界。参考值只进入停止判断和报告，不进入模型输入。
-
-`0.001` 表示相对参考成本差严格小于 0.1%；等于阈值不停止。该模式忽略 `--rounds`，拒绝同时配置时间/调用上限，每个候选完整验证后立即判断；仅正常达标才返回 `TARGET_REACHED`。用户取消、计算故障或无可行初始化仍可能中断，不能标记为达标。参考求解的 600 秒限制不限制 SA＋LLM 的运行时间。
-
-每个完整可行候选的参考差写入事件，最终比较写入 `comparison.json`。相对参考成本差与算法自身认证 gap 分开解释。
+旧 `--target-reference-gap` 已拒绝，改用内外层上下界判据。相对容差默认 `1e-4`、绝对容差 `1e-5`。
+任何块内层超限返回 `INNER_NOT_CONVERGED`，全部块收敛才协调；外层超限返回 `MAX_ITERATIONS`。
+`DUAL_CONVERGED` 只表示拉格朗日对偶协调收敛。全天可行成本、认证下界、原问题 gap 和协调上界
+写入 `convergence.json`；时间、取消和调用额度终止单独报告。独立参考模型仍可用于事后比较。
 
 1. 等待输出 `WAIT_SUBAGENT`，读取对应 `request.json`；调用 `suc_benders.subagent.claim(root, iteration)`，将返回的程序生成指令原样作为子代理任务。该函数独占创建 `dispatch.json`，已认领或已关闭的请求不能再次启动。每个请求仅启动一个子代理，串行处理；若在认领后启动工具失败，停止本次运行并保存现场，不自动重试。
 2. 调用 `collaboration.spawn_agent`，明确设置 `model="gpt-6-astra"`、`reasoning_effort="max"`、`fork_turns="none"`。只授权读取该目录的 `system.txt` 和 `user.txt`，以及写入该目录的 `candidates.json`；禁止读取其他文件、求解器调用、外部 API、其他代理和优化程序执行。

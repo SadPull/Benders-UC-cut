@@ -15,7 +15,10 @@ from .master import MasterCandidate, QuantumConfig
 
 @dataclass
 class BendersConfig:
-    max_iterations: int | None = 20
+    max_iterations: int = 20
+    block_hours: int = 3
+    max_inner_iterations: int = 20
+    convergence_tolerance: float = 1e-4
     penalty: float = 1_000_000.0
     theta_step: float = 1.0
     reserve_scale: float = 100.0
@@ -26,7 +29,7 @@ class BendersConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     max_candidate_evaluations: int | None = None
     time_limit_seconds: float | None = None
-    stop_on_no_new_candidates: bool = True
+    stop_on_no_new_candidates: bool | None = None
     sa_seed_per_call: bool = False
     rule_advisor: bool = False
     event_sink: Callable[[dict], None] | None = field(default=None, repr=False)
@@ -120,22 +123,27 @@ def solve_benders(
     scenarios: list[Scenario],
     config: BendersConfig | None = None,
 ) -> BendersResult:
-    """Run dynamic whole-horizon SA with optional LLM advice."""
+    """Run temporal Benders/SA with certified Lagrangian coordination."""
     config = config or BendersConfig()
-    if config.max_iterations is None and config.time_limit_seconds is None and config.target_cost is None:
-        raise ValueError("unlimited iterations require a time limit or target")
+    if config.target_cost is not None or config.stop_on_no_new_candidates is not None:
+        raise ValueError("target_cost and stop_on_no_new_candidates are retired; use convergence_tolerance and max_inner_iterations")
+    if any(not isinstance(v, int) or isinstance(v, bool) or v < 1
+           for v in (config.max_iterations, config.max_inner_iterations)):
+        raise ValueError("max_iterations and max_inner_iterations must be positive finite integers")
+    if type(config.block_hours) is not int or config.block_hours not in (1, 2, 3):
+        raise ValueError("block_hours must be 1, 2 or 3")
+    if not math.isfinite(config.convergence_tolerance) or config.convergence_tolerance <= 0:
+        raise ValueError("convergence_tolerance must be positive and finite")
     if config.rule_advisor and (config.llm.enabled or config.advisor_only):
         raise ValueError("rule advisor requires SA and LLM disabled")
     if config.sa_seed_per_call and config.quantum.kaiwu_seed is None:
         raise ValueError("changing SA seeds requires a starting seed")
-    if config.target_cost is not None and (not math.isfinite(config.target_cost) or config.target_cost <= 0):
-        raise ValueError("target_cost must be positive and finite")
     if config.advisor_only and (not config.llm.enabled or config.quantum_candidates):
         raise ValueError("advisor_only requires LLM enabled and SA disabled")
     if not config.quantum_candidates and not config.advisor_only:
         raise ValueError("enable SA or select advisor_only")
-    if config.time_limit_seconds is not None and config.time_limit_seconds <= 0:
-        raise ValueError("time limit must be positive")
+    if config.time_limit_seconds is not None and (not math.isfinite(config.time_limit_seconds) or config.time_limit_seconds <= 0):
+        raise ValueError("time limit must be positive and finite")
     if config.max_candidate_evaluations is not None and config.max_candidate_evaluations < 1:
         raise ValueError("max_candidate_evaluations must be positive or None")
     from .paper_solver import solve_paper

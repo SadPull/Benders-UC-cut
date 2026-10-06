@@ -16,10 +16,12 @@ from suc_benders.solver import BendersConfig, _fixed_cost, solve_benders
 from suc_benders.subagent import initialize, publish, receipt
 from suc_benders.subproblem import solve_scenario
 from tests.test_capacity import one_hour_data
+from tests.solver_fixtures import keep_inner_running
 
 
 class BurstTests(unittest.TestCase):
     def setUp(self):
+        keep_inner_running(self)
         original = one_hour_data()
         vectors = {k: np.repeat(v, 3) for k, v in vars(original).items()
                    if isinstance(v, np.ndarray) and k != "base_load"}
@@ -29,7 +31,7 @@ class BurstTests(unittest.TestCase):
         self.candidates = [make_candidate(self.data, self.scenarios,
             np.array([[1, 1, 1]] * n + [[0, 0, 0]] * (3-n)), source="llm") for n in (3, 2, 1)]
         self.config = BendersConfig(
-            max_iterations=6, stop_on_no_new_candidates=False,
+            max_inner_iterations=6,
             llm=LLMConfig(enabled=True, schedule="stagnation_burst", enhanced_feedback=True))
 
     def test_first_burst_requires_three_consecutive_insufficient_rounds(self):
@@ -43,14 +45,14 @@ class BurstTests(unittest.TestCase):
     def test_failed_burst_returns_to_three_sa_rounds_and_respects_call_limit(self):
         events = []
         self.config.event_sink = events.append
-        self.config.max_iterations = 9
+        self.config.max_inner_iterations = 9
         self.config.llm.max_calls = 4
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
                 "suc_benders.paper_solver.ask_llm_for_candidates",
                 return_value=LLMAdviceResult([], failed=True)) as ask:
             result = solve_benders(self.data, self.scenarios, self.config)
         self.assertEqual([call.args[2] for call in ask.call_args_list], [1, 2, 3, 4])
-        self.assertEqual([e["iteration"] for e in events if e["kind"] == "llm_start"], [3, 3, 3, 6])
+        self.assertEqual([e["inner"] for e in events if e["kind"] == "llm_start"], [3, 3, 3, 6])
         self.assertEqual([e["stalled"] for e in events if e["kind"] == "sa_round_validated"],
                          [1, 2, 3, 1, 2, 3, 1, 2, 3])
         self.assertEqual(result.diagnostics["sa_calls"], 9)
@@ -84,43 +86,11 @@ class BurstTests(unittest.TestCase):
             self.assertEqual([e["kind"] for e in events if e["kind"] in {"sa_start", "llm_start"}],
                              (["sa_start"] * 3 + ["llm_start"] * 3) * 2)
 
-    def test_target_stops_inside_any_call_without_finishing_batch_or_candidates(self):
-        initial = self.candidates[0]
-        cost = _fixed_cost(self.data, initial.u, initial.v, initial.w) + solve_scenario(
-            self.data, self.scenarios[0], initial.u, initial.v, initial.w).objective
-        # At exactly the target cost (reference * 1.005) search must continue.
-        self.config.target_cost = cost
-        self.config.max_iterations = 1
-        for position in (1, 2, 3):
-            with self.subTest(position=position):
-                answers = [LLMAdviceResult([]) for _ in range(position-1)]
-                answers.append(LLMAdviceResult(self.candidates[1:]))
-                with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
-                        "suc_benders.paper_solver.ask_llm_for_candidates", side_effect=answers) as ask, patch(
-                        "suc_benders.validation.validate_schedule", wraps=validate_schedule) as validate:
-                    result = solve_benders(self.data, self.scenarios, self.config)
-                self.assertEqual(result.status, "TARGET_REACHED")
-                self.assertEqual(ask.call_count, position)
-                self.assertEqual(result.diagnostics["sa_calls"], 3)
-                self.assertEqual(result.diagnostics["evaluation_count"], 2)
-                self.assertEqual(validate.call_count, 2)
-                np.testing.assert_array_equal(result.u, self.candidates[1].u)
-                self.assertLess(result.objective, cost)
-
-    def test_sa_candidate_reaching_target_prevents_llm_dispatch(self):
-        from suc_benders.paper_model import key
-        candidate = self.candidates[1]
-        point = {key(kind, i, t): int(getattr(candidate, kind)[i, t])
-                 for kind in ("u", "v", "w") for i in range(3) for t in range(3)}
+    def test_retired_cost_target_is_rejected_before_sampling(self):
         self.config.target_cost = 600.
-        with patch("suc_benders.paper_solver.solve_qubo", return_value=[[]]), patch(
-                "suc_benders.paper_solver.CompactQubo.decode", return_value=(point, None)), patch(
-                "suc_benders.paper_solver.ask_llm_for_candidates", side_effect=AssertionError("already reached")):
-            result = solve_benders(self.data, self.scenarios, self.config)
-        self.assertEqual(result.status, "TARGET_REACHED")
-        self.assertEqual(result.diagnostics["sa_calls"], 1)
-        self.assertEqual(result.diagnostics["llm_call_count"], 0)
-        np.testing.assert_array_equal(result.u, candidate.u)
+        with patch("suc_benders.paper_solver.solve_qubo") as sample, self.assertRaisesRegex(ValueError, "retired"):
+            solve_benders(self.data, self.scenarios, self.config)
+        sample.assert_not_called()
 
 
 if __name__ == "__main__":

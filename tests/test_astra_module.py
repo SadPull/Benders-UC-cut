@@ -13,10 +13,12 @@ from suc_benders.subagent import initialize, exchange, publish, receipt, claim
 from suc_benders.advisor_feedback import summarize, changes, call_due
 from suc_benders.data import Scenario
 from tests.test_capacity import one_hour_data
+from tests.solver_fixtures import keep_inner_running
 
 
 class AstraModuleTests(unittest.TestCase):
     def setUp(self):
+        keep_inner_running(self)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "run"
@@ -121,7 +123,7 @@ class AstraModuleTests(unittest.TestCase):
         scenarios = [Scenario("tiny", 1., data.base_load)]
         self.config.enhanced_feedback = True
         cfg = BendersConfig(
-            max_iterations=2, stop_on_no_new_candidates=False, llm=self.config,
+            max_inner_iterations=2, llm=self.config,
             quantum=QuantumConfig(candidate_pool_size=1))
         def respond(_):
             for call in sorted((self.root / "calls").iterdir()):
@@ -198,16 +200,16 @@ class AstraModuleTests(unittest.TestCase):
             calls.append(args[2])
             return LLMAdviceResult([], failed=True, message="failed", diagnostics={"proposals": []})
         cfg = BendersConfig(
-            max_iterations=8, stop_on_no_new_candidates=False,
+            max_inner_iterations=8,
             llm=LLMConfig(enabled=True, schedule="stagnation", max_calls=2))
         with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
                 "suc_benders.paper_solver.ask_llm_for_candidates", side_effect=fail):
             result = solve_benders(data, [Scenario("tiny", 1., data.base_load)], cfg)
-        self.assertEqual(calls, [1, 4])
+        self.assertEqual(calls, [1, 2])
         self.assertEqual(result.diagnostics["sa_calls"], 8)
         self.assertEqual(result.diagnostics["llm_call_count"], 2)
 
-    def test_advisor_only_has_no_sa_or_integer_optimizer(self):
+    def test_advisor_only_has_no_sa_but_retains_bound_certification(self):
         import gurobipy as gp
         from suc_benders.solver import BendersConfig, solve_benders
         from suc_benders.candidates import make_candidate
@@ -216,18 +218,18 @@ class AstraModuleTests(unittest.TestCase):
         candidate = make_candidate(data, scenarios, np.ones((1, 3), dtype=int), source="llm")
         cfg = BendersConfig(
             advisor_only=True, quantum_candidates=False, max_iterations=4,
-            stop_on_no_new_candidates=False, llm=LLMConfig(enabled=True, max_calls=2))
+            llm=LLMConfig(enabled=True, max_calls=2))
         optimize = gp.Model.optimize
         def guard(model, *args, **kwargs):
             model.update()
-            self.assertTrue(all(v.VType == gp.GRB.CONTINUOUS for v in model.getVars()))
+            self.assertTrue(model.ModelName == "block_benchmark_integer_master" or all(v.VType == gp.GRB.CONTINUOUS for v in model.getVars()))
             return optimize(model, *args, **kwargs)
         with patch("suc_benders.paper_solver.solve_qubo", side_effect=AssertionError("SA forbidden")), patch(
                 "suc_benders.paper_solver.ask_llm_for_candidates", return_value=LLMAdviceResult([candidate])), patch.object(gp.Model, "optimize", guard):
             result = solve_benders(data, scenarios, cfg)
         self.assertEqual(result.diagnostics["sa_calls"], 0)
         self.assertEqual(result.diagnostics["llm_call_count"], 2)
-        self.assertIsNone(result.diagnostics["reliable_lower"])
+        self.assertTrue(np.isfinite(result.diagnostics["reliable_lower"]))
         self.assertEqual(result.status, "LLM_CALL_LIMIT")
         from suc_benders.subproblem import solve_scenario
         from suc_benders.solver import _fixed_cost
@@ -235,29 +237,12 @@ class AstraModuleTests(unittest.TestCase):
         expected += _fixed_cost(data, candidate.u, candidate.v, candidate.w)
         self.assertAlmostEqual(result.objective, expected)
 
-    def test_target_is_strict_and_overrides_round_limit(self):
-        from suc_benders.solver import BendersConfig, solve_benders, _fixed_cost
-        from suc_benders.candidates import make_candidate
-        from suc_benders.subproblem import solve_scenario
+    def test_unlimited_outer_iterations_are_rejected(self):
+        from suc_benders.solver import BendersConfig, solve_benders
         data = one_hour_data()
-        vectors = {k: np.repeat(v, 2) for k, v in vars(data).items()
-                   if isinstance(v, np.ndarray) and k != "base_load"}
-        data = replace(data, **vectors, n_units=2, base_load=np.full(3, 30.))
-        scenarios = [Scenario("tiny", 1., data.base_load)]
-        initial = make_candidate(data, scenarios, np.ones((2, 3), dtype=int))
-        cost = _fixed_cost(data, initial.u, initial.v, initial.w) + solve_scenario(
-            data, scenarios[0], initial.u, initial.v, initial.w).objective
-        candidate = make_candidate(data, scenarios, np.array([[1, 1, 1], [0, 0, 0]]), source="llm")
-        cfg = BendersConfig(
-            max_iterations=1, stop_on_no_new_candidates=False, target_cost=cost,
-            llm=LLMConfig(enabled=True))
-        with patch("suc_benders.paper_solver.solve_qubo", return_value=[]), patch(
-                "suc_benders.paper_solver.ask_llm_for_candidates",
-                side_effect=[LLMAdviceResult([]), LLMAdviceResult([candidate])]):
-            result = solve_benders(data, scenarios, cfg)
-        self.assertEqual(result.status, "TARGET_REACHED")
-        self.assertLess(result.objective, cost)
-        self.assertEqual(result.diagnostics["sa_calls"], 2)
+        with self.assertRaisesRegex(ValueError, "positive finite integers"):
+            solve_benders(data, [Scenario("tiny", 1., data.base_load)],
+                          BendersConfig(max_iterations=None, time_limit_seconds=1.))
 
 
 if __name__ == "__main__":

@@ -221,7 +221,7 @@ def supervise(directory, codex, resume=False):
                 raise ValueError(f"recovery snapshot changed: {name}")
         run = directory / f"{group}-{seed}"
         if run.exists():
-            if (resume and read(run / "state.json").get("status") in {"TIME_LIMIT", "LLM_CALL_LIMIT"}
+            if (resume and read(run / "state.json").get("status") in {"TIME_LIMIT", "LLM_CALL_LIMIT", "EVALUATION_LIMIT", "DUAL_CONVERGED", "INNER_NOT_CONVERGED", "MAX_ITERATIONS"}
                     and (run / "result.json").exists()):
                 report(directory)
                 continue
@@ -271,7 +271,7 @@ def supervise(directory, codex, resume=False):
         state = read(run / "state.json")
         state.update(exitcode=worker.returncode, process_wall_seconds=time.perf_counter()-started)
         publish(run / "state.json", state)
-        if worker.returncode != 0 or state.get("status") not in {"TIME_LIMIT", "LLM_CALL_LIMIT"}:
+        if worker.returncode != 0 or state.get("status") not in {"TIME_LIMIT", "LLM_CALL_LIMIT", "EVALUATION_LIMIT", "DUAL_CONVERGED", "INNER_NOT_CONVERGED", "MAX_ITERATIONS"}:
             raise RuntimeError(f"worker failed: {run.name}; remaining runs not started")
         print(f"{position+1}/{len(manifest['order'])} {run.name}: {state['status']}", flush=True)
         report(directory)

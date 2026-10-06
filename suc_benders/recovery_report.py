@@ -59,7 +59,7 @@ def audit_run(run, group, seed, data, scenarios, reference):
             usage=agent.get("usage")))
     first = row["first_llm_improvement_seconds"]
     after = [e for e in events if first is not None and first < e["elapsed_seconds"] <= 1800]
-    complete = state.get("status") in {"TIME_LIMIT", "LLM_CALL_LIMIT"} and bool(result)
+    complete = state.get("status") in {"TIME_LIMIT", "LLM_CALL_LIMIT", "EVALUATION_LIMIT", "DUAL_CONVERGED", "INNER_NOT_CONVERGED", "MAX_ITERATIONS"} and bool(result)
     protocol_ok = (row["llm_started"] <= 3 and row["sa_seeds"] == [seed]*row["sa_calls"]
                    and (group != "C" or row["sa_calls"] == 0)
                    and all(e["diagnostics"].get("raw_count", 0) <= 4 for e in events if e["kind"] == "llm_end"))
