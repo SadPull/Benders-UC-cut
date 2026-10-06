@@ -14,7 +14,7 @@ from .context import LLMContextInput, CandidateEvaluation, build_llm_context
 from .llm import ask_llm_for_candidates
 from .rule_advisor import rule_candidates
 from .paper_model import IndexedUC, CompactQubo, key
-from .block_master_model import continuous_relaxation, priced_blocks, partition_rows, certify_master, solve_master
+from .block_master_model import continuous_relaxation, priced_blocks, partition_rows, certify_master, solve_master, point_record
 from .coordination import converged, cutting_plane, coordinate, ABSOLUTE_TOLERANCE
 from .quantum import solve_qubo
 from .subproblem import solve_scenario
@@ -31,6 +31,9 @@ def solve_paper(data, scenarios, config):
     deadline = started + (config.time_limit_seconds if config.time_limit_seconds is not None else float("inf"))
     sa_calls = llm_calls = stalled = batches = 0
     native_enabled = config.native_fallback_patience is not None
+    variant = config.gap_experiment_variant
+    pure_sa = variant is not None and variant.startswith("sa_")
+    integer_certifications = 0
     native_calls, best_sources = 0, set()
     uc = IndexedUC(data, scenarios)
     local_rows, cross = partition_rows(uc, config.block_hours)
@@ -121,7 +124,7 @@ def solve_paper(data, scenarios, config):
             "improved": incumbent < before, "fixed_cost": fixed, "expected_fuel_cost": fuel,
             "commitment_hash": commitment_hash(candidate), "commitment_id": str(signature), "u": candidate.u, "v": candidate.v, "w": candidate.w,
             "subproblem_seconds": elapsed, "sa_calls": sa_calls})
-        if native_enabled:
+        if native_enabled or variant:
             diagnostics["evaluations"][-1]["candidate_origins"] = sorted(sources or [candidate.source])
         emit("evaluation", **{k:v for k,v in diagnostics["evaluations"][-1].items() if k != "elapsed_seconds"},
              scenarios=solutions)
@@ -181,6 +184,10 @@ def solve_paper(data, scenarios, config):
             break
         blocks, _ = priced_blocks(uc, config.block_hours, multipliers)
         current_bounds = [block.objective_bounds(block.costs)[0]+block.constant for block in blocks]
+        if variant:
+            emit("multiplier_epoch", outer=outer, multipliers=list(multipliers),
+                 blocks=[dict(block=j, times=list(block.times), constant=block.constant,
+                              lower=current_bounds[j]) for j, block in enumerate(blocks)])
         pools, lower_bounds, upper_bounds = [], [], []
         before_count, before_opt, before_feas = len(evaluated), optimality_count, feasibility_count
         round_advice = []
@@ -224,6 +231,13 @@ def solve_paper(data, scenarios, config):
                     pool.append(result)
                 else:
                     feasibility_count += 1
+                if variant:
+                    cut = result["cut"]
+                    emit("local_cut", outer=outer, block=b, inner=inner, origin=origin,
+                         cut=dict(a=point_record(cut.a), c=cut.c, feasible=cut.feasible),
+                         point=point_record(result["point"]), sources=sorted(result["sources"]),
+                         feasible=result["feasible"],
+                         cost=result["cost"]+block.constant if result["feasible"] else None)
                 diagnostics["local_evaluations"].append(dict(outer=outer, block=b, inner=inner,
                     origin=origin, feasible=result["feasible"],
                     cost=result["cost"]+block.constant if result["feasible"] else None,
@@ -383,6 +397,8 @@ def solve_paper(data, scenarios, config):
                     break
                 native_record = None
                 if native_enabled:
+                    if pure_sa:
+                        raise AssertionError("native integer candidate called in pure-SA search")
                     stalled_inner = 0 if ub < local_before-ABSOLUTE_TOLERANCE else stalled_inner+1
                     if not config.quantum_candidates or stalled_inner >= config.native_fallback_patience:
                         native_calls += 1
@@ -424,7 +440,14 @@ def solve_paper(data, scenarios, config):
                         emit("native_candidate", **native_record)
                     break
                 try:
-                    certificate = certify_master(block, cuts, deadline)
+                    if pure_sa:
+                        certificate = dict(lower_bound=lb, seconds=0., status="LP_ONLY")
+                    else:
+                        integer_certifications += 1
+                        certificate = certify_master(block, cuts, deadline)
+                        if variant:
+                            emit("integer_certification", outer=outer, block=b, inner=inner,
+                                 seconds=certificate["seconds"])
                     timings["certification"] += certificate["seconds"]
                     block_record["certification_seconds"] += certificate["seconds"]
                     bound = certificate["lower_bound"]
@@ -454,6 +477,9 @@ def solve_paper(data, scenarios, config):
                 diagnostics["iterations"].append(row)
                 block_record.update(lower=lb, upper=ub, converged=done, inner_iterations=inner)
                 emit("inner_iteration", **row)
+                if variant:
+                    emit("block_bound", outer=outer, block=b, inner=inner, lower=lb,
+                         upper=ub, converged=done)
                 if done:
                     break
             block_record.update(lower=lb, upper=ub)
@@ -521,6 +547,9 @@ def solve_paper(data, scenarios, config):
         termination_reason=status, failure_stage=failure_stage, failure_message=failure_message,
         sa_calls=sa_calls, native_calls=native_calls, llm_call_count=0 if config.rule_advisor else llm_calls,
         rule_call_count=llm_calls if config.rule_advisor else 0)
+    if variant:
+        diagnostics.update(gap_experiment_variant=variant, integer_certifications=integer_certifications,
+                           online_integer_master_calls=native_calls+integer_certifications)
     timings["other"] = max(0., runtime-sum(timings.values()))
     empty = np.empty((0, 0), dtype=int)
     return BendersResult(status, incumbent, best.u if best else empty, best.v if best else empty,
