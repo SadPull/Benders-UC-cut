@@ -9,6 +9,10 @@ Integer certification runs in a separate process after search and never feeds
 candidate generation, multipliers, or stopping conditions. Reference costs and
 schedules are not inputs to search workers.
 
+Offline certification unions existing saved cuts across repeated, exactly equal
+effective cross-block multiplier vectors. It records every source epoch and uses
+only records committed before the checkpoint cutoff; different prices never mix.
+
 The fixed matrix and configuration live in `pure_sa_gap_experiment.py`. Seeds are
 7, 100007, 200007. Final search slots last 1200 seconds, with a separate 600-second
 checkpoint and at most 600 seconds of offline certification per search. Report
