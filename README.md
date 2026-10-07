@@ -1,150 +1,91 @@
-# MATLAB：时间分块 SA + LLM Benders SUC
+# Python：Kaiwu SA + LLM Benders SUC
 
-**最新版本：v0.21.0（待实验）。** 当前代码保留 SA 停滞后的块内融合框架；全天 LLM 提案与反馈闭环实验的计划已制定，相关实现已回退，等待后续实施与验证。
+**连续松弛初始化 → 时间分块 → Benders / QUBO / Kaiwu SA → 拉格朗日切平面协调 → 全天恢复与物理校验。**
 
-从 `LLM-benders-SUC` 的顶层 Python 源码重构，保留原算法主线：
+Python 为默认 `main`，原 MATLAB 代码保存在 `MATLAB` 分支。保留原数学模型，删除实验调度、检查点重放、归因报告、冻结源码和重复实现；旧 Python 历史仍可追溯。
 
-**连续松弛初始化 → 时间分块 → 块内 Benders / QUBO / SA → 拉格朗日切平面协调 → 全天恢复与物理校验。**
+## 安装与运行
 
-运行只需要 MATLAB 和已配置许可证的 Gurobi MATLAB 接口，不依赖 Python、Kaiwu、MATPOWER 或额外 MATLAB 工具箱。已在 MATLAB R2025b、Gurobi 13.0.1 上验证。
+需要 Windows 64 位、Python 3.10、有效 Gurobi 许可证和 Kaiwu 授权。使用独立虚拟环境及提供的 SDK：
 
-## 运行
-
-在 MATLAB 中进入本目录。如果 Gurobi 尚未加入 MATLAB 路径，先运行其安装目录下的 `gurobi_setup`。
-
-```matlab
-result = run_suc();
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt .\kaiwu-1.4.1-cp310-none-win_amd64.whl
+Copy-Item config.example.json config.local.json
 ```
 
-默认使用 RTS-24 的 32 台机组、24 小时、3 个随机场景；3 小时一块，外层最多 20 轮，每块内层最多 20 轮，总预算 600 秒。
+只在首次配置时复制模板，保留已有本地配置。填写 `kaiwu.user_id`、`kaiwu.sdk_code` 后运行：
 
-短运行检查：
-
-```matlab
-result = run_suc(struct('max_outer', 2, 'max_inner', 5, 'time_limit', 120));
-disp(result.status)
-disp(result.objective)
-disp(result.lower_bound)
-disp(result.relative_gap)
+```powershell
+.\.venv\Scripts\python.exe run_suc.py
+# 短运行及可选保存
+.\.venv\Scripts\python.exe run_suc.py --max-outer 1 --max-inner 2 --time-limit 60 --output results/result.json
+.\.venv\Scripts\python.exe run_suc.py --scenario-file data/deterministic.json --max-outer 1 --max-inner 2 --time-limit 60
 ```
 
-确定性场景与结果保存：
+提供的 wheel SHA256：`b55b11a491232bda40d13396c0d0b4409b594092510ef0ff50d973893d35a694`。wheel、虚拟环境、真实授权和结果目录均不提交 Git。无需 MATLAB、MATPOWER 或 QPU；Kaiwu 自身依赖由 pip 安装。
 
-```matlab
-root = fileparts(which('run_suc'));
-result = run_suc(struct('scenario_file', fullfile(root, 'data', 'deterministic.json')));
-save('result.mat', 'result');
+```python
+from run_suc import run_suc
+result = run_suc({"max_outer": 2, "max_inner": 5, "time_limit": 120})
+print(result.status, result.objective, result.lower_bound, result.relative_gap)
+print(result.validation)
 ```
 
-`result.u/v/w` 是“机组 × 小时”矩阵；`result.scenarios(k).p/r` 是对应场景的出力与备用。`history` 记录块内上下界、两类割的数量及 SA 统计，`outer_history` 记录外层协调。结果默认返回工作区，不自动生成实验目录。
+不传 `--output` 时不自动保存。`u/v/w` 和 `result.scenarios[k].p/r` 为“机组 × 小时”NumPy 矩阵。结果提供状态、成本、上下界、间隙、独立校验和精简的 `history` / `outer_history` / `llm_history`，不持有求解器对象或完整退火轨迹。Python 中无穷界保留 `inf`，JSON 中表示为 `null`。
 
-## 精简后的文件
+## 参数与算法约定
 
-保留 15 个运行用 `.m` 文件、1 个测试文件和 4 个数据 JSON。
+默认 32 台机组、24 小时、3 个场景。`run_suc(options)` 的显式选项优先于本地配置，未知参数报错。
 
-| 文件 | 职责 |
-|---|---|
-| `run_suc.m` | 唯一运行入口、参数检查、随机种子 |
-| `llm_config.m` | 自定义 LLM 开关、API 地址、Key、模型及调用参数 |
-| `+suc/load_data.m` | 读取并检查原 JSON 格式 |
-| `+suc/model.m` | 全天稀疏模型及索引 |
-| `+suc/partition.m` | 约束分块与跨块定价 |
-| `+suc/optimize.m` | Gurobi 接口、连续松弛的对偶下界 |
-| `+suc/dispatch.m` | 连续调度、最优性割、弹性可行性割 |
-| `+suc/master.m` | 精确块主问题，仅输出认证下界 |
-| `+suc/qubo.m` | 目标寄存器、容量格点、保守量化与松弛位 |
-| `+suc/anneal.m` | MATLAB 本地 Metropolis 模拟退火 |
-| `+suc/coordinate.m` | 拉格朗日切平面协调 LP |
-| `+suc/repair.m` | 全天最小开停机时间及容量修复 |
-| `+suc/llm.m` | 可选 HTTP 候选建议 |
-| `+suc/validate.m` | 独立物理与成本校验 |
-| `+suc/solve.m` | 内外层循环、候选恢复与结果 |
-| `tests/test_core.m` | 数值正确性、编码、边界和端到端回归 |
+| 参数 | 默认值 | 含义 |
+|---|---:|---|
+| `block_hours` | 3 | 时间块长度，支持较短末块 |
+| `max_outer` / `max_inner` | 20 / 20 | 外层与各块内层上限 |
+| `time_limit` / `certify_seconds` | 600 / 30 | 总求解与单次认证预算，秒 |
+| `tolerance` | 0.0001 | 相对容差，另加固定绝对容差 0.00001 |
+| `seed` / `verbose` | 7 / true | 随机种子与进度输出 |
+| `theta_step` / `penalty` / `reserve_scale` | 1 / 1000000 / 100 | QUBO 目标步长、罚系数和容量缩放 |
+| `sa_reads` / `sa_sweeps` | 16 / 5 | Kaiwu 解池大小 `size_limit` 与 `iterations_per_t` |
+| `sa_temperature` / `sa_cooling` / `sa_cutoff` | 100 / 0.98 / 0.01 | 按能量尺度调整的温度、冷却与终温系数 |
 
-未迁入：实验结果、冻结源码副本、历史报告、绘图与报告脚本、多套实验入口、Codex 文件通信、HTTP 重测框架、量子 SDK 包装，以及重复的模型实现。原项目目录保持原样，新版位于 `LLM-benders-SUC2`。
-
-## 模型与算法约定
-
-- 保留随机场景的期望二次燃料成本、固定开机/启动/关闭费用、负荷平衡、备用、最小出力、启动与关闭出力限制、爬坡、最小开停机时间和初始剩余约束。
-- 小时之间使用原始初始出力及无条件出力差爬坡限制。最小开停机约束截断至第 24 小时；最后一小时禁止停机。分块不重置初始条件，跨块约束进入外层协调，支持短末块。
-- 下界来自连续松弛的对偶值和整数块主问题的 `objbound`。认证主问题的整数解不进入 SA、割生成或全天恢复。QP 割截距用盒约束上的对偶目标重算，不直接用近似原始目标锚定。
-- QUBO 中的 Benders 割采用单侧向下量化，容量用十进制整数格点编码（容量输入最多六位小数）；认证和实际调度使用原始精度。SA 能量不是下界。
-- 每次更新外层乘子都会重建块内成本和割，并重新调度历史候选；全天成本始终按原目标重算，通过独立校验后才更新可行上界。
-- SA 改为 MATLAB 实现，按单比特翻转能量尺度升温，冷却到目标分辨率。保留一个热启动并使用随机重启；随机数和采样实现与 Kaiwu 不同，不能期待相同搜索轨迹或耗时。
-- 精简保留严格内外层停止规则。某块在内层上限内未收敛便返回 `INNER_NOT_CONVERGED`，不更新外层乘子。`DUAL_CONVERGED` 只表示对偶协调收敛；原整数问题的间隙仍看 `relative_gap`。
-
-`tolerance` 默认 `1e-4`，绝对容差 `1e-5`。还可能返回 `MAX_ITERATIONS`、`TIME_LIMIT` 或带阶段名的 `*_FAILED`；详细原因在 `message` 中。时间预算在求解和 SA 检查点生效，模型构造和正在进行的 HTTP 调用可能造成少量超时；截止后的候选不会记入结果。
+- 保留期望二次燃料成本、固定运行与启停费用、负荷、备用、最小出力、启停容量、爬坡、最小开停机时间和初始剩余约束。末小时禁止停机，最小时间约束截断至末小时。
+- 变量顺序为变量类型、场景、小时、机组。内部索引从 0 开始。分块不重置初始条件，跨块约束进入协调。
+- 下界仅来自重算的连续对偶目标与整数认证 `ObjBound`。认证整数解不进入候选、割、SA 或全天恢复，QUBO 能量不是下界。
+- Benders 割向下量化，容量使用最多六位小数的整数格点；认证和调度使用原始精度。乘子更新后重建成本和割、重新调度历史候选；只有通过独立校验的全天方案更新上界。
+- Gurobi 单线程、Kaiwu 单进程；仅当前 QUBO 在 SDK 调用时转为稠密 Ising 矩阵。固定种子可重复，不污染调用者的 NumPy 随机状态，不要求复现 MATLAB 轨迹。
+- `INNER_NOT_CONVERGED` 表示块内达到上限，停止且不更新乘子。`DUAL_CONVERGED` 只表示对偶协调收敛，原问题仍看 `relative_gap`。还有 `MAX_ITERATIONS`、`TIME_LIMIT` 和带阶段的 `*_FAILED`，原因见 `message`。
+- 计时覆盖模型构建与求解，不含输入加载和 SDK 授权。同步 Kaiwu/HTTP 调用不能强制中断，可能超出预算；迟到候选和认证结果不入账。
 
 ## 可选 LLM
 
-默认关闭。启用后，连续 `llm_patience`（默认 3）个批次改善不足 0.05% 时调用一次，最多 `llm_max_calls`（默认 3）次。使用同步、非流式的 Responses API；旧版实验策略和子代理文件协议不再保留。
+在 `config.local.json` 的 `llm` 中填写完整 Responses `url`、`model`、`api_key`，将 `enabled` 改为 `true`。默认关闭，`timeout=600`、`patience=3`、`max_calls=3`；对应 `llm_*` 运行参数可覆盖本地设置。
 
-打开项目根目录的 `llm_config.m`，一次填写以下配置：
+连续 `patience` 批改善不足 0.05% 时请求最多三个候选，每次求解最多调用 `max_calls` 次。按 [Responses 协议](https://developers.openai.com/api/docs/guides/migrate-to-responses) 同步非流式调用，设置 `stream=false`、`store=false`，提取 `output` 中消息的 `output_text`。提示的小时从 1 开始，变量和稀疏矩阵索引明确标记从 0 开始。
 
-```matlab
-o.llm_enabled = true;
-o.llm_url = 'https://YOUR-SERVICE/v1/responses';
-o.llm_api_key = 'YOUR-API-KEY';
-o.llm_model = 'YOUR-MODEL';
-```
-
-保存后，每次直接运行：
-
-```matlab
-result = run_suc();
-```
-
-`llm_url` 必须是服务的**完整 Responses 请求 URL**（通常以 `/v1/responses` 结尾）。无需设置环境变量或每次传入参数；`llm_timeout`、`llm_patience`、`llm_max_calls` 也在同一文件中修改。已有的 `run_suc(options)` 仍可用于临时覆盖配置。
-
-请求按 [OpenAI Responses 官方文档](https://developers.openai.com/api/docs/guides/migrate-to-responses) 使用 `model`、`instructions`、`input`、`stream=false` 和 `store=false`，从返回的 `output` 中提取 `output_text`，跳过推理等其他类型的条目。
-
-LLM 仅提供 `u/v/w` 二进制候选，必须再通过约束检查、连续调度和全天物理校验。HTTP 失败、响应未完成、无文本或格式错误时继续 SA；状态保存在 `llm_history`。Key 只从 `llm_config.m` 读取，不读取旧项目的 `.env` 或 `LLM_API_KEY`，运行结果和日志不保存密钥或请求头。验证使用离线模拟，未调用真实 LLM 服务。
+候选须经过格式、离散约束、连续调度、全天恢复和物理校验。失败后继续 SA，失败调用也计数；只保存不含密钥的状态摘要。保留默认候选/割融合，不保留实验账本、重放或特殊再升温。
 
 ## 验证
 
-```matlab
-tests = runtests('tests');
-assertSuccess(tests);
-```
-
-12 项测试全部通过，包含小实例全枚举割校验、精确主问题与完整 MIQP 对照、启动/关闭容量、QUBO 全编码枚举、容量格点与保守量化、跨块成本恒等式、自由等式乘子、Responses 请求与响应离线验证、本地 LLM 配置加载、内外层收敛、独立物理校验、截止时间及 RTS-24 可重复运行。
-
-迁移时还直接对照了原项目 `IndexedUC`：21,960 条约束、6,912 个变量、56,996 个非零项，矩阵、右端项、目标系数和边界逐项完全相同。随机场景下，全开机固定方案成本约为 **1,220,423.773288**；两种实现的连续松弛目标约为 **841,376.53**，差约 0.0014，来自求解数值精度。
-
-交付时的 5 轮内层短跑得到可行成本 **933,522.215366**、认证下界 **841,376.524841**、间隙 **9.8708%**，独立校验最大物理残差约 `1.36e-12 MW`。SA 生成了新的候选和割，但第一块尚未收敛，故状态为 `INNER_NOT_CONVERGED`；这一检查不表示已经求得全天最优解。
-
-独立完整 MIQP 可使用同一精确模型，仅用于事后比较：
-
-```matlab
-root = fileparts(which('run_suc'));
-[d, s] = suc.load_data(fullfile(root,'data','units.json'), ...
-    fullfile(root,'data','stochastic.json'));
-reference = suc.optimize(suc.model(d,s), 60, true);
-% reference.objval 是可行目标（仅找到解时存在）；reference.lower 是认证下界。
-```
-
-## 数据来源
-
-`data/units.json`、`stochastic.json`、`deterministic.json` 和 `provenance.json` 从原项目原样保留。来源固定版本、哈希、机组映射和转换说明见 `provenance.json`；精简版直接使用这些已转换数据，不附带 Python 转换器或原始数据副本。
-
-原始公开来源：[MATPOWER IEEE RTS-24](https://github.com/MATPOWER/matpower/blob/8b326f00d496864ed81169f7e684568fc1f7006d/data/case24_ieee_rts.m) 与 [ucacopf RTS79](https://github.com/anyacastillo/ucacopf/blob/001cf29dc2e9b3d26e71146f82db35fa379b4dca/RTS79_ucacopf.dat)。总装机 3405 MW、峰值基础负荷 2850 MW；同步调相机已排除。随机倍率 0.90/1.00/1.05、概率 0.25/0.50/0.25 和 5% 备用率属于项目设定。
-
-本模型是聚合无网络 SUC，不含输电约束、冷热启动成本或水电能量预算；这与原项目建模口径一致。
-
-## SA 停滞后的融合实验
-
-配置 `llm_config.m` 后，在项目根目录运行首批筛查：
-
 ```powershell
-.\scripts\run_stagnation.ps1 -Directory results/stagnation-20261007
+.\.venv\Scripts\python.exe -m pytest -q
+# 无真实授权时，先运行数值和 LLM 离线测试
+.\.venv\Scripts\python.exe -m pytest -q -m "not integration"
 ```
 
-固定种子 7、17、27，每个首个停滞检查点最多调用一次 LLM，C/D 共享响应并分别扣除实际调用耗时。四条分支为 A 继续 SA、B 普通再升温、C LLM 候选与割、D 额外候选热启动；不运行纯 LLM 组。当前调度器串行执行数值任务和 HTTP 请求。已有校验通过的工件会被复用，失败调用不自动重试；新实验使用新的输出目录。
+真实 Kaiwu 测试需要本地授权；缺少授权时明确跳过，不能视为真实验收完成。测试不调用真实 LLM 服务。
 
-MATLAB 底层入口为 `run_stagnation_experiment(action, directory, seed, mode)`，支持 `capture`、`prepare`、`import`、`branch`、`diagnose`、`reference`、`report`、`online`、`online-report`。首批 HTTP 请求由 PowerShell 调度器负责，`import` 消费已落盘的响应；第二阶段在运行中的 MATLAB 内同步请求，并使用独立全局调用账本。仅重新生成报告可运行：
+基线为 MATLAB 提交 `aacef8a6d49ce126a28f70a694c4013f9a1c3b24`。两种场景的矩阵、右端项、目标和边界逐项一致，测试保存 MATLAB 导出的模型指纹。
 
-```matlab
-suc.stagnation_report('results/stagnation-20261007');
-```
+| 场景 | 约束 / 变量 / 非零项 | MATLAB 固定方案成本 |
+|---|---|---:|
+| 确定性 | 12648 / 3840 / 30636 | 1223143.120217 |
+| 随机 | 21960 / 6912 / 56996 | 1220423.773288 |
 
-输出包括 `report.md`、`summary.json` 和 `curves.csv`；全天校验尚未完成时标记 `PENDING`，不会提前决定扩展。参考解只作事后比较，不进入搜索。三个种子的结果用于筛查，不构成统计显著性结论。达到预定门槛后，调度器自动执行已授权的第二阶段：种子 107、117、127，A 与选出的融合方式，共六次完整求解调用，新增模型调用总上限六次。首批重放受 1200 秒和内层总计 200 批双上限约束；第二阶段受 1800 秒和内层 200 批双上限约束，可能提前以 `INNER_NOT_CONVERGED` 结束。第二阶段结束后可用 `suc.stagnation_online_report` 生成离线归因报告。
+真实 Kaiwu 两轮短跑：确定性成本约 883727.892202、下界约 815439.903584；随机成本约 933522.215366、下界约 841376.524840、间隙约 9.8708%。两者独立校验通过且为 `INNER_NOT_CONVERGED`，不表示已达全局最优。固定种子重复结果一致。集成短跑使用较快采样参数，另验证默认采样参数的命令行运行。
+
+## 数据
+
+四个 JSON 原样保留，来源版本、哈希和转换口径见 `data/provenance.json`。公开来源为 [MATPOWER RTS-24](https://github.com/MATPOWER/matpower/blob/8b326f00d496864ed81169f7e684568fc1f7006d/data/case24_ieee_rts.m) 和 [ucacopf RTS79](https://github.com/anyacastillo/ucacopf/blob/001cf29dc2e9b3d26e71146f82db35fa379b4dca/RTS79_ucacopf.dat)。
+
+装机 3405 MW、基础峰值负荷 2850 MW。随机倍率 0.90/1.00/1.05、概率 0.25/0.50/0.25 和 5% 备用率为项目设定。模型为聚合无网络 SUC，不含输电约束、冷热启动成本或水电能量预算。
