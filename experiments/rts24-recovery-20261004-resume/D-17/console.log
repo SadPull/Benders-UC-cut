@@ -1,8 +1,0 @@
-Set parameter Username
-Set parameter LicenseID to value 2822179
-Academic license - for non-commercial use only - expires 2027-05-14
-Set parameter Threads to value 1
-Set parameter Seed to value 17
-WAIT_SUBAGENT C:\Users\12433\Desktop\LLM-benders-SUC\experiments\rts24-recovery-20261004-resume\D-17\calls\001
-WAIT_SUBAGENT C:\Users\12433\Desktop\LLM-benders-SUC\experiments\rts24-recovery-20261004-resume\D-17\calls\002
-WAIT_SUBAGENT C:\Users\12433\Desktop\LLM-benders-SUC\experiments\rts24-recovery-20261004-resume\D-17\calls\003

@@ -1,21 +1,5 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.venv/
-venv/
-results/
-*.log
-kaiwu-*.whl
 .env
-
-# Keep audited logs in the frozen experiment archives.
-!experiments/rts24-minimal-20261003/**/*.log
-!experiments/rts24-recovery-20261004*/**/*.log
-!experiments/rts24-block-master-*/**/*.log
-!experiments/rts24-cd-completion-*/**/*.log
-!experiments/rts24-cd-desktop-*/**/*.log
-
-# Publish selected regression logs with curated gap experiment reports.
-!experiments/rts24-gap-closure-20261006/**/*.log
-!experiments/rts24-pure-sa-gap-v3-20261006/**/*.log
+*.asv
+*.mat
+results/
+slprj/

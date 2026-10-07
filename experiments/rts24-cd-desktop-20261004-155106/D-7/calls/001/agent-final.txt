@@ -1,1 +1,0 @@
-Wrote four candidate schedules to D-7/calls/001/candidates.json. No solvers, external APIs, or other files were used.

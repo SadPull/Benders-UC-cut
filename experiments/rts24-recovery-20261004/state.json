@@ -1,4 +1,0 @@
-{
-  "status": "transport_preflight_failed",
-  "reason": "Independent CLI authentication route differs from desktop route; original attempt retained, remaining runs not launched"
-}

@@ -1,1 +1,0 @@
-Wrote four candidates to [candidates.json](C:/Users/12433/Desktop/LLM-benders-SUC/experiments/rts24-recovery-20261004-resume/C-17/calls/002/candidates.json).

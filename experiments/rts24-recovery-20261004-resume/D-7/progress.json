@@ -1,8 +1,0 @@
-{
-  "kind": "llm_start",
-  "elapsed_seconds": 966.7822445999991,
-  "sa_calls": 5,
-  "iteration": 5,
-  "call_index": 2,
-  "batch_index": 2
-}

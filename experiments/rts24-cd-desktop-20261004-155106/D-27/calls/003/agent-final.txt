@@ -1,1 +1,0 @@
-Search reached 1800-second deadline; collaboration.interrupt_agent returned previous_status running; late output excluded.

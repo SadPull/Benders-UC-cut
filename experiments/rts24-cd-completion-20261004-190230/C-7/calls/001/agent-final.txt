@@ -1,1 +1,0 @@
-已写入 4 个候选方案至 C-7/calls/001/candidates.json。

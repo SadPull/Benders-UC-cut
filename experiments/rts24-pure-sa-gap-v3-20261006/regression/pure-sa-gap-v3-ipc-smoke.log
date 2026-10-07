@@ -1,3 +1,0 @@
-search ipc-smoke: completed, 13.16s
-certify ipc-smoke: completed, 0.49s
-{'solver_status': 'TIME_LIMIT', 'integer_search_calls': 0, 'certified_lower': 76.99999, 'objective': 77.0, 'audit_errors': []}

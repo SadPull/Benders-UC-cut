@@ -1,7 +1,0 @@
-{
-  "automation_id": "rts-24",
-  "status": "deleted",
-  "reason": "User requires live monitoring in the active conversation and forbids scheduled monitoring",
-  "recorded_at": 1791091098.6018171,
-  "monitoring": "active conversation reads processes, events and receipts until completion"
-}

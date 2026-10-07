@@ -1,216 +1,130 @@
-# RTS-24 SUC：SA + LLM Benders
+# MATLAB：时间分块 SA + LLM Benders SUC
 
-## 纯 SA 主问题与 Gap v3 实验
+从 `LLM-benders-SUC` 的顶层 Python 源码重构，保留原算法主线：
 
-`v0.20.0` 为实验预发布，主目标尚未达成。新增纯 SA 主问题搜索与独立离线整数认证，
-默认关闭新协议；保留原算法和此前实验。详见 [发布与归档说明](docs/releases/v0.20.0.md)
-和 [冻结实验协议](docs/pure-sa-gap-v3-protocol.md)。
+**连续松弛初始化 → 时间分块 → 块内 Benders / QUBO / SA → 拉格朗日切平面协调 → 全天恢复与物理校验。**
 
-```powershell
-python -m suc_benders.pure_sa_gap_experiment --output-dir results/pure-sa-gap-new --previous-dir <已解压旧实验目录>/revised
-python -m suc_benders.pure_sa_gap_experiment --output-dir <已解压完整v3实验目录> --report-only
-```
-
-四种随机 SUC 分块筛查均被数值审计排除，因此后续消融与三种子 1200 秒确认未运行。
-纯 SA 在线整数主问题调用为零；有效经典诊断最好 Gap 为 4.496%，不能宣称达到论文相近量级。
-[结果解读](experiments/rts24-pure-sa-gap-v3-20261006.findings.md)记录乘子尺度、采样过滤及审计偏差。
-
-完整原始包、复核包与 SHA256 见 [GitHub v0.20.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.20.0)。
-Git 展示目录是精简报告；重建与复现实验应使用 Release 中的完整冻结包。
-
-## Gap 补足实验
-
-`python -m suc_benders.gap_closure_experiment --output-dir results/gap-closure-new --historical-dir <原始规模确认目录>`
-运行冻结的两小时补足协议：32 机组随机 SUC，比较纯 SA、经典分解和 SA＋经典候选兜底。
-历史目录需包含 `inputs/` 和 `references/`，用于核验已有的确定性参考；随机参考重新独立认证。
-完整预算、选块与验收规则见 [实验协议](docs/gap-closure-protocol.md)。
-
-`BendersConfig.native_fallback_patience=None` 默认关闭；设置为 3 时，连续三次内层局部上界未改善后
-调用经典主问题候选，候选经过原调度和恢复流程。经典候选与认证下界分别记录。
-`--report-only` 可在相同冻结源码上重建报告。所有迟到结果和失败保留，计分仅使用截止前结果。
-
-本项目研究 IEEE RTS-24 派生随机机组组合问题：32 台机组、24 个小时。
-默认采用连续松弛初始化 → 3 小时时间分块 → 块内 Benders／Kaiwu 本地 SA →
-拉格朗日切平面协调。Gurobi 求解连续调度，并仅用整数块主问题的 `ObjBound`
-认证下界；认证整数方案不会进入候选、割生成、SA 初始化或全天方案恢复。
-LLM／规则建议可选，全天候选仍按原成本调度并通过物理校验。
-
-当前版本为 `v0.20.0`（实验预发布），变更见 [CHANGELOG.md](CHANGELOG.md)。
-[项目阅读教材](docs/project-textbook.md)保留 `bae3200` 历史源码说明，
-新版入口见本文；已有归档、冻结源码和校验和保持原样。
-
-## 安装
-
-使用 Python 3.10、Kaiwu SDK 1.4.1 和可用的 Gurobi 许可证：
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-Kaiwu 激活方式见 [SDK 安装说明](https://kaiwu-sdk-docs.qboson.com/zh/latest/source/getting_started/sdk_installation_instructions.html)。
-这里只使用本地模拟退火，不调用 QPU。
-
-## 数据
-
-[数据说明与来源](data/rts24/README.md)包含公开输入、转换器及校验和。
-总装机容量 3405 MW，峰值负荷 2850 MW。模型采用无网络聚合系统和固定启动费用；
-不包含输电约束、冷热启动费用或水电能量预算。
-
-| 配置 | 场景 | 备用 |
-|---|---|---|
-| `data/rts24/deterministic.json` | 公开小时负荷，概率 1 | 0 |
-| `data/rts24/stochastic.json` | 负荷倍率 0.90／1.00／1.05，概率 0.25／0.50／0.25 | 5% |
-
-随机场景及备用率是项目设定。默认输入是 `data/rts24/units.json`，
-不传 `--scenario-file` 时采用上述随机场景。
-
-```powershell
-python data/rts24/convert.py --check
-```
+运行只需要 MATLAB 和已配置许可证的 Gurobi MATLAB 接口，不依赖 Python、Kaiwu、MATPOWER 或额外 MATLAB 工具箱。已在 MATLAB R2025b、Gurobi 13.0.1 上验证。
 
 ## 运行
 
-纯 SA：
+在 MATLAB 中进入本目录。如果 Gurobi 尚未加入 MATLAB 路径，先运行其安装目录下的 `gurobi_setup`。
 
-```powershell
-python -m suc_benders --strategy sa --rounds 20 --block-hours 3 --max-inner-iterations 20 --output-dir results/rts24-sa-new
+```matlab
+result = run_suc();
 ```
 
-SA 与 Astra 固定交替（需在 Codex 中调度子代理）：
+默认使用 RTS-24 的 32 台机组、24 小时、3 个随机场景；3 小时一块，外层最多 20 轮，每块内层最多 20 轮，总预算 600 秒。
 
-```powershell
-python -m suc_benders --strategy fixed --rounds 2 --output-dir results/rts24-astra-new
+短运行检查：
+
+```matlab
+result = run_suc(struct('max_outer', 2, 'max_inner', 5, 'time_limit', 120));
+disp(result.status)
+disp(result.objective)
+disp(result.lower_bound)
+disp(result.relative_gap)
 ```
 
-连续三个内层 SA 批次降本不足 0.05% 后，顺序调用最多三次 LLM；每次调用后先验证并更新反馈：
+确定性场景与结果保存：
 
-```powershell
-python -m suc_benders --strategy stagnation_burst --rounds 10 --http-base-url https://api.deepseek.com --http-model deepseek-flash --output-dir results/rts24-http-new
+```matlab
+root = fileparts(which('run_suc'));
+result = run_suc(struct('scenario_file', fullfile(root, 'data', 'deterministic.json')));
+save('result.mat', 'result');
 ```
 
-HTTP 模式从进程环境读取 `LLM_API_KEY`。Astra 使用文件通信，普通终端运行会等待
-Codex 回传候选。两种方式均保存请求、响应、校验和反馈。
+`result.u/v/w` 是“机组 × 小时”矩阵；`result.scenarios(k).p/r` 是对应场景的出力与备用。`history` 记录块内上下界、两类割的数量及 SA 统计，`outer_history` 记录外层协调。结果默认返回工作区，不自动生成实验目录。
 
-| `--strategy` | 行为 |
+## 精简后的文件
+
+保留 15 个运行用 `.m` 文件、1 个测试文件和 4 个数据 JSON。
+
+| 文件 | 职责 |
 |---|---|
-| `sa` | 纯 SA |
-| `fixed` | 每个内层 SA 批次后调用一次 LLM |
-| `stagnation` | 首个批次调用，之后连续三个 SA 批次改善不足时调用一次 |
-| `stagnation_burst` | 连续三个 SA 批次改善不足时顺序调用三次 |
-| `llm` | LLM 与连续子问题，无 SA |
+| `run_suc.m` | 唯一运行入口、参数检查、随机种子 |
+| `llm_config.m` | 自定义 LLM 开关、API 地址、Key、模型及调用参数 |
+| `+suc/load_data.m` | 读取并检查原 JSON 格式 |
+| `+suc/model.m` | 全天稀疏模型及索引 |
+| `+suc/partition.m` | 约束分块与跨块定价 |
+| `+suc/optimize.m` | Gurobi 接口、连续松弛的对偶下界 |
+| `+suc/dispatch.m` | 连续调度、最优性割、弹性可行性割 |
+| `+suc/master.m` | 精确块主问题，仅输出认证下界 |
+| `+suc/qubo.m` | 目标寄存器、容量格点、保守量化与松弛位 |
+| `+suc/anneal.m` | MATLAB 本地 Metropolis 模拟退火 |
+| `+suc/coordinate.m` | 拉格朗日切平面协调 LP |
+| `+suc/repair.m` | 全天最小开停机时间及容量修复 |
+| `+suc/llm.m` | 可选 HTTP 候选建议 |
+| `+suc/validate.m` | 独立物理与成本校验 |
+| `+suc/solve.m` | 内外层循环、候选恢复与结果 |
+| `tests/test_core.m` | 数值正确性、编码、边界和端到端回归 |
 
-可设置 `--time-limit-seconds`、`--max-llm-calls`、`--seed`、`--scenario-file`。
-输出目录必须是新目录。`python -m suc_benders.astra_run` 使用同一入口。
-完整文件通信、取消、自动反馈及审计方式见 [运行说明](docs/astra-module.md)。
+未迁入：实验结果、冻结源码副本、历史报告、绘图与报告脚本、多套实验入口、Codex 文件通信、HTTP 重测框架、量子 SDK 包装，以及重复的模型实现。原项目目录保持原样，新版位于 `LLM-benders-SUC2`。
 
-默认 `--block-hours 3`（支持 1／2／3／5，保留短末块）、`--rounds 20`（外层上限）、
-`--max-inner-iterations 20`、`--convergence-tolerance 0.0001`，绝对容差固定为 `1e-5`。
-块内判据为 `U-L <= 1e-5 + tol*max(1,abs(U))`；外层判据为
-`m-L_best <= 1e-5 + tol*max(1,abs(L_best))`。旧 `target_cost`、
-`stop_on_no_new_candidates`、`--target-reference-gap` 和无限外层迭代明确拒绝。
+## 模型与算法约定
 
-- `DUAL_CONVERGED`：仅表示拉格朗日对偶协调收敛，不保证原整数问题 gap 为零。
-- `INNER_NOT_CONVERGED`：某块达到内层上限，立即结束，不更新外层乘子。
-- `MAX_ITERATIONS`：达到外层上限。
-- `TIME_LIMIT`、`CANCELLED`、`EVALUATION_LIMIT`、`LLM_CALL_LIMIT`：资源或用户中断。
-- 初始化、松弛、认证、协调失败均报告具体阶段，保留此前验证的方案和下界。
+- 保留随机场景的期望二次燃料成本、固定开机/启动/关闭费用、负荷平衡、备用、最小出力、启动与关闭出力限制、爬坡、最小开停机时间和初始剩余约束。
+- 小时之间使用原始初始出力及无条件出力差爬坡限制。最小开停机约束截断至第 24 小时；最后一小时禁止停机。分块不重置初始条件，跨块约束进入外层协调，支持短末块。
+- 下界来自连续松弛的对偶值和整数块主问题的 `objbound`。认证主问题的整数解不进入 SA、割生成或全天恢复。QP 割截距用盒约束上的对偶目标重算，不直接用近似原始目标锚定。
+- QUBO 中的 Benders 割采用单侧向下量化，容量用十进制整数格点编码（容量输入最多六位小数）；认证和实际调度使用原始精度。SA 能量不是下界。
+- 每次更新外层乘子都会重建块内成本和割，并重新调度历史候选；全天成本始终按原目标重算，通过独立校验后才更新可行上界。
+- SA 改为 MATLAB 实现，按单比特翻转能量尺度升温，冷却到目标分辨率。保留一个热启动并使用随机重启；随机数和采样实现与 Kaiwu 不同，不能期待相同搜索轨迹或耗时。
+- 精简保留严格内外层停止规则。某块在内层上限内未收敛便返回 `INNER_NOT_CONVERGED`，不更新外层乘子。`DUAL_CONVERGED` 只表示对偶协调收敛；原整数问题的间隙仍看 `relative_gap`。
 
-输出 `convergence.json` 与 `result.json` 分别列出全天可行成本、认证下界、原问题 gap、
-协调上界和终止原因；诊断记录外层／块／内层编号、乘子、块上下界和认证耗时。
-QUBO 能量、量化目标和认证器可行目标均不作为下界。各块成本含拉格朗日价格，不能用作全天成本。
-乘子变化后重建割与成本缓存，旧候选必须重新调度；跨块约束只进入协调，初始／终端条件不在块边界重置。
+`tolerance` 默认 `1e-4`，绝对容差 `1e-5`。还可能返回 `MAX_ITERATIONS`、`TIME_LIMIT` 或带阶段名的 `*_FAILED`；详细原因在 `message` 中。时间预算在求解和 SA 检查点生效，模型构造和正在进行的 HTTP 调用可能造成少量超时；截止后的候选不会记入结果。
 
-[新版验收记录](experiments/rts24-temporal-20261005/README.md)包含枚举端到端测试及
-确定性／随机 RTS-24 各一次种子 7、禁用 LLM、60 秒预算的真实 SA 检查。
+## 可选 LLM
 
-固定三机组的 1／3／5 小时分块对照：
+默认关闭。启用后，连续 `llm_patience`（默认 3）个批次改善不足 0.05% 时调用一次，最多 `llm_max_calls`（默认 3）次。使用同步、非流式的 Responses API；旧版实验策略和子代理文件协议不再保留。
 
-绘图额外需要 Matplotlib，本轮验证版本为 `3.10.3`：
+打开项目根目录的 `llm_config.m`，一次填写以下配置：
 
-```powershell
-python -m pip install matplotlib==3.10.3
-python -m suc_benders.three_unit_block_experiment --output-dir results/three-unit-blocks-new
+```matlab
+o.llm_enabled = true;
+o.llm_url = 'https://YOUR-SERVICE/v1/responses';
+o.llm_api_key = 'YOUR-API-KEY';
+o.llm_model = 'YOUR-MODEL';
 ```
 
-保留 24 小时时域，每组使用三个变化种子，每次预算 90 秒、内层 60 次、外层 20 次。
-输出逐块收敛记录与曲线；加 `--report-only` 可从原始结果重建报告。
+保存后，每次直接运行：
 
-[三机组分块实测报告](experiments/three-unit-blocks-20261005-232743/README.md)：
-1 小时三个种子均收敛；3、5 小时各两个种子完成对偶收敛，5 小时三个种子均找到独立参考最优方案。
-
-## 独立参考与基线验证
-
-```powershell
-python -m suc_benders.full --scenario-file data/rts24/deterministic.json --time-limit 600 --mip-gap 0.0001
-python -m suc_benders.rts24_experiment --output-dir results/rts24-baseline-new
+```matlab
+result = run_suc();
 ```
 
-基线验证要求干净且已提交的工作区和新目录。它串行完成两个配置的 SA（种子 7、
-候选池 16、最多 20 外层／20 内层／600 秒），再求独立参考（单线程、600 秒、MIPGap 1e-4），
-并校验每个完整方案。该命令不会调用 LLM。
+`llm_url` 必须是服务的**完整 Responses 请求 URL**（通常以 `/v1/responses` 结尾）。无需设置环境变量或每次传入参数；`llm_timeout`、`llm_patience`、`llm_max_calls` 也在同一文件中修改。已有的 `run_suc(options)` 仍可用于临时覆盖配置。
 
-## 保留的 RTS-24 结果
+请求按 [OpenAI Responses 官方文档](https://developers.openai.com/api/docs/guides/migrate-to-responses) 使用 `model`、`instructions`、`input`、`stream=false` 和 `store=false`，从返回的 `output` 中提取 `output_text`，跳过推理等其他类型的条目。
 
-最小必要性对照实验（15 次搜索 + 1 次参考）使用独立入口：
+LLM 仅提供 `u/v/w` 二进制候选，必须再通过约束检查、连续调度和全天物理校验。HTTP 失败、响应未完成、无文本或格式错误时继续 SA；状态保存在 `llm_history`。Key 只从 `llm_config.m` 读取，不读取旧项目的 `.env` 或 `LLM_API_KEY`，运行结果和日志不保存密钥或请求头。验证使用离线模拟，未调用真实 LLM 服务。
 
-```powershell
-python -m suc_benders.minimal_experiment --output-dir experiments/rts24-minimal-new
+## 验证
+
+```matlab
+tests = runtests('tests');
+assertSuccess(tests);
 ```
 
-该入口冻结源码和输入后串行运行 A 固定种子 SA、B 逐轮换种子 SA、C LLM-only、
-D SA+LLM、E SA+规则启发式，各取种子 7/17/27，搜索预算 1800 秒。
-C/D 各最多三次全新 Astra/max 子代理调用，需要 Codex 按 `subagent.claim/receipt`
-调度；C 用完额度结束，其余组继续至算法停止或预算截止。E 默认总共三轮规则提案，
-`--rule-max-calls 0` 可选择每次停滞均触发三轮；每轮至多四个不同候选。
-规则候选采用提示词中相同的收益表，尝试整段关机及两端修剪。
-运行过程中生成 `report.md`、`summary.json` 和 `curves.csv`，包括截止时刻成绩、
-原始/修复/调度逐级统计、贡献来源、分项耗时及独立物理复核。
-参考解只用于事后比较，不用于停止或生成候选。三个重复仅用于初步筛查。
+12 项测试全部通过，包含小实例全枚举割校验、精确主问题与完整 MIQP 对照、启动/关闭容量、QUBO 全编码枚举、容量格点与保守量化、跨块成本恒等式、自由等式乘子、Responses 请求与响应离线验证、本地 LLM 配置加载、内外层收敛、独立物理校验、截止时间及 RTS-24 可重复运行。
 
-| 归档 | 结果 |
-|---|---|
-| [分块 SA 主问题微基准](experiments/rts24-block-master-20261005-130325/README.md) | 50 个快照、150 次 SA、2400 条候选完整完成；3h 原始离散可行率 5.21%，6h 为 0%，两组均未通过筛查；逐样本与原归档哈希复核完成，经典参考数值边界单列 |
-| [中断实验补跑](experiments/rts24-recovery-20261004-resume/README.md) | C／17、D／7、C／27、D／17 均按 1800 秒预算完成，数值审计通过；实时监测，累计恢复会话 17／18 次，完整响应为 2、1、2、2 次；先前失败、中断及全部结果保留 |
-| [最小必要性实验](experiments/rts24-minimal-20261003/analysis.md) | 15 个预定结果及 2 次标记补跑；数值审计通过，但 C／17 补跑、D／7 无模型响应，协同证据仍不足；全部 17 次尝试保留 |
-| [SA 基线](experiments/rts24-baseline-20261002/README.md) | 三轮后确定性／随机配置的参考成本差分别为 46.89%／32.70% |
-| [Astra burst](experiments/rts24-sa-llm-burst-20261002/report.md) | 5 次 SA、2 次 Astra；成本 889097.785912，参考差 0.455455%，达到严格 0.5% 目标 |
-| [DeepSeek burst](experiments/rts24-deepseek-burst-20261002/report.md) | 用户停止；成本 907432.581261，参考差 2.527027%，未达到修订后的 1% 目标 |
+迁移时还直接对照了原项目 `IndexedUC`：21,960 条约束、6,912 个变量、56,996 个非零项，矩阵、右端项、目标系数和边界逐项完全相同。随机场景下，全开机固定方案成本约为 **1,220,423.773288**；两种实现的连续松弛目标约为 **841,376.53**，差约 0.0014，来自求解数值精度。
 
-归档保留当次源码、输入、运行记录与审计，文件校验和保持不变。复现当次结果应使用
-压缩包中的源码快照；当前源码清理后不能冒充原版本或恢复原指纹的运行。
-这些单种子实验不构成速度优势或全局最优性证明。
+交付时的 5 轮内层短跑得到可行成本 **933,522.215366**、认证下界 **841,376.524841**、间隙 **9.8708%**，独立校验最大物理残差约 `1.36e-12 MW`。SA 生成了新的候选和割，但第一块尚未收敛，故状态为 `INNER_NOT_CONVERGED`；这一检查不表示已经求得全天最优解。
 
-## 分块 SA 主问题微基准
+独立完整 MIQP 可使用同一精确模型，仅用于事后比较：
 
-下面的独立入口比较全时域、3 小时和 6 小时块，固定经典价格和 Benders 主问题，
-不调用 LLM，不运行完整外层拉格朗日协调，与默认的完整协调流程相互独立：
-
-```powershell
-python -m suc_benders.block_master_experiment --output-dir experiments/rts24-block-master-new
+```matlab
+root = fileparts(which('run_suc'));
+[d, s] = suc.load_data(fullfile(root,'data','units.json'), ...
+    fullfile(root,'data','stochastic.json'));
+reference = suc.optimize(suc.model(d,s), 60, true);
+% reference.objval 是可行目标（仅找到解时存在）；reference.lower 是认证下界。
 ```
 
-先冻结源码与数据并运行正确性检查，再在整批 3600 秒计算预算内生成最多 50 个快照，
-每个快照使用种子 7/17/27 各调用一次原有 SA，候选池 16。经典参考单线程、
-每次最多 60 秒、MIPGap 为 1e-6；未认证或未完成的项目单独标记。
-初始化条件只作用于全天起点，终端条件只作用于全天终点；跨块约束通过固定乘子进入
-目标，不在各块重置初始状态。修复沿用全时域规则，块外小时填入共同初始方案。
+## 数据来源
 
-输出包含原始/修复/经典目标重算三类统计、原生参考、QUBO 矩阵、逐样本 JSON/CSV、
-分层图表与哈希清单。主问题质量改善不等于全天收敛、成本改善或加速，达到筛查门槛
-也不会自动启动下一阶段实验。
+`data/units.json`、`stochastic.json`、`deterministic.json` 和 `provenance.json` 从原项目原样保留。来源固定版本、哈希、机组映射和转换说明见 `provenance.json`；精简版直接使用这些已转换数据，不附带 Python 转换器或原始数据副本。
 
-## 实现与验证
+原始公开来源：[MATPOWER IEEE RTS-24](https://github.com/MATPOWER/matpower/blob/8b326f00d496864ed81169f7e684568fc1f7006d/data/case24_ieee_rts.m) 与 [ucacopf RTS79](https://github.com/anyacastillo/ucacopf/blob/001cf29dc2e9b3d26e71146f82db35fa379b4dca/RTS79_ucacopf.dat)。总装机 3405 MW、峰值基础负荷 2850 MW；同步调相机已排除。随机倍率 0.90/1.00/1.05、概率 0.25/0.50/0.25 和 5% 备用率属于项目设定。
 
-- `solver.py` 定义配置、结果和统一入口；`paper_solver.py` 实现时间分块内外层循环，`coordination.py` 实现拉格朗日切平面。
-- `paper_model.py` 实现索引约束、连续松弛和紧凑 QUBO；文件名沿用既有实现。
-- `candidates.py` 负责确定性修复；`context.py` 保留供 LLM 使用的成本、对偶及减开机启发信息。
-- `llm.py`、`subagent.py`、`advisor_feedback.py` 负责候选通信和自动反馈。
-- `validation.py` 独立校验物理约束和成本；`full_model.py` 提供完整 Gurobi 参考。
-
-启动／关闭容量分别处理；备用使用精确容量格点，进入 QUBO 的割采用单侧保守量化。
-连续模型和实际成本保持原精度。SA 搜索是启发式，QUBO 能量不能作为全局下界。
-时间限制在检查点生效，正在执行的 SA SDK 调用可能产生超时；截止后的候选不计入结果。
-
-```powershell
-python -m unittest discover -s tests -v
-```
+本模型是聚合无网络 SUC，不含输电约束、冷热启动成本或水电能量预算；这与原项目建模口径一致。

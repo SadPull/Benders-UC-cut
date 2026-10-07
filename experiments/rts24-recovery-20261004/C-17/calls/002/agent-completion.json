@@ -1,8 +1,0 @@
-{
-  "agent_id": "01a1051c-a134-7843-a44b-3cf76f4b24fd",
-  "exitcode": 15,
-  "actual_turn_completed": false,
-  "receipt_published": true,
-  "failure_reason": "Initial CLI ignored configured custom provider; no candidates returned",
-  "finished_at": 1791087172.83503
-}

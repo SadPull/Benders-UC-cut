@@ -1,9 +1,0 @@
-{
-  "status": "INNER_NOT_CONVERGED",
-  "dual_converged": false,
-  "feasible_cost": 883727.892202252,
-  "certified_lower_bound": 815439.9031823768,
-  "primal_gap": 0.07727264197772626,
-  "coordination_upper": null,
-  "termination_reason": "INNER_NOT_CONVERGED"
-}

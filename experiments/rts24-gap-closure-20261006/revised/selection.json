@@ -1,5 +1,0 @@
-{
-  "chosen_hours": 1,
-  "rule": "largest_on_time_certified_lower_then_shortest_hours",
-  "excluded": []
-}

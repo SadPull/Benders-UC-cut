@@ -1,1 +1,0 @@
-Wrote four candidate schedules to D-27/calls/003/candidates.json.

@@ -1,1 +1,0 @@
-Completed: wrote four candidate schedules to C-27/calls/001/candidates.json.
