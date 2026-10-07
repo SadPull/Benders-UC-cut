@@ -63,7 +63,7 @@ def test_partition_identity(tiny, hours):
     assert blocks[-1].times[-1] == 4
 
 
-def test_cuts_exhaustive_and_integer_bound(tiny):
+def test_cuts_exhaustive_and_lp_bound(tiny):
     d, s = tiny(); s[0].load[:] = [30, 0, 0]
     m = model(d, s); b = partition(m, 3)[0][0]
     records, cuts = [], []
@@ -83,8 +83,8 @@ def test_cuts_exhaustive_and_integer_bound(tiny):
         if r.feasible:
             for c in cuts:
                 assert c.alpha + c.beta @ x <= (r.recourse if c.optimality else 0) + 1e-5
-    certified, bound = master(b, cuts, 10)
-    assert abs(bound - cost) < 2e-4 and not hasattr(certified, "x")
+    relaxed_master, bound = master(b, cuts, 10)
+    assert bound <= cost + 2e-4 and not hasattr(relaxed_master, "x")
     assert abs(optimize(m, 10, True).objval - cost) < 2e-5
 
 
@@ -105,7 +105,7 @@ def encoding_model(A, rhs, kind, scale=10, hi=4):
 
 def test_qubo_full_encoding(options):
     m = encoding_model([[1, 1, 0], [1, 2, -1]], [1, 0], ["hard", "optimality"])
-    q = qubo(m, options, [np.array(x) for x in ([0, 0], [1, 0], [0, 1])], 4)
+    q = qubo(m, options, 4)
     n = q.Q.shape[0]; assert n <= 12
     minimum = np.full((4, 5), np.inf)
     for bits in product([0., 1.], repeat=n):
@@ -120,18 +120,27 @@ def test_qubo_full_encoding(options):
                 assert abs(minimum[code, theta] - theta / m.scale) < 1e-8
             else:
                 assert minimum[code, theta] > theta / m.scale + 1
-    for bits in q.starts.T:
-        theta = q.theta_lower + q.theta_weights @ bits[q.theta_ids]
-        assert abs(bits @ q.Q @ bits + q.offset - theta / m.scale) < 1e-8
 
 
-def test_capacity_lattice_and_conservative_quantization(options):
+def test_fractional_capacity_encoding_builds(options):
     m = encoding_model([[-.15, -.25, 0], [.27, -.31, -1]], [-.2, -.18], ["capacity", "optimality"], 1, 1)
     options.theta_step = .1
-    q = qubo(m, options, [np.array([0, 1]), np.array([1, 1])], 1)
-    for bits in q.starts.T:
-        theta = q.theta_lower + q.theta_weights @ bits[q.theta_ids]
-        assert abs(bits @ q.Q @ bits + q.offset - theta) < 2e-7
+    q = qubo(m, options, 1)
+    assert q.Q.shape[0] > len(q.free)
+
+
+def test_capacity_lattice_feasibility_exhaustive(options):
+    m = encoding_model([[-.15, -.25, 0]], [-.20000001], ["capacity"], 1, 0)
+    m.eq = np.array([False])
+    q = qubo(m, options, 0)
+    minimum = np.full(4, np.inf)
+    for bits in product([0., 1.], repeat=q.Q.shape[0]):
+        bits = np.asarray(bits)
+        index = int(bits[0]+2*bits[1])
+        minimum[index] = min(minimum[index], float(bits @ q.Q @ bits + q.offset))
+    for code in range(4):
+        feasible = .15*(code % 2)+.25*(code // 2) >= .20000001
+        assert (abs(minimum[code]) < 1e-7) == feasible
 
 
 def test_free_equality_price():
@@ -140,11 +149,15 @@ def test_free_equality_price():
 
 
 @pytest.mark.parametrize("hours", [1, 2, 3, 5])
-def test_tiny_convergence_and_validation(tiny, options, hours):
+def test_tiny_lp_gap_and_validation(tiny, options, hours, monkeypatch):
+    from suc_benders import solver
+    monkeypatch.setattr(solver, "anneal", lambda *args: ([], {"bits": 1}))
     d, s = tiny(1)
     options.block_hours = hours
     r = solve(d, s, options)
-    assert r.status == "DUAL_CONVERGED", r
+    # Without integer certification this instance retains an LP integrality gap.
+    assert r.status == "INNER_NOT_CONVERGED", r
+    assert not r.outer_history
     assert abs(r.objective - 225) < 1e-5
     assert r.lower_bound <= r.objective + 1e-5
     assert validate(d, s, r)["feasible"]

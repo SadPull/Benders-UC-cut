@@ -95,7 +95,7 @@ def partition(m, hours, prices=None):
                time=m.time[cols], times=times, d=m.d, scenarios=m.scenarios,
                constant=-float(m.rhs[cross[first[cross] == j]] @ prices[cross[first[cross] == j]]),
                crossA=m.A[cross][:, cols], crossrhs=m.rhs[cross] * (first[cross] == j),
-               original_obj=m.obj[cols])
+               original_obj=m.obj[cols], labels=[m.labels[k] for k in rows])
         b.binary = np.flatnonzero(np.isin(cols, m.binary))
         b.continuous = np.flatnonzero(~np.isin(cols, m.binary))
         b.scale = max(1., float(np.sum(np.abs(m.obj[cols]) * b.ub + b.q * b.ub ** 2)))

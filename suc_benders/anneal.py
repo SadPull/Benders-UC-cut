@@ -21,7 +21,7 @@ def initialize(user_id, sdk_code):
 def anneal(q, o, seconds, seed):
     import kaiwu as kw
     started = perf_counter()
-    samples = list(q.starts.T)
+    samples = []
     n = q.Q.shape[0]
     if seconds > 0 and n:
         scale = max(1., float(abs(q.Q).max()))
@@ -33,7 +33,7 @@ def anneal(q, o, seconds, seed):
                 initial_temperature=o.sa_temperature * flip_scale, alpha=o.sa_cooling,
                 cutoff_temperature=o.sa_cutoff * q.energy_unit / scale,
                 iterations_per_t=o.sa_sweeps, size_limit=o.sa_reads,
-                rand_seed=int(seed), verbose=False, process_num=1)
+                rand_seed=int(seed), verbose=False)
             spins = np.atleast_2d(optimizer.solve(ising))
         except Exception as error:
             raise RuntimeError(f"Kaiwu sampling failed ({type(error).__name__}); check local SDK authorization") from None
@@ -43,12 +43,10 @@ def anneal(q, o, seconds, seed):
                   else (1 + spins) // 2)
         samples.extend(binary)
     energies = [float(x @ q.Q @ x + q.offset) for x in samples]
-    candidates, seen = [], set()
-    for j in np.argsort(energies, kind="stable"):
-        x = q.fixed.copy(); x[q.free] = samples[j][:len(q.free)]
+    candidates = []
+    for sample in samples:
+        x = q.fixed.copy(); x[q.free] = sample[:len(q.free)]
         x = x[:q.nx].astype(np.uint8)
-        key = x.tobytes()
-        if key not in seen:
-            seen.add(key); candidates.append(x)
+        candidates.append(x)
     return candidates, {"bits": n, "candidates": len(candidates),
                         "best_energy": min(energies, default=np.inf), "seconds": perf_counter() - started}

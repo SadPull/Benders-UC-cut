@@ -17,7 +17,6 @@ class Options:
     max_inner: int = 20
     tolerance: float = 1e-4
     time_limit: float = 600
-    certify_seconds: float = 30
     seed: int = 7
     verbose: bool = True
     theta_step: float = 1
@@ -60,7 +59,7 @@ def load_options(overrides=None, config_path=None):
         v = getattr(o, name)
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
-    for name in ("time_limit", "certify_seconds", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):
+    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):
         v = getattr(o, name)
         if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name != "tolerance"):
             raise ValueError(f"Invalid numeric option: {name}")

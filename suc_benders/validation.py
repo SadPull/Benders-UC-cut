@@ -1,5 +1,6 @@
 """Temporal/capacity repair and independent physical/cost validation."""
 from types import SimpleNamespace as NS
+import hashlib
 
 import numpy as np
 
@@ -8,6 +9,17 @@ def pack(d, u):
     previous = np.column_stack([d.initial_on, u[:, :-1]])
     v, w = np.maximum(u - previous, 0), np.maximum(previous - u, 0)
     return np.concatenate([z.ravel(order="F") for z in (u, v, w)])
+
+
+def commitment(d, x):
+    # Each variable type occupies a contiguous, column-major unit/hour matrix.
+    n = d.n_units * d.horizon
+    return NS(**{name: np.asarray(x)[j*n:(j+1)*n].reshape((d.n_units, d.horizon), order="F").copy()
+                 for j, name in enumerate(("u", "v", "w"))})
+
+
+def commitment_hash(z):
+    return hashlib.sha256(np.r_[z.u.ravel(), z.v.ravel(), z.w.ravel()].astype(np.uint8).tobytes()).hexdigest()
 
 
 def capacity(d, u, v, w):
@@ -20,7 +32,7 @@ def repair(d, scenarios, u):
     u = np.asarray(u)
     if u.shape != (d.n_units, d.horizon) or not np.isfinite(u).all():
         return None
-    u = np.clip(np.floor(u + .5), 0, 1)
+    u = np.clip(np.rint(u), 0, 1)
     for i in range(d.n_units):
         state, duration = d.initial_on[i], d.initial_duration[i]
         for t in range(d.horizon):
@@ -44,7 +56,7 @@ def repair(d, scenarios, u):
         if (deficit <= 1e-6).all():
             return candidate
         t = np.flatnonzero(deficit > 1e-6)[0]
-        winner, best_gain, best_cost = None, 0., np.inf
+        choices = []
         for i in range(d.n_units):
             start = 0 if d.initial_on[i] else max(0, int(d.min_down[i] - d.initial_duration[i]))
             if start >= d.horizon:
@@ -52,12 +64,11 @@ def repair(d, scenarios, u):
             trial = u.copy(); trial[i, start:] = 1
             x, remaining = evaluate(trial)
             gain, cost = deficit[t] - remaining[t], cost_vector @ x
-            if ((remaining <= deficit + 1e-6).all() and gain > 1e-6
-                    and (gain > best_gain + 1e-9 or (abs(gain - best_gain) <= 1e-9 and cost < best_cost))):
-                winner, best_gain, best_cost = trial, gain, cost
-        if winner is None:
+            if (remaining <= deficit + 1e-6).all() and gain > 1e-6:
+                choices.append((gain, -cost, -i, trial))
+        if not choices:
             return None
-        u = winner
+        u = max(choices, key=lambda item: item[:3])[3]
     return None
 
 
