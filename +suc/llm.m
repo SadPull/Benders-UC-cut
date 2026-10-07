@@ -1,60 +1,79 @@
-function [candidates,info] = llm(b,best,lower,o,seconds)
+﻿function [candidates,info] = llm(b,best,lower,o,seconds,feedback)
 %LLM Optional synchronous Responses API advisor; candidates are untrusted.
-candidates=[]; info=struct('status','FAILED','message','','accepted',0);
-context=struct('hours',b.times,'unit_count',b.d.n_units,'current_lower_bound',lower, ...
-    'current_cost',best.cost,'u',best.point(b.u),'v',best.point(b.v),'w',best.point(b.w), ...
-    'pmin',b.d.pmin,'pmax',b.d.pmax,'pstart',b.d.pstart,'pshut',b.d.pshut, ...
-    'min_up',b.d.min_up,'min_down',b.d.min_down,'ramp_up',b.d.ramp_up,'ramp_down',b.d.ramp_down, ...
-    'priced_binary_cost',b.obj(b.binary),'scenario_loads',[]);
-for k=1:numel(b.scenarios), context.scenario_loads(k,:)=b.scenarios(k).load(b.times); end
-system=['Propose up to 3 alternative binary schedules for this stochastic unit commitment block. ' ...
-    'Return ONLY JSON: {"candidates":[{"u":[...],"v":[...],"w":[...]}]}. ' ...
-    'Each matrix has unit_count rows and one column per listed hour; entries must be 0 or 1. ' ...
-    'u is commitment, v startup, w shutdown. Local costs include Lagrangian prices. ' ...
-    'At a block boundary do not invent a reset to the original initial condition. ' ...
-    'All proposals will be checked against the actual constraints and dispatch QP.'];
-body=struct('model',o.llm_model,'instructions',system,'input',jsonencode(context), ...
-    'stream',false,'store',false);
+if nargin < 6, feedback=struct(); end
+[body,info]=suc.llm_request(b,best,lower,o,feedback); candidates=[];
+attempt_folder='';
 try
+    if isfield(o,'llm_budget_dir') && ~isempty(o.llm_budget_dir)
+        limit=6;
+        if isfield(o,'llm_global_max_calls'), limit=o.llm_global_max_calls; end
+        [attempt_folder,budget_cleanup]=claim(o.llm_budget_dir,limit); %#ok<NASGU>
+        write_json(fullfile(attempt_folder,'request.json'),body);
+    end
     settings=weboptions('MediaType','application/json','ContentType','json', ...
         'HeaderFields',{'Authorization',['Bearer ' o.llm_api_key]}, ...
         'Timeout',max(1,min(seconds,o.llm_timeout)));
+    started=tic;
     response=webwrite(o.llm_url,body,settings);
-    assert(strcmp(response.status,'completed'),'suc:LlmResponse','Response is not completed.');
-    output=response.output;
-    if ~iscell(output), output=num2cell(output); end
-    content='';
-    for k=1:numel(output)
-        item=output{k};
-        if ~strcmp(item.type,'message'), continue; end
-        parts=item.content;
-        if ~iscell(parts), parts=num2cell(parts); end
-        for j=1:numel(parts)
-            part=parts{j};
-            if strcmp(part.type,'output_text'), content=[content part.text]; end %#ok<AGROW>
-        end
-    end
-    content=strtrim(content);
-    assert(~isempty(content),'suc:LlmResponse','Response contains no output text.');
-    content=regexprep(content,'^```(?:json)?\s*|\s*```$','');
-    raw=jsondecode(content);
-    assert(isstruct(raw) && isfield(raw,'candidates'),'Invalid candidate JSON.');
-    for k=1:min(3,numel(raw.candidates))
-        row=raw.candidates(k); valid=true; x=zeros(numel(b.binary),1);
-        for name={'u','v','w'}
-            f=name{1};
-            if ~isfield(row,f), valid=false; break; end
-            value=row.(f);
-            if ~isequal(size(value),size(b.(f))) || ~isnumeric(value) || any(~isfinite(value),'all') ...
-                    || any(value~=0 & value~=1,'all'), valid=false; break; end
-            [~,where]=ismember(b.(f),b.binary); x(where)=value;
-        end
-        if valid, candidates(:,end+1)=x; end %#ok<AGROW>
-    end
-    candidates=unique(candidates','rows','stable')';
-    info.status='OK'; info.accepted=size(candidates,2);
+    elapsed=toc(started);
+    if ~isempty(attempt_folder), write_json(fullfile(attempt_folder,'response.json'),response); end
+    [candidates,parsed]=suc.llm_parse(response,b);
+    parsed.context_seconds=info.context_seconds; parsed.http_seconds=elapsed; info=parsed;
 catch exception
-    % Do not persist request headers, raw responses or credentials.
-    info.message=exception.identifier;
+    % Persist identifiers only: transport messages can contain credentials.
+    info.status='FAILED'; info.message=exception.identifier;
+    if exist('started','var'), info.http_seconds=toc(started); end
 end
+if ~isempty(attempt_folder)
+    % No configuration, request headers or raw exception messages enter artifacts.
+    write_json(fullfile(attempt_folder,'info.json'),info);
+    path=fullfile(o.llm_budget_dir,'call-ledger.json');
+    entries=jsondecode(fileread(path,'Encoding','UTF-8'));
+    entries(end).status=info.status; write_json(path,entries);
+end
+end
+
+function [folder,cleanup]=claim(root,limit)
+% An occupied slot remains consumed even if the process dies before sending.
+validateattributes(limit,{'numeric'},{'scalar','integer','positive','finite'});
+if ~isfolder(root), mkdir(root); end
+file=java.io.RandomAccessFile(fullfile(root,'call-ledger.lock'),'rw');
+channel=file.getChannel();
+try
+    lock=channel.tryLock();
+catch
+    channel.close(); file.close();
+    error('suc:LlmBudgetLock','Another request owns the global call lock.');
+end
+if isempty(lock)
+    channel.close(); file.close();
+    error('suc:LlmBudgetLock','Another request owns the global call lock.');
+end
+cleanup=onCleanup(@()release(lock,channel,file));
+path=fullfile(root,'call-ledger.json');
+entries=struct('attempt_id',{},'directory',{},'started_utc',{},'status',{});
+if isfile(path)
+    entries=jsondecode(fileread(path,'Encoding','UTF-8'));
+    assert(isempty(entries) || (isstruct(entries) && all(isfield(entries, ...
+        {'attempt_id','directory','started_utc','status'}))),'suc:LlmBudget','Invalid global ledger.');
+end
+assert(numel(entries)<limit,'suc:LlmBudget','Global LLM call budget exhausted.');
+id=char(java.util.UUID.randomUUID()); folder=fullfile(root,id);
+entry=struct('attempt_id',id,'directory',folder, ...
+    'started_utc',char(datetime('now','TimeZone','UTC','Format','yyyy-MM-dd''T''HH:mm:ss.SSS''Z''')), ...
+    'status','CLAIMED');
+if isempty(entries), entries=entry; else, entries(end+1)=entry; end
+write_json(path,entries);
+mkdir(folder);
+end
+
+function release(lock,channel,file)
+lock.release(); channel.close(); file.close();
+end
+
+function write_json(path,value)
+temporary=[path '.tmp']; fid=fopen(temporary,'w','n','UTF-8');
+assert(fid>=0,'suc:LlmArtifact','Cannot open LLM artifact.');
+cleanup=onCleanup(@()fclose(fid)); fprintf(fid,'%s',jsonencode(value)); clear cleanup;
+movefile(temporary,path,'f');
 end

@@ -1,5 +1,7 @@
 # MATLAB：时间分块 SA + LLM Benders SUC
 
+**最新版本：v0.21.0（待实验）。** 当前代码保留 SA 停滞后的块内融合框架；全天 LLM 提案与反馈闭环实验的计划已制定，相关实现已回退，等待后续实施与验证。
+
 从 `LLM-benders-SUC` 的顶层 Python 源码重构，保留原算法主线：
 
 **连续松弛初始化 → 时间分块 → 块内 Benders / QUBO / SA → 拉格朗日切平面协调 → 全天恢复与物理校验。**
@@ -128,3 +130,21 @@ reference = suc.optimize(suc.model(d,s), 60, true);
 原始公开来源：[MATPOWER IEEE RTS-24](https://github.com/MATPOWER/matpower/blob/8b326f00d496864ed81169f7e684568fc1f7006d/data/case24_ieee_rts.m) 与 [ucacopf RTS79](https://github.com/anyacastillo/ucacopf/blob/001cf29dc2e9b3d26e71146f82db35fa379b4dca/RTS79_ucacopf.dat)。总装机 3405 MW、峰值基础负荷 2850 MW；同步调相机已排除。随机倍率 0.90/1.00/1.05、概率 0.25/0.50/0.25 和 5% 备用率属于项目设定。
 
 本模型是聚合无网络 SUC，不含输电约束、冷热启动成本或水电能量预算；这与原项目建模口径一致。
+
+## SA 停滞后的融合实验
+
+配置 `llm_config.m` 后，在项目根目录运行首批筛查：
+
+```powershell
+.\scripts\run_stagnation.ps1 -Directory results/stagnation-20261007
+```
+
+固定种子 7、17、27，每个首个停滞检查点最多调用一次 LLM，C/D 共享响应并分别扣除实际调用耗时。四条分支为 A 继续 SA、B 普通再升温、C LLM 候选与割、D 额外候选热启动；不运行纯 LLM 组。当前调度器串行执行数值任务和 HTTP 请求。已有校验通过的工件会被复用，失败调用不自动重试；新实验使用新的输出目录。
+
+MATLAB 底层入口为 `run_stagnation_experiment(action, directory, seed, mode)`，支持 `capture`、`prepare`、`import`、`branch`、`diagnose`、`reference`、`report`、`online`、`online-report`。首批 HTTP 请求由 PowerShell 调度器负责，`import` 消费已落盘的响应；第二阶段在运行中的 MATLAB 内同步请求，并使用独立全局调用账本。仅重新生成报告可运行：
+
+```matlab
+suc.stagnation_report('results/stagnation-20261007');
+```
+
+输出包括 `report.md`、`summary.json` 和 `curves.csv`；全天校验尚未完成时标记 `PENDING`，不会提前决定扩展。参考解只作事后比较，不进入搜索。三个种子的结果用于筛查，不构成统计显著性结论。达到预定门槛后，调度器自动执行已授权的第二阶段：种子 107、117、127，A 与选出的融合方式，共六次完整求解调用，新增模型调用总上限六次。首批重放受 1200 秒和内层总计 200 批双上限约束；第二阶段受 1800 秒和内层 200 批双上限约束，可能提前以 `INNER_NOT_CONVERGED` 结束。第二阶段结束后可用 `suc.stagnation_online_report` 生成离线归因报告。

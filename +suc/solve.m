@@ -8,6 +8,7 @@ result=struct('status','MAX_ITERATIONS','message','','objective',Inf,'lower_boun
 incumbent=[]; stage='INITIALIZATION';
 try
     relaxation=suc.optimize(m,remaining());
+    assert(remaining()>0,'suc:TimeLimit','Initialization completed after deadline.');
     assert(strcmp(relaxation.status,'OPTIMAL'),'suc:Initialization', ...
         'Continuous relaxation failed: %s',relaxation.status);
     result.lower_bound=relaxation.lower-1e-5; lambda=relaxation.lambda;
@@ -31,7 +32,19 @@ try
                 if remaining()<=0, result.status='TIME_LIMIT'; complete=false; break; end
                 stage=sprintf('BLOCK_%d_%d',outer,j); b=blocks{j};
                 seeds=[incumbent.point(b.cols(b.binary)) previous{j}];
-                [search,log]=search_block(b,seeds,o,started,result.llm_calls,outer,j);
+                intervention=struct('mode','none');
+                if isfield(o,'capture_stagnation') && o.capture_stagnation
+                    intervention.mode='capture';
+                end
+                [search,log,state]=suc.search_block(b,seeds,o,started,result.llm_calls,outer,j,[],intervention);
+                if search.captured
+                    safe=o; safe.llm_api_key=''; safe.llm_url='';
+                    result.checkpoint=struct('b',b,'state',state,'seeds',seeds,'o',safe, ...
+                        'd',d,'s',s,'incumbent',incumbent,'lambda',lambda,'outer',outer, ...
+                        'index',j,'planes',{planes},'previous',{previous},'bounds',bounds);
+                    result.history=[result.history log];
+                    result.status='STAGNATION_CAPTURED'; complete=false; break;
+                end
                 result.llm_calls=result.llm_calls+search.llm_calls;
                 result.llm_history=[result.llm_history search.llm_history];
                 result.history=[result.history log];
@@ -95,70 +108,10 @@ end
         r=suc.dispatch(full,x,remaining());
         if ~r.feasible || remaining()<=0, return; end
         z=unpack(m,r.point,d,s); z.validation=suc.validate(d,s,z);
+        if remaining()<=0, return; end
         if z.objective < result.objective
             incumbent=z; incumbent.point=r.point;
             for f={'objective','u','v','w','scenarios','validation'}, result.(f{1})=z.(f{1}); end
-        end
-    end
-end
-
-function [out,history]=search_block(b,seeds,o,started,used_calls,outer,index)
-cuts=struct('beta',{},'alpha',{},'optimality',{}); cache=[]; pool={}; best=[];
-lower=sum(min(b.obj.*b.lb,b.obj.*b.ub))+b.constant; upper=Inf;
-history=[]; stalled=0; calls=0; llm_history=[];
-seeds=unique(seeds','rows','stable')';
-for k=1:size(seeds,2), evaluate(seeds(:,k)); end
-for iteration=1:o.max_inner
-    if remaining()<=0, break; end
-    before=upper;
-    [master,bound]=suc.master(b,cuts,min(o.certify_seconds,remaining())); lower=max(lower,bound);
-    sampling=struct('bits',0,'accepted_flips',0,'best_energy',NaN,'seconds',0,'candidates',0);
-    if ~closed(lower,upper,o.tolerance) && remaining()>0
-        seed_pool=seeds;
-        if ~isempty(best), seed_pool=[best.point(b.binary) seed_pool]; end
-        master.lb(end)=max(master.lb(end),lower-b.constant);
-        q=suc.qubo(master,o,seed_pool,upper-b.constant);
-        if remaining()>0
-            [proposals,sampling]=suc.anneal(q,o,remaining());
-            for k=1:size(proposals,2), evaluate(proposals(:,k)); end
-        end
-    end
-    if isfinite(before) && before-upper <= 5e-4*max(1,abs(before)), stalled=stalled+1;
-    else, stalled=0; end
-    if o.llm_enabled && ~isempty(best) && stalled>=o.llm_patience && ...
-            used_calls+calls<o.llm_max_calls && remaining()>0 && ~closed(lower,upper,o.tolerance)
-        [proposals,info]=suc.llm(b,best,lower,o,remaining()); calls=calls+1; stalled=0;
-        info.outer=outer; info.block=index; info.inner=iteration;
-        llm_history=[llm_history info]; %#ok<AGROW>
-        for k=1:size(proposals,2), evaluate(proposals(:,k)); end
-    end
-    if remaining()>0
-        [~,bound]=suc.master(b,cuts,min(o.certify_seconds,remaining())); lower=max(lower,bound);
-    end
-    history=[history struct('outer',outer,'block',index,'inner',iteration,'lower',lower, ...
-        'upper',upper,'optimality_cuts',sum([cuts.optimality]), ...
-        'feasibility_cuts',sum(~[cuts.optimality]),'sampling',sampling)]; %#ok<AGROW>
-    if closed(lower,upper,o.tolerance), break; end
-end
-out=struct('lower',lower,'upper',upper,'best',best,'pool',{pool}, ...
-    'seeds',seeds,'llm_calls',calls,'llm_history',llm_history);
-if ~isempty(best), out.seeds=best.point(b.binary); end
-    function seconds=remaining()
-        seconds=o.time_limit-toc(started);
-    end
-    function evaluate(x)
-        if remaining()<=0 || (~isempty(cache) && any(all(cache==x,1))), return; end
-        r=suc.dispatch(b,x,remaining());
-        if remaining()<=0, return; end
-        cache(:,end+1)=x;
-        if ~isempty(r.cut), cuts(end+1)=r.cut; end
-        if r.feasible
-            residual=b.A*r.point-b.rhs; residual(b.eq)=abs(residual(b.eq));
-            assert(max(residual)<=1e-5,'suc:Dispatch','Local dispatch validation failed.');
-            pool{end+1}=r.point;
-            if r.cost<upper, best=r; upper=r.cost; end
-        elseif ~ismember(r.status,{'INFEASIBLE','DISCRETE_INFEASIBLE'})
-            error('suc:Dispatch','Local dispatch failed: %s',r.status);
         end
     end
 end

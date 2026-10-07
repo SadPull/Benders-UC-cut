@@ -10,7 +10,8 @@ defaults = struct('data_file',fullfile(root,'data','units.json'), ...
     'time_limit',600,'certify_seconds',30,'seed',7,'verbose',true, ...
     'theta_step',1,'penalty',1e6,'reserve_scale',100, ...
     'sa_reads',4,'sa_sweeps',2,'sa_temperature',20,'sa_cooling',0.9, ...
-    'sa_cutoff',0.1);
+    'sa_cutoff',0.1,'capture_stagnation',false,'fusion_mode','C','llm_min_remaining',0, ...
+    'llm_budget_dir','','llm_global_max_calls',6);
 llm = llm_config();
 for name = fieldnames(llm)'
     defaults.(name{1}) = llm.(name{1});
@@ -21,6 +22,9 @@ for k = 1:numel(names)
     defaults.(names{k}) = options.(names{k});
 end
 o = defaults;
+assert(ismember(o.fusion_mode,{'C','D'}),'suc:Options','fusion_mode must be C or D.');
+validateattributes(o.llm_min_remaining,{'numeric'},{'scalar','nonnegative','finite'});
+validateattributes(o.capture_stagnation,{'logical'},{'scalar'});
 for name = {'block_hours','max_outer','max_inner','sa_reads','sa_sweeps','llm_patience'}
     validateattributes(o.(name{1}),{'numeric'},{'scalar','integer','positive','finite'},'',name{1});
 end
