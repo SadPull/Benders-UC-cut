@@ -63,6 +63,28 @@ def test_partition_identity(tiny, hours):
     assert blocks[-1].times[-1] == 4
 
 
+def test_coordinate_selects_small_multipliers_on_flat_optimal_face(monkeypatch):
+    from suc_benders import benders
+    original = benders.optimize
+    calls = []
+
+    def degenerate(m, seconds):
+        result = original(m, seconds)
+        if not calls:
+            # The second multiplier has zero slope in every plane, so this remains optimal.
+            result.x[1] = 1e18
+        calls.append(result)
+        return result
+
+    monkeypatch.setattr(benders, "optimize", degenerate)
+    planes = [[(5., np.array([-1., 0.])), (0., np.array([1., 0.]))]]
+    prices, upper = coordinate(planes, np.array([False, True]), 10., 10.)
+    assert len(calls) == 2 and calls[0].x[1] == 1e18
+    assert upper == pytest.approx(2.5)  # Preserve the primary objective, not the L1 objective.
+    assert prices[0] == pytest.approx(2.5, abs=2e-5) and abs(prices[1]) < 1e-8
+    assert min(c+slope@prices for c, slope in planes[0]) >= upper-2e-5
+
+
 def test_cuts_exhaustive_and_lp_bound(tiny):
     d, s = tiny(); s[0].load[:] = [30, 0, 0]
     m = model(d, s); b = partition(m, 3)[0][0]
@@ -156,8 +178,9 @@ def test_tiny_lp_gap_and_validation(tiny, options, hours, monkeypatch):
     options.block_hours = hours
     r = solve(d, s, options)
     # Without integer certification this instance retains an LP integrality gap.
-    assert r.status == "INNER_NOT_CONVERGED", r
-    assert not r.outer_history
+    assert r.status == "MAX_ITERATIONS", r
+    assert len(r.outer_history) == options.max_outer
+    assert all(row["unconverged_blocks"] for row in r.outer_history)
     assert abs(r.objective - 225) < 1e-5
     assert r.lower_bound <= r.objective + 1e-5
     assert validate(d, s, r)["feasible"]

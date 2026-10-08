@@ -1,4 +1,4 @@
-"""Nested block search with archived SA/repair and whole-day advisor policies."""
+"""Round-robin block search with shared whole-day validation and advice."""
 from dataclasses import dataclass, field
 from time import perf_counter
 from types import SimpleNamespace as NS
@@ -61,7 +61,8 @@ class WholeDay:
         self.stalled, self.feedback = 0, None
         self.diagnostics = result.diagnostics
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
-                                local_evaluations=[], llm_calls=[], timings={name: 0. for name in (
+                                local_evaluations=[], llm_calls=[], blocks=[], rounds=[],
+                                complete_rounds=0, coordination_count=0, timings={name: 0. for name in (
                                     "initialization", "relaxation", "qubo", "annealing", "repair",
                                     "local_dispatch", "subproblems", "validation", "context", "llm", "coordination")})
         self.timings = self.diagnostics["timings"]
@@ -164,71 +165,102 @@ class WholeDay:
             del self.advisor_pool[16:]
         return r.feasible
 
-    def after_batch(self, before, b, evaluate, outer, index, inner, allow_advice):
+    def after_round(self, before, searches, outer, inner, allow_advice):
         due, self.stalled = call_due("stagnation_burst", before, self.result.objective,
                                      self.stalled, self.result.llm_calls, self.o.llm_patience)
         if not (allow_advice and due and self.o.llm_enabled):
             return
-        for _ in range(3):
-            if self.remaining() <= 0 or (self.o.llm_max_calls is not None
-                                       and self.result.llm_calls >= self.o.llm_max_calls):
-                break
-            phase = perf_counter()
-            measurements = self.diagnostics["evaluations"]
-            evaluations = [CandidateEvaluation(r["source"], r["objective"] if r["feasible"] else np.inf,
-                r["fixed_cost"], r["expected_fuel_cost"] if r["feasible"] else np.inf,
-                r["scenario_costs"], r["feasible"], 0, 0, None) for r in measurements]
-            context = build_llm_context(self.d, self.scenarios, LLMContextInput(
-                self.result, self.dispatches, evaluations[-16:], evaluations,
-                [NS(**row) for row in self.diagnostics["iterations"]]))
-            context["previous_call_feedback"] = self.feedback
-            baseline_u = self.result.u.copy()
-            baseline = next(r for r in reversed(measurements) if r["commitment_hash"] == commitment_hash(self.result))
-            costs = dict(total=baseline["objective"], fixed=baseline["fixed_cost"], expected_fuel=baseline["expected_fuel_cost"])
-            prior_ids = {r["commitment_hash"] for r in measurements}
-            pool = sorted(((key, row) for key, row in self.cache.items() if row["feasible"]),
-                          key=lambda item: item[1]["objective"])[:16]
-            bases = [commitment(self.d, np.frombuffer(key, dtype=np.uint8)) for key, _ in pool]
-            self.timings["context"] += perf_counter() - phase
-            if self.remaining() <= 0:
-                break
-            self.result.llm_calls += 1
-            self.stalled = 0
-            phase = perf_counter()
-            proposals, info = llm.request(self.d, self.scenarios, self.result, self.o, self.remaining(),
-                                         context, bases, self.result.llm_calls)
-            self.timings["llm"] += perf_counter() - phase
-            info.update(outer=outer, block=index, inner=inner, call_id=f"llm:{self.result.llm_calls}")
-            self.result.llm_history.append(info)
-            self.diagnostics["llm_calls"].append(info)
-            if self.remaining() > 0:
-                for raw, record in proposals:
-                    x = self.prepare(raw, "llm", record)
-                    if x is None or self.remaining() <= 0:
-                        continue
-                    local = evaluate(x[b.cols[b.binary]], "llm")
-                    record.update(local_dispatch_completed=local is not None,
-                                  local_feasible=local.feasible if local is not None else None)
-                    self.accept(x, "llm", record)
-            else:
-                for record in info.get("proposals", []):
-                    record["outcome"] = "deadline"
-            info["accepted"] = sum(p.get("outcome") == "accepted" for p in info.get("proposals", []))
-            self.feedback = summarize(NS(diagnostics=info, failed=info["status"] != "OK",
-                                         message=info.get("message", "")),
-                                      baseline_u, costs, measurements, prior_ids)
-            info["feedback"] = self.feedback
+        if self.remaining() <= 0 or (self.o.llm_max_calls is not None
+                                   and self.result.llm_calls >= self.o.llm_max_calls):
+            return
+        phase = perf_counter()
+        measurements = self.diagnostics["evaluations"]
+        evaluations = [CandidateEvaluation(r["source"], r["objective"] if r["feasible"] else np.inf,
+            r["fixed_cost"], r["expected_fuel_cost"] if r["feasible"] else np.inf,
+            r["scenario_costs"], r["feasible"], 0, 0, None) for r in measurements]
+        context = build_llm_context(self.d, self.scenarios, LLMContextInput(
+            self.result, self.dispatches, evaluations[-16:], evaluations,
+            [NS(**row) for row in self.diagnostics["iterations"]]))
+        context["previous_call_feedback"] = self.feedback
+        baseline_u = self.result.u.copy()
+        baseline = next(r for r in reversed(measurements) if r["commitment_hash"] == commitment_hash(self.result))
+        costs = dict(total=baseline["objective"], fixed=baseline["fixed_cost"], expected_fuel=baseline["expected_fuel_cost"])
+        prior_ids = {r["commitment_hash"] for r in measurements}
+        pool = sorted(((key, row) for key, row in self.cache.items() if row["feasible"]),
+                      key=lambda item: item[1]["objective"])[:16]
+        bases = [commitment(self.d, np.frombuffer(key, dtype=np.uint8)) for key, _ in pool]
+        self.timings["context"] += perf_counter() - phase
+        if self.remaining() <= 0:
+            return
+        self.result.llm_calls += 1
+        self.stalled = 0
+        phase = perf_counter()
+        proposals, info = llm.request(self.d, self.scenarios, self.result, self.o, self.remaining(),
+                                     context, bases, self.result.llm_calls)
+        self.timings["llm"] += perf_counter() - phase
+        info.update(outer=outer, block=None, inner=inner, round=inner, stage="round_end", call_id=f"llm:{self.result.llm_calls}")
+        self.result.llm_history.append(info)
+        self.diagnostics["llm_calls"].append(info)
+        if self.remaining() > 0:
+            for raw, record in proposals:
+                x = self.prepare(raw, "llm", record)
+                if x is None or self.remaining() <= 0:
+                    continue
+                if self.accept(x, "llm", record):
+                    projections = []
+                    for search in searches:
+                        if self.remaining() <= 0:
+                            break
+                        b = search.b
+                        local = search.evaluate(x[b.cols[b.binary]], "llm")
+                        projections.append(dict(block=search.index, completed=local is not None,
+                                                feasible=local.feasible if local is not None else None))
+                    record["block_projections"] = projections
+                    record["local_dispatch_completed"] = (len(projections) == len(searches)
+                        and all(row["completed"] for row in projections))
+                    record["local_feasible"] = (all(row["feasible"] for row in projections)
+                        if record["local_dispatch_completed"] else None)
+        else:
+            for record in info.get("proposals", []):
+                record["outcome"] = "deadline"
+        info["accepted"] = sum(p.get("outcome") == "accepted" for p in info.get("proposals", []))
+        self.feedback = summarize(NS(diagnostics=info, failed=info["status"] != "OK",
+                                     message=info.get("message", "")),
+                                  baseline_u, costs, measurements, prior_ids)
+        info["feedback"] = self.feedback
 
 
-def search_block(b, seeds, o, deadline, outer, index, whole):
-    result = NS(lower=float(np.minimum(b.obj * b.lb, b.obj * b.ub).sum() + b.constant),
-                upper=np.inf, best=None, planes=[], seeds=[], history=[])
-    cuts, cache = [], {}
+class BlockSearch:
+    """One fixed-multiplier block, retained across round-robin visits."""
 
-    def remaining():
-        return deadline - perf_counter()
+    def __init__(self, b, o, outer, index, whole, planes=None):
+        self.b, self.o, self.outer, self.index, self.whole = b, o, outer, index, whole
+        self.lower = float(np.minimum(b.obj * b.lb, b.obj * b.ub).sum() + b.constant)
+        self.upper, self.best = np.inf, None
+        self.cuts, self.cache, self.history = [], {}, []
+        self.planes = [] if planes is None else planes
+        self.diagnostic = dict(outer=outer, block=index, hours=(b.times + 1).tolist(), visits=0,
+                               sa_calls=0, first_visit_seconds=None)
+        whole.diagnostics["blocks"].append(self.diagnostic)
+        self.summarize()
 
-    def evaluate(x, source):
+    def summarize(self):
+        self.diagnostic.update(lower=self.lower, upper=self.upper,
+            relative_gap=(max(0., self.upper-self.lower)/max(1., abs(self.upper))
+                          if np.isfinite(self.upper) else None),
+            converged=closed(self.lower, self.upper, self.o.tolerance),
+            optimality_cuts=sum(c.optimality for c in self.cuts),
+            feasibility_cuts=sum(not c.optimality for c in self.cuts))
+
+    @property
+    def seeds(self):
+        pool = sorted((r for r in self.cache.values() if r.feasible), key=lambda r: r.cost)[:16]
+        return [r.point[self.b.binary].astype(np.uint8) for r in pool]
+
+    def evaluate(self, x, source):
+        b, whole, result = self.b, self.whole, self
+        cache, cuts = self.cache, self.cuts
+        remaining = whole.remaining
         key = np.asarray(x, np.uint8).tobytes()
         if remaining() <= 0:
             return
@@ -256,89 +288,84 @@ def search_block(b, seeds, o, deadline, outer, index, whole):
             result.planes.append((float(b.original_obj @ p + b.q @ (p ** 2)), b.crossA @ p - b.crossrhs))
             if r.cost < result.upper:
                 result.best, result.upper = r, r.cost
-        whole.diagnostics["local_evaluations"].append(dict(outer=outer, block=index, source=source,
+        whole.diagnostics["local_evaluations"].append(dict(outer=self.outer, block=self.index, source=source,
             feasible=r.feasible, cost=r.cost if r.feasible else None))
         return r
 
-    for seed in seeds:
-        evaluate(seed, "initial")
-    for inner in range(1, o.max_inner + 1):
+    def step(self, seeds, inner):
+        b, o, whole, result = self.b, self.o, self.whole, self
+        outer, index, cuts = self.outer, self.index, self.cuts
+        remaining, evaluate = whole.remaining, self.evaluate
         if remaining() <= 0:
-            break
+            return
+        self.diagnostic["visits"] += 1
+        if self.diagnostic["first_visit_seconds"] is None:
+            self.diagnostic["first_visit_seconds"] = perf_counter() - whole.started
+        for seed in seeds:
+            evaluate(seed, "initial")
+        if remaining() <= 0:
+            return
         phase = perf_counter()
         m, bound = master(b, cuts, remaining())
         whole.timings["relaxation"] += perf_counter() - phase
         if remaining() <= 0:
-            break
+            return
         result.lower = max(result.lower, bound)
         sampling = {"bits": 0, "candidates": 0, "best_energy": None, "seconds": 0.}
-        before_count, before_opt = len(whole.diagnostics["evaluations"]), sum(c.optimality for c in cuts)
-        before_feas = len(cuts) - before_opt
-        before_calls = whole.result.llm_calls
         if not closed(result.lower, result.upper, o.tolerance):
             if result.best is None:
                 raise RuntimeError("No feasible block seed")
-            before = whole.result.objective
             baseline_u = whole.result.u.copy()
             phase = perf_counter()
             m.lb[-1] = max(m.lb[-1], result.lower - b.constant)
             q = qubo(m, o, result.upper - b.constant)
             whole.timings["qubo"] += perf_counter() - phase
             if remaining() <= 0:
-                break
+                return
             phase = perf_counter()
             whole.diagnostics["sa_calls"] += 1
+            self.diagnostic["sa_calls"] += 1
             proposals, sampling = anneal(q, o, remaining(), o.seed)
             whole.timings["annealing"] += perf_counter() - phase
-            sampling.update(outer=outer, block=index, inner=inner, seed=o.seed,
+            sampling.update(outer=outer, block=index, inner=inner, round=inner, seed=o.seed,
                             raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
                             unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
             whole.diagnostics["sampling"].append(sampling)
             del q
             if remaining() <= 0:
-                break
+                return
             # All samples use the same incumbent snapshot, before this batch's improvements.
             for k, x in enumerate(proposals):
                 if remaining() <= 0:
-                    break
+                    return
                 local = np.zeros(len(b.obj)); local[b.binary] = x
                 raw = baseline_u.copy(); raw[:, b.times] = local[b.u]
-                record = {"proposal_id": f"sa:{whole.diagnostics['sa_calls']}:{k}", "outer": outer, "block": index}
+                record = {"proposal_id": f"sa:{whole.diagnostics['sa_calls']}:{k}", "outer": outer, "block": index, "round": inner}
                 repaired = whole.prepare(raw, "sa", record)
                 if repaired is not None and remaining() > 0:
                     local = evaluate(repaired[b.cols[b.binary]], "sa")
                     record.update(local_dispatch_completed=local is not None,
                                   local_feasible=local.feasible if local is not None else None)
                     whole.accept(repaired, "sa", record)
-            if remaining() > 0:
-                whole.after_batch(before, b, evaluate, outer, index, inner,
-                                  not closed(result.lower, result.upper, o.tolerance))
         if remaining() <= 0:
-            break
+            return
         phase = perf_counter()
         _, bound = master(b, cuts, remaining())
         whole.timings["relaxation"] += perf_counter() - phase
         if remaining() <= 0:
-            break
+            return
         result.lower = max(result.lower, bound)
         optimality = sum(c.optimality for c in cuts)
         result.history.append(dict(outer=outer, block=index, inner=inner, lower=result.lower,
             upper=result.upper, optimality_cuts=optimality, feasibility_cuts=len(cuts)-optimality, sampling=sampling))
-        whole.diagnostics["iterations"].append(dict(iteration=len(whole.diagnostics["iterations"])+1,
-            incumbent=whole.result.objective, optimality_cuts_added=optimality-before_opt,
-            feasibility_cuts_added=len(cuts)-optimality-before_feas,
-            new_candidates=len(whole.diagnostics["evaluations"])-before_count,
-            llm_failed=any(row["status"] != "OK" for row in whole.result.llm_history[before_calls:])))
-        if closed(result.lower, result.upper, o.tolerance):
-            break
-    pool = sorted((r for r in cache.values() if r.feasible), key=lambda r: r.cost)[:16]
-    result.seeds = [r.point[b.binary].astype(np.uint8) for r in pool]
-    return result
+        whole.result.history.append(result.history[-1])
+        self.summarize()
 
 
 def solve(d, scenarios, o):
     started = perf_counter(); deadline = started + o.time_limit
     result, whole = Result(), None
+    searches = []
     stage = "INITIALIZATION"
 
     def remaining():
@@ -369,35 +396,69 @@ def solve(d, scenarios, o):
             if remaining() <= 0:
                 raise TimeoutError
             blocks, _ = partition(m, o.block_hours, prices)
-            bounds = np.asarray([np.minimum(b.obj * b.lb, b.obj * b.ub).sum() + b.constant for b in blocks])
-            complete = True
-            for j, b in enumerate(blocks):
+            searches = [BlockSearch(b, o, outer, j + 1, whole, planes[j]) for j, b in enumerate(blocks)]
+            for inner in range(1, o.max_inner + 1):
+                before = result.objective
+                before_count, before_calls = len(whole.diagnostics["evaluations"]), result.llm_calls
+                before_opt = sum(c.optimality for search in searches for c in search.cuts)
+                before_feas = sum(not c.optimality for search in searches for c in search.cuts)
+                round_record = dict(outer=outer, round=inner, complete=False, visited_blocks=[],
+                                    skipped_closed_blocks=[], started_seconds=perf_counter()-started)
+                whole.diagnostics["rounds"].append(round_record)
+                for j, search in enumerate(searches):
+                    if remaining() <= 0:
+                        raise TimeoutError
+                    if closed(search.lower, search.upper, o.tolerance):
+                        round_record["skipped_closed_blocks"].append(j + 1)
+                        continue
+                    b = search.b
+                    stage = f"BLOCK_{outer}_{j + 1}_ROUND_{inner}"
+                    seeds = [whole.best.point[b.cols[b.binary]], *(previous[j] if inner == 1 else []),
+                             *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
+                    search.step(seeds, inner)
+                    # Every term belongs to the current multiplier vector, including unvisited blocks.
+                    result.lower_bound = max(result.lower_bound, float(sum(x.lower for x in searches)))
+                    if remaining() <= 0:
+                        raise TimeoutError
+                    round_record["visited_blocks"].append(j + 1)
+                    if search.best is not None:
+                        raw = result.u.copy(); raw[:, b.times] = search.best.point[b.u]
+                        record = {"proposal_id": f"pool:{outer}:{inner}:{j+1}",
+                                  "outer": outer, "round": inner, "block": j + 1}
+                        x = whole.prepare(raw, "pool", record)
+                        whole.accept(x, "pool", record)
+                    if o.verbose:
+                        print(f"outer={outer} round={inner} block={j + 1}/{len(blocks)} "
+                              f"local=[{search.lower:.6f}, {search.upper:.6f}] "
+                              f"full={result.objective:.6f} LB={result.lower_bound:.6f}", flush=True)
+                    if remaining() <= 0:
+                        raise TimeoutError
+                round_record.update(complete=True, sa_completed_seconds=perf_counter()-started,
+                                    incumbent_before=before, incumbent_after_sa=result.objective)
+                whole.diagnostics["complete_rounds"] += 1
+                iteration = dict(iteration=len(whole.diagnostics["iterations"])+1, outer=outer, round=inner,
+                    incumbent=result.objective,
+                    optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
+                    feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
+                    new_candidates=len(whole.diagnostics["evaluations"])-before_count, llm_failed=False)
+                whole.diagnostics["iterations"].append(iteration)
+                all_closed = all(closed(x.lower, x.upper, o.tolerance) for x in searches)
+                stage = f"ADVISOR_{outer}_ROUND_{inner}"
+                whole.after_round(before, searches, outer, inner, not all_closed)
+                iteration.update(incumbent=result.objective,
+                    optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
+                    feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
+                    new_candidates=len(whole.diagnostics["evaluations"])-before_count,
+                    llm_failed=any(row["status"] != "OK" for row in result.llm_history[before_calls:]))
+                round_record.update(ended_seconds=perf_counter()-started, incumbent=result.objective,
+                                    llm_calls=result.llm_calls-before_calls)
+                for search in searches:
+                    search.summarize()
                 if remaining() <= 0:
                     raise TimeoutError
-                stage = f"BLOCK_{outer}_{j + 1}"
-                seeds = [whole.best.point[b.cols[b.binary]], *previous[j],
-                         *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
-                search = search_block(b, seeds, o, deadline, outer, j + 1, whole)
-                result.history.extend(search.history)
-                bounds[j] = max(bounds[j], search.lower)
-                result.lower_bound = max(result.lower_bound, float(bounds.sum()))
-                previous[j] = search.seeds
-                planes[j].extend(search.planes)
-                if search.best is not None and remaining() > 0:
-                    raw = result.u.copy(); raw[:, b.times] = search.best.point[b.u]
-                    record = {"proposal_id": f"pool:{outer}:{j+1}"}
-                    x = whole.prepare(raw, "pool", record)
-                    whole.accept(x, "pool", record)
-                if o.verbose:
-                    print(f"outer={outer} block={j + 1}/{len(blocks)} local=[{search.lower:.6f}, {search.upper:.6f}] "
-                          f"full={result.objective:.6f} LB={result.lower_bound:.6f}")
-                if remaining() <= 0:
-                    raise TimeoutError
-                if not closed(search.lower, search.upper, o.tolerance):
-                    result.status = "INNER_NOT_CONVERGED"; complete = False
+                if all_closed:
                     break
-            if not complete:
-                break
+            previous = [search.seeds for search in searches]
             stage = "COORDINATION"
             phase = perf_counter()
             values, upper = coordinate(planes, m.eq[cross], result.objective, remaining())
@@ -405,7 +466,11 @@ def solve(d, scenarios, o):
             if remaining() <= 0:
                 raise TimeoutError
             result.coordination_upper = upper
-            result.outer_history.append({"outer": outer, "lower": result.lower_bound, "coordination_upper": upper})
+            result.outer_history.append({"outer": outer, "lower": result.lower_bound, "coordination_upper": upper,
+                                         "complete_rounds": inner,
+                                         "unconverged_blocks": [x.index for x in searches
+                                             if not closed(x.lower, x.upper, o.tolerance)]})
+            whole.diagnostics["coordination_count"] += 1
             if closed(result.lower_bound, upper, o.tolerance, result.lower_bound):
                 result.status = "DUAL_CONVERGED"
                 break
@@ -413,6 +478,8 @@ def solve(d, scenarios, o):
     except Exception as error:
         result.status = "TIME_LIMIT" if remaining() <= 0 or isinstance(error, TimeoutError) else f"{stage}_FAILED"
         result.message = f"{type(error).__name__}: {error}"
+    for search in searches:
+        search.summarize()
     if np.isfinite(result.objective):
         result.validation = validate(d, scenarios, result)
         if result.lower_bound > result.objective + 1e-4:

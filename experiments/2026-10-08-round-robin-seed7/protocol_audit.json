@@ -1,0 +1,38 @@
+{
+  "status": "PASSED",
+  "same_sources": true,
+  "only_option_difference": "llm_enabled",
+  "equal_budget_seconds": 1800,
+  "actual_fresh_response_agents": [
+    "/root/stable_advice_001",
+    "/root/stable_advice_002",
+    "/root/stable_advice_003"
+  ],
+  "runs": [
+    {
+      "run": "D-7",
+      "blocks_visited": 8,
+      "first_round_sampling_blocks": 8,
+      "complete_rounds": 12,
+      "coordination_count": 0,
+      "sa_calls": 96,
+      "llm_calls": 4,
+      "status": "TIME_LIMIT",
+      "objective": 885963.8361390627,
+      "elapsed_seconds": 1800.0041368999991
+    },
+    {
+      "run": "A-7",
+      "blocks_visited": 8,
+      "first_round_sampling_blocks": 8,
+      "complete_rounds": 400,
+      "coordination_count": 20,
+      "sa_calls": 3200,
+      "llm_calls": 0,
+      "status": "MAX_ITERATIONS",
+      "objective": 925317.5772898465,
+      "elapsed_seconds": 1646.2329769999997
+    }
+  ],
+  "note": "Single-seed whole-method comparison; SA proposals are block-local and LLM proposals whole-day."
+}

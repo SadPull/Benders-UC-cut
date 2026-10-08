@@ -120,6 +120,7 @@ def master(b, cuts, seconds=0):
 
 
 def coordinate(planes, equality, incumbent, seconds):
+    started = perf_counter()
     nc, B = len(equality), len(planes)
     rows, rhs = [], []
     for j, group in enumerate(planes):
@@ -138,6 +139,22 @@ def coordinate(planes, equality, incumbent, seconds):
     raw = optimize(m, seconds)
     if raw.status != "OPTIMAL":
         raise RuntimeError(f"Coordination LP failed: {raw.status}")
-    prices = raw.x[:nc]
+    upper = -raw.objval
+    if nc:
+        # The primary optimum can have unbounded flat multiplier directions.
+        # Select the smallest L1 multipliers without changing its certified upper bound.
+        identity = sparse.eye(nc, format="csr")
+        absolute = sparse.hstack([identity, sparse.csr_matrix((nc, B))], format="csr")
+        target = sparse.csr_matrix(np.r_[np.zeros(nc), -np.ones(B), np.zeros(nc)][None, :])
+        stable = NS(A=sparse.vstack([
+            sparse.hstack([m.A, sparse.csr_matrix((len(m.rhs), nc))]), target,
+            sparse.hstack([absolute, -identity]), sparse.hstack([-absolute, -identity])], format="csr"),
+            rhs=np.r_[m.rhs, -upper, np.zeros(2*nc)],
+            eq=np.zeros(len(m.rhs)+1+2*nc, bool), obj=np.r_[np.zeros(nc+B), np.ones(nc)],
+            q=np.zeros(2*nc+B), lb=np.r_[m.lb, np.zeros(nc)], ub=np.r_[m.ub, np.full(nc, np.inf)], binary=[])
+        raw = optimize(stable, seconds-(perf_counter()-started))
+        if raw.status != "OPTIMAL":
+            raise RuntimeError(f"Multiplier selection LP failed: {raw.status}")
+    prices = raw.x[:nc].copy()
     prices[~equality] = np.maximum(0, prices[~equality])
-    return prices, -raw.objval
+    return prices, upper

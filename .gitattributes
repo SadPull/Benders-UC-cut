@@ -1,0 +1,2 @@
+# Preserve experiment bytes so published checksums also verify on other platforms.
+experiments/2026-10-08-round-robin-seed7/* -text whitespace=cr-at-eol,-blank-at-eof

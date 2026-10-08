@@ -1,0 +1,121 @@
+{
+  "version": "v0.24.0",
+  "created_at": "2026-10-08T08:49:35.195232+00:00",
+  "repository": "https://github.com/SadPull/LLM-benders-SUC",
+  "release_url": "https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.24.0",
+  "base_commit": "d3bdefc54db67f53823e2cacd067ea94c64f454e",
+  "experimental_snapshot_version": "0.23.0",
+  "published_source_version": "0.24.0",
+  "archive": {
+    "name": "LLM-benders-SUC-v0.24.0-experiments.zip",
+    "bytes": 33338815,
+    "sha256": "87a9d32f69a5912b81ef60fdcb0f4ae3186f47f7ee4e014e0d74b252d114da33",
+    "original_file_count": 563,
+    "uncompressed_bytes": 2201469150,
+    "hash_manifest": "FILE_SHA256.json",
+    "all_original_member_hashes_matched": true
+  },
+  "authoritative_batch": "results/two-arm-round-robin-stable-seed7-20261008",
+  "failed_batch": "results/two-arm-round-robin-seed7-20261008",
+  "datasets": [
+    {
+      "directory": "results/resume-state-check-20261008",
+      "file_count": 7,
+      "uncompressed_bytes": 2837,
+      "state": {
+        "status": "RESTORATION_VERIFIED"
+      }
+    },
+    {
+      "directory": "results/sa-diagnosis-20261007",
+      "file_count": 1,
+      "uncompressed_bytes": 3399,
+      "state": null
+    },
+    {
+      "directory": "results/two-arm-codex-seed7-20261007",
+      "file_count": 89,
+      "uncompressed_bytes": 22327458,
+      "state": {
+        "status": "COMPLETED",
+        "stage": "A-7"
+      }
+    },
+    {
+      "directory": "results/two-arm-codex-unlimited-resumed-seed7-20261008",
+      "file_count": 115,
+      "uncompressed_bytes": 18481411,
+      "state": {
+        "status": "COMPLETED"
+      }
+    },
+    {
+      "directory": "results/two-arm-codex-unlimited-seed7-20261007",
+      "file_count": 97,
+      "uncompressed_bytes": 1481697,
+      "state": {
+        "status": "CONTINUED_IN_COMPLETED_BATCH",
+        "output_directory": "C:\\Users\\12433\\Desktop\\LLM-benders-SUC\\results\\two-arm-codex-unlimited-resumed-seed7-20261008",
+        "historical_pause_state": "state_at_pause.json"
+      }
+    },
+    {
+      "directory": "results/two-arm-codex-unlimited-seed7-20261007-setup-aborted",
+      "file_count": 4,
+      "uncompressed_bytes": 523,
+      "state": {
+        "status": "STOPPED_SETUP",
+        "reason": "Align thread environment with previous experiment before preflight",
+        "no_search_started": true
+      }
+    },
+    {
+      "directory": "results/two-arm-round-robin-seed7-20261008",
+      "file_count": 100,
+      "uncompressed_bytes": 470816836,
+      "state": {
+        "status": "FAILED",
+        "stage": "A-7"
+      }
+    },
+    {
+      "directory": "results/two-arm-round-robin-stable-seed7-20261008",
+      "file_count": 93,
+      "uncompressed_bytes": 1684630470,
+      "state": {
+        "status": "COMPLETED",
+        "stage": "A-7"
+      }
+    },
+    {
+      "directory": "results/two-arm-seed7-20261007",
+      "file_count": 47,
+      "uncompressed_bytes": 530282,
+      "state": {
+        "status": "INTERRUPTED_BY_USER",
+        "stage": "D-7",
+        "reason": "User observed server-side LLM failure and requested replacing HTTP with Codex subagents. Worker terminated; no final D-7 result was produced. A-7 was not started.",
+        "stopped_at": "2026-10-07T12:20:41.781479+00:00",
+        "worker_pid": 23656
+      }
+    }
+  ],
+  "reproduction_directory": "tmp/round-robin-validation",
+  "verification": {
+    "all_original_member_hashes_matched": true,
+    "all_frozen_source_hashes_matched": true,
+    "credential_scan_passed": true,
+    "validation_record": "80 passed; includes real Kaiwu and deterministic/stochastic six-stage coordination checks",
+    "final_physical_and_protocol_audits": "PASSED"
+  },
+  "source_asset": "LLM-benders-SUC-v0.24.0-source.zip",
+  "checksum_asset": "SHA256SUMS.txt",
+  "excluded": [
+    "config.local.json",
+    "licenses",
+    "Kaiwu wheel",
+    ".venv",
+    "__pycache__/*.pyc",
+    "unrelated tmp/pdfs analysis"
+  ]
+}

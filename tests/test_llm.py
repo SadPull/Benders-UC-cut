@@ -85,10 +85,11 @@ def test_transport_and_timeout(whole, monkeypatch):
     assert not candidates and info["status"] == "TIME_LIMIT"
 
 
-def test_burst_refreshes_full_incumbent_feedback_and_projections(whole, monkeypatch):
+def test_round_advice_refreshes_full_incumbent_feedback_and_all_projections(whole, monkeypatch):
     whole.o.llm_enabled = True; whole.o.llm_patience = 1
-    b = partition(whole.m, 3)[0][0]
-    seen, projections = [], []
+    searches = [solver.BlockSearch(b, whole.o, 1, j+1, whole)
+                for j, b in enumerate(partition(whole.m, 3)[0])]
+    seen = []
 
     def request(d, scenarios, best, o, seconds, context, bases, iteration):
         seen.append((best.u.copy(), context))
@@ -99,14 +100,20 @@ def test_burst_refreshes_full_incumbent_feedback_and_projections(whole, monkeypa
         return [(raw, record)], {"status": "OK", "message": "", "proposals": [record]}
 
     monkeypatch.setattr(llm, "request", request)
-    whole.after_batch(whole.result.objective, b, lambda x, source: projections.append(x.copy()), 1, 1, 1, True)
-    assert whole.result.llm_calls == 3 and len(projections) == 3
+    for inner in range(1, 4):
+        whole.after_round(whole.result.objective, searches, 1, inner, True)
+        assert whole.result.llm_calls == inner
+    assert whole.result.llm_calls == 3
     assert seen[0][0].all() and not seen[1][0][0].any() and not seen[2][0][:2].any()
     assert seen[1][1]["previous_call_feedback"]["proposals"][0]["cost_change"]["total"] < 0
     context = seen[0][1]
     assert context["scenario_duals"]["balance"] and context["unit_hour_decommit_gradient"]
     assert context["incumbent_cost"]["total"] > whole.result.objective
-    assert all(x.shape == (len(b.binary),) for x in projections)
+    for call in whole.result.llm_history:
+        projections = call["proposals"][0]["block_projections"]
+        assert [x["block"] for x in projections] == [1, 2]
+        assert all(x["completed"] and x["feasible"] for x in projections)
+    assert all(search.cuts and search.planes for search in searches)
     assert len(whole.advisor_pool) == 2
     assert whole.result.llm_history[-1]["proposals"][0]["outcome"] == "duplicate"
     assert not whole.result.u[:2].any() and whole.result.validation["feasible"]
@@ -125,7 +132,9 @@ def test_late_llm_output_is_not_evaluated(whole, monkeypatch, max_calls):
         return [(np.zeros((3, 5)), {})], {"status": "OK", "proposals": []}
 
     monkeypatch.setattr(llm, "request", late)
-    whole.after_batch(before, b, lambda *args: pytest.fail("late projection"), 1, 1, 1, True)
+    search = solver.BlockSearch(b, whole.o, 1, 1, whole)
+    monkeypatch.setattr(search, "evaluate", lambda *args: pytest.fail("late projection"))
+    whole.after_round(before, [search], 1, 1, True)
     assert whole.result.llm_calls == 1 and whole.result.objective == before and not whole.advisor_pool
 
 

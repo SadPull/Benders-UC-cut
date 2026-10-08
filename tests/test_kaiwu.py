@@ -69,18 +69,22 @@ def test_real_small_qubo(authorized, options):
 @pytest.mark.parametrize("scenario", ["deterministic", "stochastic"])
 def test_real_rts_short_run(authorized, scenario):
     from run_suc import run_suc
-    o = {"scenario_file": str(ROOT / f"data/{scenario}.json"), "max_outer": 1, "max_inner": 2,
-         "time_limit": 60, "sa_reads": 4, "sa_sweeps": 2, "sa_cooling": .8,
+    o = {"scenario_file": str(ROOT / f"data/{scenario}.json"), "max_outer": 6, "max_inner": 2,
+         "time_limit": 120, "sa_reads": 4, "sa_sweeps": 2, "sa_cooling": .8,
          "sa_temperature": 10, "verbose": False, "llm_enabled": False}
     before = np.random.get_state()
     a = run_suc(o)
     after = np.random.get_state()
     assert all(np.array_equal(x, y) for x, y in zip(before, after))
-    assert a.status in ("INNER_NOT_CONVERGED", "MAX_ITERATIONS", "DUAL_CONVERGED", "TIME_LIMIT"), a
+    assert a.status in ("MAX_ITERATIONS", "DUAL_CONVERGED", "TIME_LIMIT"), a
     assert a.validation["feasible"] and np.isfinite(a.objective)
     assert a.lower_bound <= a.objective + 1e-5
     assert a.history and a.history[0]["sampling"]["bits"] > 0
     assert a.diagnostics["sa_calls"] > 0 and a.llm_calls == 0
+    assert {row["block"] for row in a.diagnostics["blocks"] if row["visits"]} == set(range(1, 9))
+    assert all(row["sa_calls"] > 0 or row["converged"] for row in a.diagnostics["blocks"])
+    assert a.diagnostics["coordination_count"] == 6 and len(a.outer_history) == 6
+    assert a.diagnostics["complete_rounds"] >= 1
     assert all(row["seed"] == 7 for row in a.diagnostics["sampling"])
     assert a.diagnostics["timings"]["qubo"] > 0
     print(f"\n{scenario}: status={a.status} cost={a.objective:.9f} LB={a.lower_bound:.9f} gap={a.relative_gap:.6%} residual={a.validation['max_residual_mw']:.3g} seconds={a.elapsed_seconds:.3f}")
