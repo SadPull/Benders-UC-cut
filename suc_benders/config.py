@@ -35,7 +35,7 @@ class Options:
     llm_model: str = ""
     llm_timeout: float = 600
     llm_patience: int = 3
-    llm_max_calls: int = 3
+    llm_max_calls: int | None = 3
 
 
 def load_options(overrides=None, config_path=None):
@@ -57,6 +57,8 @@ def load_options(overrides=None, config_path=None):
         setattr(o, name, value)
     for name in ("block_hours", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed", "llm_max_calls"):
         v = getattr(o, name)
+        if name == "llm_max_calls" and v is None:
+            continue
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
     for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):

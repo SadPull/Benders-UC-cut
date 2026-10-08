@@ -1,0 +1,11 @@
+Release: v0.23.0
+Python: 3.10.11
+OMP_NUM_THREADS=OPENBLAS_NUM_THREADS=MKL_NUM_THREADS=1
+Command: py -3.10 -m pytest -q
+........................................................................ [100%]
+
+72 passed in 10.50s
+Includes all 3 real Kaiwu integration tests; no skips.
+Python syntax (17 files): PASSED
+Experiment CLI help (both entrypoints): PASSED
+git diff --check: PASSED

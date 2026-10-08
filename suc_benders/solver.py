@@ -170,7 +170,8 @@ class WholeDay:
         if not (allow_advice and due and self.o.llm_enabled):
             return
         for _ in range(3):
-            if self.remaining() <= 0 or self.result.llm_calls >= self.o.llm_max_calls:
+            if self.remaining() <= 0 or (self.o.llm_max_calls is not None
+                                       and self.result.llm_calls >= self.o.llm_max_calls):
                 break
             phase = perf_counter()
             measurements = self.diagnostics["evaluations"]

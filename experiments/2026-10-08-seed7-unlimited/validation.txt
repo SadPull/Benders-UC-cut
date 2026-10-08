@@ -1,0 +1,1 @@
+69 passed, 3 deselected. Command: python -m pytest -q -m not integration. Archived state reconstruction verified on actual inputs and commitment hash. Real Kaiwu check recorded in kaiwu_check.json.

@@ -6,6 +6,7 @@ __pycache__/
 config.local.json
 .env
 results/
+tmp/
 *.mat
 *.asv
 slprj/

@@ -1,6 +1,6 @@
 # Python：Kaiwu SA + LLM Benders SUC
 
-**版本：v0.22.0（2026-10-07）**。变更与兼容性说明见 [CHANGELOG.md](CHANGELOG.md)。
+**版本：v0.23.0（2026-10-08）**。变更与兼容性说明见 [CHANGELOG.md](CHANGELOG.md)，本次对照实验见 [归档索引](experiments/README.md)。
 
 **连续松弛初始化 → 时间分块 → Benders / QUBO / Kaiwu SA → 拉格朗日切平面协调 → 全天恢复与物理校验。**
 
@@ -13,10 +13,18 @@ Python 为默认 `main`，原 MATLAB 代码保存在 `MATLAB` 分支。求解策
 ```powershell
 py -3.10 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt .\kaiwu-1.4.1-cp310-none-win_amd64.whl
-Copy-Item config.example.json config.local.json
 ```
 
-只在首次配置时复制模板，保留已有本地配置。填写 `kaiwu.user_id`、`kaiwu.sdk_code` 后运行：
+首次运行时创建 `config.local.json`，已有本地配置直接保留。最小配置如下，填写自己的 `kaiwu.user_id`、`kaiwu.sdk_code`：
+
+```json
+{
+  "kaiwu": {"user_id": "", "sdk_code": ""},
+  "llm": {"enabled": false, "url": "", "model": "", "api_key": "", "max_calls": 3}
+}
+```
+
+随后运行：
 
 ```powershell
 .\.venv\Scripts\python.exe run_suc.py
@@ -65,7 +73,7 @@ print(result.validation)
 
 ## 可选 LLM
 
-在 `config.local.json` 的 `llm` 中填写完整 Responses `url`、`model`、`api_key`，将 `enabled` 改为 `true`。默认关闭，`timeout=600`、`patience=3`、`max_calls=3`；对应 `llm_*` 运行参数可覆盖本地设置。
+在 `config.local.json` 的 `llm` 中填写完整 Responses `url`、`model`、`api_key`，将 `enabled` 改为 `true`。默认关闭，`timeout=600`、`patience=3`、`max_calls=3`；对应 `llm_*` 运行参数可覆盖本地设置。`max_calls=null`（Python 中为 `llm_max_calls=None`）取消全局请求次数上限，仍受总时间预算和停止规则限制；`0` 表示不请求。
 
 每批 SA 的全天评估完成后，根据全天最好成本统计停滞。连续 `patience` 批改善不足 0.05%，且当前块尚未收敛时，按旧版连续请求最多 3 次，并受全局 `max_calls` 限制；每次最多 4 个全天 `u` 矩阵候选。每次完成修复、评估及反馈后才发送下一次请求。上下文恢复全天场景调度、成本、对偶敏感度和机组停机机会；原始 `unit` / `period` 为零起始索引，反馈变化区间为一开始的机组/小时编号。
 
@@ -74,6 +82,14 @@ print(result.validation)
 全天候选修复、连续调度和物理校验通过后才能更新上界；其块投影在当前乘子下重新调度生成局部割，不能直接复用全天割。失败后继续 SA；不保留密钥、HTTP 头或原始传输异常文本。
 
 ## 验证
+
+单种子对照实验（随机 RTS-24，种子 7，SA+LLM 后接固定种子 SA，各最多 1800 秒）：
+
+```powershell
+py -3.10 run_two_arm_experiment.py --output-dir results/two-arm-seed7-new
+```
+
+需要填写 `config.local.json` 中的 Kaiwu 授权，并在 Codex 中运行，由 Codex 调度全新的 Astra/max 子代理。此实验脚本通过 `connectivity/` 和 `D-7/calls/NNN/` 中的请求、候选及完成回执交换数据，不使用 HTTP，也不需要 HTTP 密钥。每次回执包含请求 ID、子代理标识和响应 SHA256。脚本首先测试子代理连通性，失败立即停止整个批次；通过后检查 Kaiwu、运行独立 Gurobi 参考，再串行运行两组。实验设置 `llm_max_calls=None`，取消子代理总调用次数上限；保留每次停滞触发最多连续请求 3 次、每次最多 4 个候选及原提前停止规则，预检单独记录。输出目录必须是新目录，保存不含本地凭据的源码快照、逐组结果、独立复核、报告和成本曲线。参考成本差与求解器下界间隙分别报告，单种子结果不代表普遍优势。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
@@ -90,9 +106,17 @@ print(result.validation)
 | 确定性 | 12648 / 3840 / 30636 | 1223143.120217 |
 | 随机 | 21960 / 6912 / 56996 | 1220423.773288 |
 
-本次变更后重新运行真实 Kaiwu 检查：小 QUBO 固定种子重复结果一致；确定性与随机场景各进行一次 60 秒预算、内层两次的纯 SA 短跑（允许提前退出）。确定性成本约 883727.892202、下界约 815439.903585；随机成本约 933522.215366、下界约 841376.524844、间隙约 9.8708%。两者独立校验通过且为 `INNER_NOT_CONVERGED`，不表示全局最优，也不能把初始化收益全归于 SA。集成短跑使用较快采样参数。
+v0.22.0 的真实 Kaiwu 检查：小 QUBO 固定种子重复结果一致；确定性与随机场景各进行一次 60 秒预算、内层两次的纯 SA 短跑（允许提前退出）。确定性成本约 883727.892202、下界约 815439.903585；随机成本约 933522.215366、下界约 841376.524844、间隙约 9.8708%。两者独立校验通过且为 `INNER_NOT_CONVERGED`，不表示全局最优，也不能把初始化收益全归于 SA。集成短跑使用较快采样参数。
 
 离线回归直接对照 D/17 冻结代码的修复结果、整条割量化及 QUBO 矩阵/能量，另检查跨块修复、同批基准冻结、LP 下界、未收敛停止、全天 LLM 连续反馈及迟到结果排除。归档 D/17 的 885066.704 成绩由旧版全天搜索和 LLM 产生，不作为本版本成绩或验收门槛。
+
+## 本次实验归档
+
+[v0.23.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.23.0) 保存发布源码包、完整实验附件和 SHA256 校验文件。仓库内的 [实验归档](experiments/2026-10-08-seed7-unlimited/README.md) 保存精简报告、曲线、参数和审计记录；原始请求、响应、全天结果、冻结源码及暂停恢复证据在 Release 附件中。
+
+本次取消子代理全局次数上限并追加恢复预算后，SA+子代理成本为 885425.011365，纯 SA 为 925317.577290。两组均只执行到第一轮的第一个 3 小时块，后续 7 块与跨块乘子更新未执行；最终方案仍通过完整 24 小时物理校验。SA 直接搜索当前块，子代理提出全天候选。单种子及预算变化的解释限制见归档报告。
+
+`resume_two_arm_experiment.py` 是本次暂停点的专用恢复工具：重放前三次调用、验证暂停状态，再纳入第 2 次请求的重试；`--check-only` 只验证状态恢复。它严格检查冻结源码和输入哈希，历史实验须使用附件中对应的源码快照及原参数路径。发布版本号更新后，当前源码不会通过旧实验的逐文件哈希检查。
 
 ## 数据
 

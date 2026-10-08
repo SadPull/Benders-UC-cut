@@ -177,3 +177,7 @@ def test_deadline(tiny, options):
 def test_option_validation(change, tmp_path):
     with pytest.raises(ValueError):
         load_options(change, tmp_path / "missing.json")
+
+
+def test_unlimited_llm_calls_option(tmp_path):
+    assert load_options({"llm_max_calls": None}, tmp_path / "missing.json").llm_max_calls is None

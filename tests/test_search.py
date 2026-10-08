@@ -2,6 +2,7 @@ from time import perf_counter
 from types import SimpleNamespace as NS
 
 import numpy as np
+import pytest
 
 from suc_benders import solver
 from suc_benders.model import model, partition
@@ -50,9 +51,10 @@ def test_late_relaxation_not_accepted(tiny, options, monkeypatch):
     assert result.lower == initial_bound and result.best is not None
 
 
-def test_llm_failure_burst_and_fixed_sa_seed(tiny, options, monkeypatch):
+@pytest.mark.parametrize("max_calls,expected", [(2, 2), (0, 0), (None, 9)])
+def test_llm_failure_burst_and_fixed_sa_seed(tiny, options, monkeypatch, max_calls, expected):
     d, s = tiny(1); whole = make_whole(d, s, options)
-    options.llm_enabled = True; options.llm_patience = 1; options.llm_max_calls = 2; options.max_inner = 3
+    options.llm_enabled = True; options.llm_patience = 1; options.llm_max_calls = max_calls; options.max_inner = 3
     force_open_master(monkeypatch)
     seeds, requests = [], []
 
@@ -68,10 +70,11 @@ def test_llm_failure_burst_and_fixed_sa_seed(tiny, options, monkeypatch):
     monkeypatch.setattr(solver.llm, "request", request)
     result = solver.search_block(whole.full, [whole.best.point[whole.full.binary]], options,
                                  whole.deadline, 1, 1, whole)
-    assert seeds == [options.seed]*3 and whole.result.llm_calls == 2
-    assert len(requests) == 2 and len(result.history) == 3
-    assert whole.result.llm_history[0]["inner"] == whole.result.llm_history[1]["inner"] == 1
-    assert requests[1][5]["previous_call_feedback"]["failed"]
+    assert seeds == [options.seed]*3 and whole.result.llm_calls == expected
+    assert len(requests) == expected and len(result.history) == 3
+    assert [row["inner"] for row in whole.result.llm_history] == ([1]*3 + [2]*3 + [3]*3)[:expected]
+    if expected > 1:
+        assert requests[1][5]["previous_call_feedback"]["failed"]
 
 
 def test_late_sa_candidates_not_dispatched(tiny, options, monkeypatch):

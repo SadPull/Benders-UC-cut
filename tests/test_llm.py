@@ -112,8 +112,10 @@ def test_burst_refreshes_full_incumbent_feedback_and_projections(whole, monkeypa
     assert not whole.result.u[:2].any() and whole.result.validation["feasible"]
 
 
-def test_late_llm_output_is_not_evaluated(whole, monkeypatch):
+@pytest.mark.parametrize("max_calls", [3, None])
+def test_late_llm_output_is_not_evaluated(whole, monkeypatch, max_calls):
     whole.o.llm_enabled = True; whole.o.llm_patience = 1
+    whole.o.llm_max_calls = max_calls
     before = whole.result.objective; now = [0.]; whole.deadline = 10
     monkeypatch.setattr(solver, "perf_counter", lambda: now[0])
     b = partition(whole.m, 3)[0][0]
