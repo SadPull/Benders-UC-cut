@@ -84,3 +84,14 @@ def run_process(command, directory, seconds, *, env=None, numerical=True, estima
                      worker_gate=json.loads((directory/'resource_gate.json').read_text(encoding='utf-8')))
     save(directory/'state.json', state)
     return state
+
+
+class Stopped(RuntimeError):
+    def __init__(self, state, stage):
+        self.state, self.stage = state, stage
+        super().__init__(f"{stage}: {state['status']}")
+
+
+def require_finished(state, stage):
+    if state['status'] != 'FINISHED':
+        raise Stopped(state, stage)

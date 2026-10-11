@@ -5,7 +5,7 @@ from types import SimpleNamespace as NS
 import numpy as np
 import pytest
 
-from benchmarks.azema.audit import verify_cut
+from benchmarks.paper_audit import verify_cut
 from suc_benders import solver
 from suc_benders.benders import dispatch
 from suc_benders.model import model, partition
@@ -132,77 +132,3 @@ def test_callback_deadline_and_crossed_bound(tiny, options, monkeypatch):
     c.callback_error = None; monkeypatch.setattr(whole, 'remaining', lambda: -1.)
     c._callback(g, gp.GRB.Callback.MIP)
     assert len(stopped) == 2 and c.callback_error is None
-
-
-def test_improvement_protocol_only_cd_and_fresh_start(tmp_path):
-    from benchmarks.rts24_improved import options, BUDGET
-    c, d = (options(tmp_path, a, 7, tmp_path/a) for a in ('C', 'D'))
-    assert BUDGET == 1800 and c['rts24_improvements'] and c['max_inner'] == 3
-    assert not c['llm_enabled'] and d['llm_enabled']
-    for key in set(c)-{'llm_enabled', 'llm_agent_directory'}:
-        assert c[key] == d[key]
-    assert not any(k in c for k in ('llm_api_key', 'kaiwu_sdk_code'))
-    with pytest.raises(ValueError):
-        options(tmp_path, 'A', 7, tmp_path)
-
-
-def test_core_rts24_data_matches_independent_reference():
-    from benchmarks.rts24_improved import INPUTS, RTS24, read
-    from benchmarks.rts24_paper_c import RTS24 as paper_case
-    from benchmarks.rts24 import case
-    from benchmarks.azema.artifacts import sha256
-    from suc_benders.model import fingerprint
-    manifest = read(RTS24/'reference/manifest.json')
-    reference = read(RTS24/'reference/result.json')
-    assert paper_case == RTS24 and RTS24.parent.name == 'data'
-    assert manifest['input_sha256'] == {name: sha256(RTS24/'inputs'/name) for name in INPUTS}
-    assert manifest['model_fingerprint'] == fingerprint(case(RTS24/'inputs'))
-    assert reference['checked']['objective'] == pytest.approx(885066.704430, abs=1e-6)
-    assert reference['lower_bound'] <= reference['checked']['objective']
-
-
-def test_completed_probe_event_contains_late_fields(tiny, options, tmp_path):
-    from benchmarks.rts24_improved import ImprovementRecorder
-    from benchmarks.azema.artifacts import read_jsonl
-    options.rts24_improvements = True
-    whole = whole_day(tiny, options)
-    whole.progress = ImprovementRecorder(tmp_path, 30)
-    whole.certifier.probe_advice(whole.result.u, dict(proposal_id='probe:test'))
-    events = read_jsonl(tmp_path/'completed_events.jsonl')
-    event = next(r for r in events if r['event'] == 'probe_complete')
-    assert event['value']['actual_cost'] == pytest.approx(whole.result.objective)
-    assert 'underestimation' in event['value']
-
-
-def test_improved_final_keeps_streams_without_repacking(tiny, options, tmp_path):
-    import json
-    from benchmarks.rts24_improved import ImprovementRecorder
-    options.rts24_improvements = True
-    whole = whole_day(tiny, options)
-    whole.progress = ImprovementRecorder(tmp_path, 30)
-    # A nonstreamed diagnostic must never enter the final serialization path.
-    whole.diagnostics['unused_large_diagnostic'] = object()
-    whole.result.status = 'TIME_LIMIT'
-    whole.emit('final')
-    final = json.loads((tmp_path/'checkpoint.json').read_text())
-    assert final['event'] == 'final' and final['status'] == 'TIME_LIMIT'
-    assert final['offsets']['certificate_cuts'] > 0
-    assert (tmp_path/'certificate_cuts.jsonl').exists()
-    assert (tmp_path/'llm_receipts.json').exists()
-    assert not (tmp_path/'diagnostics.json').exists()
-
-
-def test_improved_worker_saves_compact_result(tmp_path, monkeypatch):
-    import json
-    from time import time
-    import run_suc
-    from benchmarks import rts24_improved as experiment
-    result = NS(status='TIME_LIMIT', message='', objective=225., lower_bound=220.,
-                relative_gap=5/225, elapsed_seconds=1795., diagnostics=object())
-    monkeypatch.setattr(run_suc, 'run_suc', lambda *args, **kwargs: result)
-    monkeypatch.setattr(experiment, 'memory_gate', lambda *args: {'passed': True})
-    code = experiment.worker_main(dict(action='run', directory=str(tmp_path), options={},
-        launch_epoch_seconds=time(), time_limit=1800.))
-    saved = json.loads((tmp_path/'result.json').read_text())
-    assert code == 0 and saved['objective'] == 225. and saved['status'] == 'TIME_LIMIT'
-    assert 'diagnostics' not in saved

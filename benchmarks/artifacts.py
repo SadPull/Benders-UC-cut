@@ -1,4 +1,4 @@
-"""Durable evidence and resource gates for the one-instance benchmark."""
+"""Durable evidence, resource gates and source snapshots for paper C."""
 import hashlib
 import json
 import os
@@ -9,6 +9,7 @@ from time import perf_counter
 import numpy as np
 import psutil
 
+from suc_benders.model import fingerprint
 from . import ROOT
 
 
@@ -60,9 +61,9 @@ def memory_gate(estimated_peak_bytes=0):
 
 
 def source_hashes():
-    paths = [ROOT/'run_suc.py', ROOT/'run_benchmark.py', ROOT/'run_rts24_pilot.py', ROOT/'run_rts24_improved.py', ROOT/'run_rts24_paper_c.py', ROOT/'requirements.txt', ROOT/'pytest.ini']
+    paths = [ROOT/'run_suc.py', ROOT/'run_rts24_paper_c.py', ROOT/'requirements.txt', ROOT/'pytest.ini']
     paths += list((ROOT/'suc_benders').glob('*.py'))
-    paths += [p for p in (ROOT/'benchmarks').rglob('*') if p.suffix in ('.py', '.jl')]
+    paths += [p for p in (ROOT/'benchmarks').rglob('*') if p.suffix == '.py']
     paths += list((ROOT/'tests').glob('*.py'))
     return {p.relative_to(ROOT).as_posix(): sha256(p) for p in sorted(paths) if p.exists()}
 
@@ -78,6 +79,7 @@ def snapshot(folder):
 
 
 class Recorder:
+    audit_cuts = True
     full_diagnostics = True
     streams = ('evaluations', 'proposals', 'sampling', 'certificate_cuts', 'hourly_certificate_cuts',
                'bound_probes', 'rounds', 'local_evaluations', 'certification_history')
@@ -89,6 +91,16 @@ class Recorder:
         self.last, self.peak_rss = None, 0
         self.process = psutil.Process()
         self.sequence = 0
+
+    def relaxation(self, m, value, elapsed):
+        target = self.directory/'initial_prices.npz'
+        temporary = target.with_suffix('.npz.tmp')
+        with temporary.open('wb') as stream:
+            np.savez_compressed(stream, prices=value.prices)
+            stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        save(self.directory/'initial_bound.json', dict(lower_bound=value.lower,
+            model_fingerprint=fingerprint(m), arrays_sha256=sha256(target), elapsed_seconds=elapsed))
 
     def __call__(self, whole, event):
         rss = self.process.memory_info().rss

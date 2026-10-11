@@ -2,6 +2,8 @@
 
 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.0) 保存非核心文件。仓库是私有仓库，下载需要使用有权限的 GitHub 账户。源码由 `v0.25.0` 标签固定；本目录的 `v0.25.0.json` 记录附件名称、字节数、SHA256 和原始文件数。
 
+v0.25.1 已移除旧 SMS100、短测及整数认证 C/D 入口。当前 C 只使用 Python 环境，按根目录 README 安装；以下 Julia 和旧入口恢复说明适用于 v0.25.0 源码或历史冻结源码。
+
 | 附件 | 内容 | 何时需要 |
 |---|---|---|
 | `experiments-v0.25.0.zip` | 本次清理前全部 `results/`：正式与失败批次、预检、审计、原始采样、代理回执、冻结源码、清理记录 | 查阅或复核历史实验 |
@@ -23,15 +25,15 @@
 
 ## 重建依赖
 
-经典 10 机组日常环境使用根目录 README 的 `requirements.txt` 安装步骤。RTS-24/SMS100 实验则要求 Gurobi **12.0.2** 与 Julia **1.11.5**。先准备 Python 3.10、Kaiwu SDK 和有效许可证，再从项目根目录运行：
+经典 10 机组和当前 C 组使用根目录 README 的安装步骤。需要复现 v0.25.0 的 RTS-24/SMS100 框架时，先把该标签源码或实验冻结源码解压到独立目录，准备 Python 3.10、Kaiwu SDK 和有效许可证，再从该历史源码根目录运行：
 
 ```powershell
 py -3.10 -B -m benchmarks.azema.setup
 .\.benchmark\azema\python\Scripts\python.exe -B run_rts24_paper_c.py --help
 ```
 
-此命令按固定上游提交及输入校验和重建 `.benchmark/azema/`，只准备环境，不启动求解或 LLM 请求。需要网络；新机器优先重建，避免沿用旧机器的虚拟环境绝对路径。`config.local.json`、`.local/` 和 `*.lic` 均被 Git 忽略，本地配置不在 Release 附件内。
+此历史命令按固定上游提交及输入校验和重建 `.benchmark/azema/`，使用 Gurobi 12.0.2 与 Julia 1.11.5，只准备环境，不启动求解或 LLM 请求。需要网络；新机器优先重建，避免沿用旧机器的虚拟环境绝对路径。`config.local.json`、`.local/` 和 `*.lic` 均被 Git 忽略，本地配置不在 Release 附件内。
 
 ## 本地保留范围
 
-`suc_benders/`、`benchmarks/`、各运行入口、`tests/`、`data/`、原始 Azema 输入包、依赖和文档，以及 `.git/` 与本地授权配置。回归夹具属于核心验证数据，保留历史对照源码；历史大文件仍可通过原标签和 Release 找回。本次归档只包含清理时实际存在的项目文件和已记录的外部缓存暂存目录，不声称恢复更早已丢失的文件。
+`suc_benders/`、精简后的 `benchmarks/`、`run_suc.py`、`run_rts24_paper_c.py`、`tests/`、`data/`、原始 Azema 输入包、依赖和文档，以及 `.git/` 与本地授权配置。回归夹具属于核心验证数据，保留历史对照源码；历史大文件仍可通过原标签和 Release 找回。本次归档只包含清理时实际存在的项目文件和已记录的外部缓存暂存目录，不声称恢复更早已丢失的文件。

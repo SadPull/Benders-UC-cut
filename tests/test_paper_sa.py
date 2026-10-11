@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy import sparse
 
-from benchmarks.azema.audit import verify_cut
+from benchmarks.paper_audit import verify_cut
 from benchmarks.rts24 import quadratic_dual
 from suc_benders.benders import dispatch, master
 from suc_benders.config import load_options
@@ -158,7 +158,7 @@ def test_paper_budget_reserves_five_seconds(tiny, options):
 def test_recorded_continuous_proof_replay_and_tampering(tiny, options, tmp_path, monkeypatch):
     import json
     from benchmarks import paper_audit
-    from benchmarks.azema.artifacts import read_jsonl
+    from benchmarks.artifacts import read_jsonl
     from benchmarks.rts24_paper_c import PaperRecorder
     from suc_benders import solver
     d, s = tiny(T=6)
@@ -179,7 +179,7 @@ def test_recorded_continuous_proof_replay_and_tampering(tiny, options, tmp_path,
 
 def test_user_memory_waiver_still_runs_watchdog(tmp_path, monkeypatch):
     import sys
-    from benchmarks.azema import process
+    from benchmarks import process
     monkeypatch.setattr(process, 'memory_gate', lambda *a: dict(passed=False, available_bytes=1, required_bytes=4*1024**3))
     monkeypatch.setattr(process.psutil, 'virtual_memory', lambda: NS(available=1))
     state = process.run_process([sys.executable, '-c', 'import time; time.sleep(30)'], tmp_path, .15,

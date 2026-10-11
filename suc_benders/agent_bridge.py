@@ -1,11 +1,11 @@
 """Inspect and acknowledge proposal agents dispatched by the current Codex task."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from time import time
 
-from suc_benders.subagent_advisor import save
-from .azema.artifacts import sha256
+from .subagent_advisor import save
 
 
 def requests(directory):
@@ -38,7 +38,7 @@ def complete(path, agent_id):
         raise ValueError('Completion agent mismatch or duplicate completion')
     reply = path.parent/'reply.json'
     save(path.parent/'completion.json', dict(agent_id=agent_id, request_id=job['request_id'],
-        request_sha256=job['request_sha256'], reply_sha256=sha256(reply), completed_epoch_seconds=time()))
+        request_sha256=job['request_sha256'], reply_sha256=hashlib.sha256(reply.read_bytes()).hexdigest(), completed_epoch_seconds=time()))
 
 
 def main():

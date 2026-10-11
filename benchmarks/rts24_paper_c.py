@@ -23,14 +23,12 @@ from suc_benders.optimization import continuous_only, optimize
 from suc_benders.paper import STREAMS, decode, record_bound, record_state, sampling_evidence
 from suc_benders.qubo import qubo
 from suc_benders.solver import BlockSearch, Result, WholeDay
-from .azema import GUROBI_VERSION
-from .azema.artifacts import append, memory_gate, read_jsonl, save, scored_trace, sha256, snapshot, source_hashes
-from .azema.controller import Stopped, require_finished
-from .azema.process import run_process
-from .azema.protocol import environment
+from . import GUROBI_VERSION
+from .artifacts import Recorder, append, memory_gate, read_jsonl, save, scored_trace, sha256, snapshot, source_hashes
+from .process import Stopped, require_finished, run_process
+from .runtime import environment
 from .paper_audit import audit
-from .rts24 import PilotRecorder, case
-from .rts24_improved import INPUTS, RTS24, reference_check
+from .rts24 import INPUTS, RTS24, case, reference_check
 
 BUDGET = 1800.
 
@@ -55,9 +53,9 @@ def binding(directory, seed, allow_low_memory):
         memory_gate_waived=allow_low_memory)
 
 
-class PaperRecorder(PilotRecorder):
+class PaperRecorder(Recorder):
     full_diagnostics = False
-    streams = (*PilotRecorder.streams, *STREAMS)
+    streams = (*Recorder.streams, *STREAMS)
 
     def __init__(self, directory, budget, started, allow_low_memory=False):
         super().__init__(directory, budget)

@@ -3,7 +3,7 @@ from time import time
 
 import pytest
 
-from benchmarks.agent_bridge import complete, dispatch, requests
+from suc_benders.agent_bridge import complete, dispatch, requests
 from suc_benders.bound_advisor import BoundAdvisor
 from suc_benders.config import load_options
 from suc_benders.subagent_advisor import save

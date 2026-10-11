@@ -1,6 +1,8 @@
 # Python：Kaiwu SA + LLM Benders SUC
 
-**版本：v0.25.0（2026-10-11）**。变更见 [CHANGELOG.md](CHANGELOG.md)，实验和运行环境见 [版本归档与恢复说明](archives/README.md) 及 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.0)。
+**版本：v0.25.1（2026-10-11）**。变更见 [CHANGELOG.md](CHANGELOG.md)，当前源码见 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.1)，历史实验和运行环境见 [版本归档与恢复说明](archives/README.md)。
+
+本地只保留两个运行入口：`run_suc.py` 用于核心求解，`run_rts24_paper_c.py` 用于当前 C 组。`benchmarks/` 仅保留 C 组执行、数据核验、连续证明审计、检查点、进程监控和 Python 环境记录。旧 SMS100、600 秒短测及整数认证 C/D 入口已移除，需要时从 `v0.25.0` 恢复。
 
 默认算例为 **Kazarlis 经典 10 机组 UC**，支持冷热启动费用，继续使用聚合 SUC。RTS-24 实验显式读取 [独立核心数据](data/rts24/README.md)。
 
@@ -8,11 +10,11 @@
 
 经典 10 机组上下界 LLM 实验已完成，正式间隙 **0.009663%**。完整上界过程、两条真实 LLM 通道的独立验收与证据见 [中文报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/classic10-report.md)。
 
-SMS100 首轮采用 100 机组、24 小时、100 场景的 A／B／C／D 对照，每组 3600 秒，验收门槛为有效上下界间隙 0.1%。当前已暂停，四组正式实验尚未启动，已有预检与失败记录见 [实验报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/sms100-report.md)。入口为 `run_benchmark.py`，须先按归档说明恢复或重建 `.benchmark/azema/python/Scripts/python.exe` 的 Gurobi 12.0.2 隔离环境；全部数值预检和至少 4 GiB 可用内存门槛通过后才会启动正式组。
+SMS100 保持暂停，四组正式实验尚未启动；已有预检与失败记录见 [实验报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/sms100-report.md)。旧 `run_benchmark.py`、跨语言检查和 Julia 环境准备工具均已归档至 `v0.25.0`，复现时使用该版本源码。
 
-RTS-24 完整方法短测已完成：600 秒内 UB **885637.947869**、LB **881636.274031**、gap **0.451841%**，尚未达到 0.1% 目标，独立审计通过。输入为保留的 32 机组、24 小时、三场景算例，预检和审计单独计时。入口为 `run_rts24_pilot.py`，与当前 Codex 的 Astra/max 子代理调度配合使用；`llm_agent_directory` 指定文件请求目录，候选仍由原数值流程修复、评估及生成割。结果见 [短测报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/rts24-pilot-report.md)。
+RTS-24 完整方法短测已完成：600 秒内 UB **885637.947869**、LB **881636.274031**、gap **0.451841%**，尚未达到 0.1% 目标，独立审计通过。旧 `run_rts24_pilot.py` 及对应调度、报告工具已归档至 `v0.25.0`；结果见 [短测报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/rts24-pilot-report.md)。
 
-本地保留核心代码、回归测试、输入及来源、独立参考数据、版本索引和未提交的本地授权配置。`results/`、`.benchmark/` 和此前移出的缓存统一保存为 v0.25.0 Release 附件，提供逐文件清单和 SHA256；历史失败记录及冻结源码完整归档。运行实验前按 [恢复说明](archives/README.md) 准备依赖。
+本地保留核心代码、回归测试、输入及来源、独立参考数据、版本索引和未提交的本地授权配置。`results/`、`.benchmark/` 和此前移出的缓存统一保存为 v0.25.0 Release 附件，提供逐文件清单和 SHA256；历史失败记录及冻结源码完整归档。当前 C 组按下文准备 Python 环境，历史实验按 [恢复说明](archives/README.md) 处理。
 
 [SA 参数调优报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/sa-tuning-report.md) 保留全部 64 次试验记录；复核数据不完整，未修改生产默认参数。`sa_tuning` 源码目录在更早清理前已缺失，专用测试位于实验压缩包内 `results/sa_tuning/20261010-115014-123203/support/test_sa_tuning.py`，不参与核心测试收集。v0.23.0 / v0.24.0 的历史实验继续保留在各自标签和 Release 中。
 
@@ -151,33 +153,25 @@ py -3.10 run_suc.py --bound-mode integer_benders --bound-slice-seconds 30 --llm-
 
 `run_rts24_paper_c.py` 保留连续初始化、局部固定变量 QP、主问题 LP 松弛和乘子协调，正式整数主问题只使用 Kaiwu SA。按原始局部整数样本生成割后，再独立拼接和规则修复全天方案；正式运行断言 Gurobi 整数变量数为零。仅连续对偶证据进入认证下界，SA 能量及隔离整数诊断不作为证明。
 
-恢复运行环境后，从新目录执行预检和正式实验；每次正式运行重新初始化，预算为 1800 秒：
+当前 C 组固定使用 Gurobi **12.0.2**，只检查实际使用的 Python 依赖，无需 Julia 或 SMS100 文件。完成上面的常规安装后，将同一虚拟环境中的 Gurobi 切换到该版本，从新目录执行预检和正式实验。每次正式运行重新初始化，预算为 1800 秒：
 
 ```powershell
-.\.benchmark\azema\python\Scripts\python.exe -B run_rts24_paper_c.py --phase preflight --seed 7 --directory results/rts24-paper-c-next
-.\.benchmark\azema\python\Scripts\python.exe -B run_rts24_paper_c.py --phase run --seed 7 --directory results/rts24-paper-c-next
+.\.venv\Scripts\python.exe -m pip install gurobipy==12.0.2
+.\.venv\Scripts\python.exe -B run_rts24_paper_c.py --phase preflight --seed 7 --directory results/rts24-paper-c-next
+.\.venv\Scripts\python.exe -B run_rts24_paper_c.py --phase run --seed 7 --directory results/rts24-paper-c-next
 ```
 
 2026-10-11 的 C/7 正确性审计通过，但认证 gap 9.870755% 未达标，初始化后没有降本。原始离散可行样本为 4398/41648，完整原生主问题可行样本为零；修复后重复率 87.6735%。本次按用户明确授权取消 4 GiB 门槛，资源监控和看门狗仍启用；入口默认继续检查内存，显式 `--allow-low-memory` 才复用该例外。详细报告见 [论文分工 C 报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/rts24-paper-c-report.md)。
 
 ## RTS-24 C/D 整数认证改进实验（历史方法）
 
-独立入口 `run_rts24_improved.py` 固定使用已保存的 RTS-24 派生输入，运行 C（改进数值方法）和 D（同一方法加异步双通道子代理）。每组独立初始化，墙钟预算 1800 秒，保留 600 秒成绩，认证目标为 0.1%。认证窗口按停滞情况从 30 秒升至 90、180 秒；启用分场景割、历史认证下界、三轮 SA 后协调及可复现采样种子。
+旧 `run_rts24_improved.py` 包含 Gurobi 整数认证，已从当前版本移除。其 C/7、D/7 均通过审计，成本均为 885066.704430，认证 gap 分别为 0.226751%、0.213077%，未触发多种子扩展。D 发出 5 次正式请求，其中 4 次完成评估、1 次取消。
 
-```powershell
-.\.benchmark\azema\python\Scripts\python.exe -B run_rts24_improved.py --phase preflight --directory results/rts24-cd-next
-.\.benchmark\azema\python\Scripts\python.exe -B run_rts24_improved.py --phase all --directory results/rts24-cd-next
-# 单独选择阶段、组别、种子及输出目录
-.\.benchmark\azema\python\Scripts\python.exe -B run_rts24_improved.py --phase run --arm C --seed 7 --directory results/rts24-cd-next
-```
-
-预检验证核心回归、全部八块及两次协调、真实上下界子代理提案、割和上下界证明。数值启动要求至少 4 GiB 可用内存及预计峰值余量。D 的文件接口需要当前 Codex 任务派发独立上下文的 Astra/max 子代理并记录完成回执；脚本本身不会创建代理。正式运行期间继续 SA 和认证，每次最多一个在途请求，超时及取消结果单独记录。
-
-先执行 C/7、D/7；两组审计通过且至少一组达标后，才执行种子 11、19。已有正式运行不覆盖、不续时。Gurobi 参考解只用于独立费用核对，预检解、参考解和割均不作为正式初始化。输入、冻结源码、证明、回执和结果保存在 v0.25.0 实验压缩包的 `results/rts24-improved-20261011` 中；`report.md` 给出认证 gap 与参考成本差两个不同指标。该入口包含 Gurobi 整数认证，论文分工 C 使用上面的独立入口。
-
-本轮 C/7、D/7 均通过审计，最终成本均为 885066.704430，认证 gap 分别为 0.226751%、0.213077%，未触发多种子扩展。D 发出 5 次正式请求，其中 4 次完成评估、1 次取消；详见结果目录。正式运行结束后修正了冗余诊断打包造成的收尾超时，保留原冻结版本及成绩；当前代码回归为 193 项通过。后续运行须选择新输出目录并重新预检。
+源码和入口保留在 `v0.25.0`，原始输入、冻结源码、证明、回执和成绩位于该版本实验包的 `results/rts24-improved-20261011`。核心求解器中的可选整数认证功能继续保留；当前论文分工 C 使用上面的独立入口。
 
 ## 验证
+
+v0.25.1 清理后通过 201 项离线回归，5 项真实授权集成测试未运行。删除旧实验专用检查，保留迁移后的检查点、二次下界、割证据、资源门禁和 LLM 回执测试；新增当前 C 的独立依赖与过期预检检查。本次整理未重新运行正式实验。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
