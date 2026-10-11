@@ -4,6 +4,8 @@ import hashlib
 
 import numpy as np
 
+from .startup import fixed_cost
+
 
 def pack(d, u):
     previous = np.column_stack([d.initial_on, u[:, :-1]])
@@ -32,6 +34,9 @@ def repair(d, scenarios, u):
     u = np.asarray(u)
     if u.shape != (d.n_units, d.horizon) or not np.isfinite(u).all():
         return None
+    if getattr(d, "model_profile", "") == "azema_sms":
+        from .azema import repair as sms_repair
+        return pack(d, sms_repair(d, u))
     u = np.clip(np.rint(u), 0, 1)
     for i in range(d.n_units):
         state, duration = d.initial_on[i], d.initial_duration[i]
@@ -43,7 +48,6 @@ def repair(d, scenarios, u):
             duration = duration + 1 if target == state else 1
             state = target; u[i, t] = state
     required = (1 + d.reserve_fraction) * np.max([s.load for s in scenarios], axis=0)
-    cost_vector = np.concatenate([np.tile(c, d.horizon) for c in (d.cost_c, d.startup_cost, d.shutdown_cost)])
 
     def evaluate(on):
         x = pack(d, on)
@@ -63,7 +67,7 @@ def repair(d, scenarios, u):
                 continue
             trial = u.copy(); trial[i, start:] = 1
             x, remaining = evaluate(trial)
-            gain, cost = deficit[t] - remaining[t], cost_vector @ x
+            gain, cost = deficit[t] - remaining[t], fixed_cost(d, trial, commitment(d, x).w)
             if (remaining <= deficit + 1e-6).all() and gain > 1e-6:
                 choices.append((gain, -cost, -i, trial))
         if not choices:
@@ -78,13 +82,22 @@ def unpack(m, point):
     for name in ("u", "v", "w"):
         setattr(result, name, point[getattr(m.ix, name)].copy())
     for k, s in enumerate(m.scenarios):
-        p, r = point[m.ix.p[:, :, k]], point[m.ix.r[:, :, k]]
+        p = point[m.ix.p[:, :, k]]
+        r = np.zeros_like(p) if m.ix.r is None else point[m.ix.r[:, :, k]]
         result.scenarios.append(NS(name=s.name, probability=s.probability, p=p.copy(), r=r.copy(),
                                    objective=float(np.sum(d.cost_a[:, None] * p ** 2 + d.cost_b[:, None] * p))))
+        if hasattr(m.ix, "shed"):
+            z = result.scenarios[-1]
+            z.shed, z.curtail = point[m.ix.shed[:, k]].copy(), point[m.ix.curtail[:, k]].copy()
+            z.penalty_cost = float(d.shedding_cost*z.shed.sum()+d.curtailment_cost*z.curtail.sum())
+            z.recourse_cost = z.objective+z.penalty_cost
     return result
 
 
 def validate(d, scenarios, result):
+    if getattr(d, "model_profile", "") == "azema_sms":
+        from .azema import validate as sms_validate
+        return sms_validate(d, scenarios, result)
     if not np.isfinite(result.objective):
         raise ValueError("No finite objective")
     for name in ("u", "v", "w"):
@@ -125,7 +138,7 @@ def validate(d, scenarios, result):
         if abs(cost - z.objective) > 1e-4:
             raise ValueError("Scenario fuel cost mismatch")
         fuel += s.probability * cost
-    fixed = np.sum(d.cost_c[:, None] * u + d.startup_cost[:, None] * v + d.shutdown_cost[:, None] * w)
+    fixed = fixed_cost(d, u, w)
     error = float(abs(fixed + fuel - result.objective))
     if maximum > 1e-5 or error > 1e-4:
         raise ValueError("Physical or total cost validation failed")

@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from .validation import capacity as commitment_capacity
+from .startup import fixed_cost, startup_costs
 
 
 @dataclass
@@ -48,11 +49,7 @@ def _round3(value: Any) -> Any:
 
 
 def _fixed_cost(data: Any, incumbent: Any) -> float:
-    return float(
-        np.sum(data.cost_c[:, None] * incumbent.u)
-        + np.sum(data.startup_cost[:, None] * incumbent.v)
-        + np.sum(data.shutdown_cost[:, None] * incumbent.w)
-    )
+    return fixed_cost(data, incumbent.u, incumbent.w)
 
 
 def _scenario_costs(results: Sequence[Any], scenarios: Sequence[Any]) -> dict[str, float]:
@@ -248,6 +245,7 @@ def _unit_cost_decomposition(
     if incumbent is None or not results:
         return []
     rows = []
+    starts = startup_costs(data, incumbent.u)
     for i in range(data.n_units):
         fuel = float(
             sum(
@@ -262,7 +260,7 @@ def _unit_cost_decomposition(
             {
                 "unit": i,
                 "fixed_cost": float(np.sum(data.cost_c[i] * incumbent.u[i])),
-                "startup_cost": float(np.sum(data.startup_cost[i] * incumbent.v[i])),
+                "startup_cost": float(np.sum(starts[i])),
                 "shutdown_cost": float(np.sum(data.shutdown_cost[i] * incumbent.w[i])),
                 "fuel_cost": fuel,
             }
@@ -282,6 +280,10 @@ def build_llm_context(
     fixed = _fixed_cost(data, incumbent) if incumbent is not None else None
     expected_fuel = _expected_fuel(results, scenarios) if results else None
     total = fixed + expected_fuel if fixed is not None and expected_fuel is not None else None
+    sms = getattr(data, "model_profile", "") == "azema_sms"
+    expected_penalty = sum(s.probability*r.penalty_cost for s, r in zip(scenarios, results)) if sms else 0.
+    if total is not None:
+        total += expected_penalty
     incumbent_cost = None
     if total is not None:
         incumbent_cost = {
@@ -290,6 +292,10 @@ def build_llm_context(
             "expected_fuel": expected_fuel,
             "scenario_fuel": _scenario_costs(results, scenarios),
         }
+        if sms:
+            incumbent_cost.update(expected_penalty=expected_penalty,
+                expected_shed_mwh=sum(s.probability*float(r.shed.sum()) for s, r in zip(scenarios, results)),
+                expected_curtail_mwh=sum(s.probability*float(r.curtail.sum()) for s, r in zip(scenarios, results)))
 
     return _round3(
         {
@@ -302,7 +308,7 @@ def build_llm_context(
                 context_input.candidate_evaluations
             ),
             "scenario_dispatch_summary": _scenario_dispatch_summary(data, scenarios, incumbent, results),
-            "reserve_margin": _reserve_margin(data, scenarios, incumbent),
+            "reserve_margin": [] if sms else _reserve_margin(data, scenarios, incumbent),
             "tight_constraints": _tight_constraints(scenarios, results),
             "infeasible_diagnostics": list(context_input.infeasible_diagnostics)[:20],
             "iteration_history": _iteration_history_rows(context_input.history),
@@ -417,11 +423,12 @@ def _hourly_commitment_profile(
     if incumbent is None:
         return []
     rows = []
+    starts = startup_costs(data, incumbent.u)
     for t in range(min(limit, data.horizon)):
         units_on = np.flatnonzero(incumbent.u[:, t]).tolist()
         hourly_fixed = float(np.sum(data.cost_c[units_on])) if units_on else 0.0
         hourly_fixed += float(
-            np.sum(data.startup_cost * incumbent.v[:, t])
+            np.sum(starts[:, t])
         )
         hourly_fixed += float(
             np.sum(data.shutdown_cost * incumbent.w[:, t])
@@ -443,6 +450,7 @@ def _peaker_usage(data: Any, incumbent: Any | None) -> list[dict]:
     if incumbent is None:
         return []
     rows = []
+    starts = startup_costs(data, incumbent.u)
     for i in range(data.n_units):
         on_hours = int(incumbent.u[i].sum())
         if on_hours >= data.horizon:
@@ -457,10 +465,11 @@ def _peaker_usage(data: Any, incumbent: Any | None) -> list[dict]:
                 "on_hours": on_hours,
                 "cost_c": float(data.cost_c[i]),
                 "startup_cost": float(data.startup_cost[i]),
+                "incurred_startup_cost": float(starts[i].sum()),
                 "pmax": float(data.pmax[i]),
                 "pmin": float(data.pmin[i]),
                 "role": role,
-                "cost_per_on_hour": float(data.cost_c[i] + data.startup_cost[i] / max(1, on_hours)),
+                "cost_per_on_hour": float(data.cost_c[i] + starts[i].sum() / max(1, on_hours)),
             }
         )
     return rows

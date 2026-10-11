@@ -17,12 +17,17 @@ class Options:
     max_inner: int = 20
     tolerance: float = 1e-4
     time_limit: float = 600
+    bound_mode: str = "relaxation"
+    bound_slice_seconds: float = 30
+    rts24_improvements: bool = False
+    paper_sa: bool = False
     seed: int = 7
     verbose: bool = True
     theta_step: float = 1
     penalty: float = 1e6
     reserve_scale: float = 100
     sa_reads: int = 16
+    sa_enabled: bool = True
     sa_sweeps: int = 5
     sa_temperature: float = 100
     sa_cooling: float = .98
@@ -33,6 +38,7 @@ class Options:
     llm_url: str = field(default="", repr=False)
     llm_api_key: str = field(default="", repr=False)
     llm_model: str = ""
+    llm_agent_directory: str = ""
     llm_timeout: float = 600
     llm_patience: int = 3
     llm_max_calls: int | None = 3
@@ -61,7 +67,14 @@ def load_options(overrides=None, config_path=None):
             continue
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
-    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):
+    if o.bound_mode not in ("relaxation", "integer_benders"):
+        raise ValueError("Unknown bound_mode")
+    if not isinstance(o.rts24_improvements, bool) or (o.rts24_improvements and o.bound_mode != "integer_benders"):
+        raise ValueError("RTS24 improvements require integer_benders")
+    if not isinstance(o.paper_sa, bool) or (o.paper_sa and (
+            o.bound_mode != 'relaxation' or o.llm_enabled or not o.sa_enabled or o.rts24_improvements)):
+        raise ValueError('Paper SA requires continuous bounds, SA enabled and LLM disabled')
+    for name in ("time_limit", "bound_slice_seconds", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):
         v = getattr(o, name)
         if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name != "tolerance"):
             raise ValueError(f"Invalid numeric option: {name}")
@@ -69,9 +82,13 @@ def load_options(overrides=None, config_path=None):
         raise ValueError("Require 0 < sa_cooling < 1 and sa_cutoff < sa_temperature")
     if not isinstance(o.llm_enabled, bool) or not isinstance(o.verbose, bool):
         raise ValueError("llm_enabled and verbose must be boolean")
-    for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key"):
+    if not isinstance(o.sa_enabled, bool):
+        raise ValueError("sa_enabled must be boolean")
+    if not o.sa_enabled and (o.bound_mode != "integer_benders" or o.llm_enabled):
+        raise ValueError("Disabling SA requires integer_benders with LLM disabled")
+    for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key", "llm_agent_directory"):
         if not isinstance(getattr(o, name), str):
             raise ValueError(f"{name} must be a string")
-    if o.llm_enabled and not all((o.llm_url, o.llm_model, o.llm_api_key)):
+    if o.llm_enabled and (not o.llm_model or (not o.llm_agent_directory and not all((o.llm_url, o.llm_api_key)))):
         raise ValueError("Fill LLM URL, model and API key before enabling LLM")
     return o

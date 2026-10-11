@@ -1,0 +1,82 @@
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from time import perf_counter, sleep
+
+import pytest
+
+from suc_benders import bound_advisor
+from test_certification import whole_day
+
+
+@pytest.fixture
+def local_responses():
+    received = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            body = {"id": "offline-response", "model": "offline", "status": "completed", "output": [
+                {"type": "message", "content": [{"type": "output_text", "text": json.dumps(
+                    {"candidates": [{"u": [[1, 1, 1]]}]})}]}]}
+            payload = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/responses", received
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_real_process_returns_receipt_and_excludes_credentials(tiny, options, local_responses):
+    d, _ = tiny(1)
+    options.llm_url = local_responses[0]
+    options.llm_api_key = "offline-secret"
+    task = bound_advisor.BoundAdvisor(d, options, {"model": "offline", "input": "probe"}, 1, 8.)
+    try:
+        reply = None
+        deadline = perf_counter()+8
+        while reply is None and perf_counter() < deadline:
+            reply = task.poll()
+            if reply is None:
+                sleep(.01)
+        assert reply is not None
+        candidates, info = reply
+        assert info["status"] == "OK" and info["response_id"] == "offline-response"
+        assert len(candidates) == 1 and local_responses[1]
+        assert "offline-secret" not in json.dumps(info)
+        assert info["request_sha256"] and not task.process.is_alive()
+    finally:
+        if task.process.is_alive():
+            task.close()
+
+
+def test_request_deadline_terminates_worker(tiny, options, local_responses):
+    d, _ = tiny(1)
+    options.llm_url, options.llm_api_key = local_responses[0], "offline-secret"
+    task = bound_advisor.BoundAdvisor(d, options, {}, 1, .00001)
+    candidates, info = task.poll()
+    assert not candidates and info["status"] == "TIME_LIMIT"
+    assert not task.process.is_alive()
+
+
+def test_bound_prompt_targets_separation_not_only_feasible_savings(tiny, options):
+    whole = whole_day(tiny, options)
+    body = bound_advisor.request_body(whole.d, whole.scenarios, whole.result, options,
+                                     {"lower_bound": 10., "upper_bound": 20.}, 1)
+    prompt = json.loads(body["input"])
+    assert "Dispatch-infeasible" in body["instructions"]
+    assert prompt["context"]["bound_search"]["lower_bound"] == 10.
+    assert "Never turn a unit OFF" not in json.dumps(prompt["rules"])
+    assert body["reasoning"] == {"effort": "max"}

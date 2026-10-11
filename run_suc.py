@@ -12,12 +12,18 @@ from suc_benders.data import load_data
 from suc_benders.solver import solve
 
 
-def run_suc(options=None):
+def run_suc(options=None, *, resume_state=None, initial_state=None, progress=None, started_at=None):
     o = load_options(options)
     d, scenarios = load_data(o.data_file, o.scenario_file)
     state = np.random.get_state()
     try:
-        initialize(o.kaiwu_user_id, o.kaiwu_sdk_code)
+        if o.sa_enabled:
+            initialize(o.kaiwu_user_id, o.kaiwu_sdk_code)
+        if initial_state is not None or progress is not None or started_at is not None:
+            return solve(d, scenarios, o, resume_state=resume_state, initial_state=initial_state,
+                         progress=progress, started_at=started_at)
+        if resume_state is not None:
+            return solve(d, scenarios, o, resume_state=resume_state)
         return solve(d, scenarios, o)
     finally:
         np.random.set_state(state)
@@ -42,8 +48,10 @@ def _serializable(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name, kind in (("scenario-file", str), ("block-hours", int), ("max-outer", int),
-                       ("max-inner", int), ("time-limit", float), ("seed", int)):
+                       ("max-inner", int), ("time-limit", float), ("seed", int),
+                       ("bound-mode", str), ("bound-slice-seconds", float)):
         parser.add_argument(f"--{name}", type=kind)
+    parser.add_argument("--llm-enabled", action="store_true", default=None)
     parser.add_argument("--output", type=Path, help="Optional JSON result file")
     args = vars(parser.parse_args())
     output = args.pop("output")

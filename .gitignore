@@ -10,3 +10,6 @@ tmp/
 *.mat
 *.asv
 slprj/
+.benchmark/
+.local/
+*.lic

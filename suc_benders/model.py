@@ -4,22 +4,33 @@ Variable ordering matches MATLAB: variable type, scenario, hour, unit.
 Internal indices and hours are zero based; schedule matrices are unit x hour.
 """
 from types import SimpleNamespace as NS
+import hashlib
+import json
 
 import numpy as np
 from scipy import sparse
 
 
 def model(d, scenarios):
+    if getattr(d, "model_profile", "") == "azema_sms":
+        from .azema import model as sms_model
+        return sms_model(d, scenarios)
     n, T, S = d.n_units, d.horizon, len(scenarios)
     N = n * T
     u = np.arange(N).reshape((n, T), order="F")
     p = np.arange(3 * N, (3 + S) * N).reshape((n, T, S), order="F")
     ix = NS(u=u, v=u + N, w=u + 2 * N, p=p, r=p + N * S)
     nv = (3 + 2 * S) * N
+    cold = hasattr(d, "cold_startup_cost") and (d.cold_startup_cost > d.startup_cost).any()
+    if cold:
+        ix.cold_start = np.arange(nv, nv+N).reshape((n, T), order="F")
+        nv += N
     m = NS(obj=np.zeros(nv), q=np.zeros(nv), lb=np.zeros(nv), ub=np.ones(nv), ix=ix,
-           binary=np.arange(3 * N), time=np.tile(np.repeat(np.arange(T), n), 3 + 2 * S),
+           binary=np.arange(3 * N), time=np.tile(np.repeat(np.arange(T), n), 3 + 2 * S + int(cold)),
            d=d, scenarios=scenarios, constant=0.)
     m.obj[ix.u], m.obj[ix.v], m.obj[ix.w] = d.cost_c[:, None], d.startup_cost[:, None], d.shutdown_cost[:, None]
+    if cold:
+        m.obj[ix.cold_start] = (d.cold_startup_cost-d.startup_cost)[:, None]
     for k, s in enumerate(scenarios):
         m.obj[ix.p[:, :, k]] = s.probability * d.cost_b[:, None]
         m.q[ix.p[:, :, k]] = s.probability * d.cost_a[:, None]
@@ -47,6 +58,13 @@ def model(d, scenarios):
             remaining = d.initial_on[i] * d.min_up[i] + (1 - d.initial_on[i]) * d.min_down[i] - d.initial_duration[i]
             if t < remaining:
                 add(u, 1, d.initial_on[i], True, "initial")
+            if cold:
+                # Cold iff the preceding L+1 hours are all OFF, including pre-horizon history.
+                window = int(d.min_down[i]+d.cold_start_hours[i])+1
+                history = ix.u[i, max(0, t-window):t]
+                initially_warm = t < window and (d.initial_on[i] or d.initial_duration[i]+t < window)
+                add([v, ix.cold_start[i, t], *history], [1, -1, *-np.ones(len(history))],
+                    float(initially_warm), label="cold_start")
             for j in range(t, min(T, t + int(d.min_up[i]))):
                 add([v, ix.u[i, j]], [1, -1], 0, label="min_up")
             for j in range(t, min(T, t + int(d.min_down[i]))):
@@ -72,6 +90,24 @@ def model(d, scenarios):
     m.A = sparse.coo_matrix((V, (I, J)), shape=(len(rhs), nv)).tocsr()
     m.rhs, m.eq, m.labels = np.asarray(rhs, float), np.asarray(eq, bool), labels
     return m
+
+
+def fingerprint(m):
+    """Bind recoverable cuts to the canonical model and its scenario identities."""
+    a = m.A.copy(); a.sort_indices()
+    digest = hashlib.sha256(b"suc-model-v1")
+    for values, dtype in ((a.shape, "<i8"), (a.indptr, "<i8"), (a.indices, "<i8"),
+                          (a.data, "<f8"), (m.rhs, "<f8"), (m.eq, "<f8"),
+                          (m.obj, "<f8"), (m.q, "<f8"), (m.lb, "<f8"), (m.ub, "<f8"),
+                          (m.binary, "<i8"), (m.time, "<i8")):
+        values = np.asarray(values, dtype=dtype)
+        digest.update(np.asarray(values.shape, dtype="<i8").tobytes())
+        digest.update(values.tobytes())
+    digest.update(json.dumps([m.d.n_units, m.d.horizon, [(s.name, s.probability) for s in m.scenarios]],
+                             ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    if getattr(m.d, "model_profile", "") == "azema_sms":
+        digest.update(b"azema_sms:linear:soft_balance:author_3bin:v1")
+    return digest.hexdigest()
 
 
 def partition(m, hours, prices=None):

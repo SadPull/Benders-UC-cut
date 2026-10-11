@@ -48,5 +48,8 @@ def anneal(q, o, seconds, seed):
         x = q.fixed.copy(); x[q.free] = sample[:len(q.free)]
         x = x[:q.nx].astype(np.uint8)
         candidates.append(x)
-    return candidates, {"bits": n, "candidates": len(candidates),
-                        "best_energy": min(energies, default=np.inf), "seconds": perf_counter() - started}
+    statistics = {"bits": n, "candidates": len(candidates),
+                  "best_energy": min(energies, default=np.inf), "seconds": perf_counter() - started}
+    if getattr(o, 'paper_sa', False):
+        statistics.update(raw_bits=[''.join(str(int(v)) for v in x) for x in samples], raw_energies=energies)
+    return candidates, statistics

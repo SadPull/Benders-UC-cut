@@ -1,2 +1,2 @@
-# Preserve experiment bytes so published checksums also verify on other platforms.
-experiments/2026-10-08-round-robin-seed7/* -text whitespace=cr-at-eol,-blank-at-eof
+# Preserve byte-level hashes used by the independent RTS-24 reference audit.
+data/rts24/**/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol

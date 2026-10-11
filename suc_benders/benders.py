@@ -9,7 +9,7 @@ from scipy import sparse
 from .optimization import optimize
 
 
-def dispatch(b, x, seconds):
+def dispatch(b, x, seconds, *, certified=False):
     started = perf_counter()
     X, Y = b.binary, b.continuous
     x = np.asarray(x)
@@ -17,6 +17,8 @@ def dispatch(b, x, seconds):
         raise ValueError("Dispatch requires an exact binary vector")
     result = NS(feasible=False, status="DISCRETE_INFEASIBLE", cost=np.inf,
                 point=None, cut=None, recourse=np.inf, prices=None)
+    keep_proof = certified and (getattr(b, "audit_cuts", False)
+        or getattr(getattr(b, "d", None), "model_profile", "") == "azema_sms")
     hard = b.A[:, Y].getnnz(axis=1) == 0
     residual = b.A[hard][:, X] @ x - b.rhs[hard]
     residual[b.eq[hard]] = np.abs(residual[b.eq[hard]])
@@ -25,12 +27,21 @@ def dispatch(b, x, seconds):
     rows = np.flatnonzero(~hard)
     B = b.A[rows][:, X]
     g = NS(A=b.A[rows][:, Y], rhs=b.rhs[rows] - B @ x, eq=b.eq[rows],
-           obj=b.obj[Y], q=b.q[Y], lb=b.lb[Y], ub=b.ub[Y], binary=[])
+           obj=b.obj[Y], q=b.q[Y], lb=b.lb[Y], ub=b.ub[Y], binary=[], purpose='fixed_commitment_qp')
     raw = optimize(g, seconds)
     result.status = raw.status
     if raw.status == "OPTIMAL":
         beta = np.asarray(B.T @ raw.prices)
-        result.cut = NS(beta=beta, alpha=raw.objval - beta @ x, optimality=True)
+        anchor = raw.objval
+        if certified:
+            if not np.isfinite(raw.lower) or raw.lower > raw.objval + 1e-5:
+                raise RuntimeError("Invalid recourse dual bound")
+            anchor = raw.lower - 1e-5
+        result.cut = NS(beta=beta, alpha=anchor - beta @ x, optimality=True, certified=certified)
+        if keep_proof:
+            active = np.flatnonzero(raw.prices)
+            result.cut.proof = dict(kind="bounded_lagrangian", indices=active.tolist(),
+                                    prices=raw.prices[active].tolist())
         result.point = np.zeros(len(b.obj)); result.point[X] = x; result.point[Y] = raw.x
         result.recourse = raw.objval
         result.cost = raw.objval + b.obj[X] @ x + b.constant
@@ -48,12 +59,26 @@ def dispatch(b, x, seconds):
                      eq=np.zeros(nr, bool), obj=np.r_[np.zeros(ny), np.ones(ns)],
                      q=np.zeros(ny + ns), lb=np.r_[g.lb, np.zeros(ns)],
                      ub=np.r_[g.ub, np.full(ns, np.inf)], binary=[])
+        elastic.purpose = 'feasibility_lp'
         raw = optimize(elastic, seconds - (perf_counter() - started))
         result.status = raw.status
         if raw.status == "OPTIMAL":
             prices = np.clip(raw.prices, 0, 1)
             beta = np.asarray(D.T @ prices)
-            result.cut = NS(beta=beta, alpha=float(raw.objval - beta @ x), optimality=False)
+            alpha = float(raw.objval - beta @ x)
+            if certified:
+                # For every feasible y, prices @ (C*y + D*x - h) <= 0.
+                # Minimize C.T @ prices over the original bounded y domain.
+                # This remains valid after projecting numerical multipliers.
+                c = np.asarray(C.T @ prices)
+                alpha = float(np.minimum(c * g.lb, c * g.ub).sum() - prices @ h - 1e-5)
+                if not np.isfinite(alpha) or alpha + beta @ x <= 1e-7:
+                    raise RuntimeError("Feasibility cut does not certify separation")
+            result.cut = NS(beta=beta, alpha=alpha, optimality=False, certified=certified)
+            if keep_proof:
+                active = np.flatnonzero(prices)
+                result.cut.proof = dict(kind="bounded_farkas", indices=active.tolist(),
+                                       prices=prices[active].tolist())
             result.recourse, result.status = raw.objval, "INFEASIBLE"
     return result
 
@@ -73,7 +98,7 @@ def master(b, cuts, seconds=0):
         rows.append({int(j): float(v) for j, v in zip(indices, values) if v != 0})
         rhs.append(bound); eq.append(equality); kind.append(label)
 
-    for t, hour in enumerate(b.times):
+    for t, hour in enumerate([] if getattr(b.d, "model_profile", "") == "azema_sms" else b.times):
         capacity = {}
         for i in range(b.d.n_units):
             u, v = mapping[b.u[i, t]], mapping[b.v[i, t]]
@@ -108,13 +133,21 @@ def master(b, cuts, seconds=0):
            q=np.zeros(nb + 1), lb=np.r_[np.zeros(nb), lo], ub=np.r_[np.ones(nb), hi],
            binary=np.arange(nb), nx=nx, and_pairs=pairs, kind=kind, scale=b.scale,
            capacity_rows=capacity_rows)
+    m.purpose = 'master_lp_relaxation'
+    m.bound_certificate = None
     lower = -np.inf
     if seconds > 0:
         raw = optimize(m, seconds)
         if raw.status == "INFEASIBLE":
             raise RuntimeError("LP master is infeasible")
         if raw.status == "OPTIMAL":
-            lower = raw.objval + b.constant - 1e-5
+            lower = (raw.lower if getattr(b, 'paper_sa', False) else raw.objval) + b.constant - 1e-5
+            if getattr(b, 'paper_sa', False):
+                if not np.isfinite(lower):
+                    raise RuntimeError('Master LP has no finite dual certificate')
+                active = np.flatnonzero(raw.prices)
+                m.bound_certificate = dict(lower=lower, indices=active.tolist(),
+                                          prices=raw.prices[active].tolist())
     # Relaxation solutions are bounds only, not SA candidates.
     return m, lower
 
@@ -136,6 +169,7 @@ def coordinate(planes, equality, incumbent, seconds):
            obj=np.r_[np.zeros(nc), -np.ones(B)], q=np.zeros(nc + B),
            lb=np.r_[np.where(equality, -np.inf, 0), np.full(B, -np.inf)],
            ub=np.full(nc + B, np.inf), binary=[])
+    m.purpose = 'coordination_lp'
     raw = optimize(m, seconds)
     if raw.status != "OPTIMAL":
         raise RuntimeError(f"Coordination LP failed: {raw.status}")
@@ -152,6 +186,7 @@ def coordinate(planes, equality, incumbent, seconds):
             rhs=np.r_[m.rhs, -upper, np.zeros(2*nc)],
             eq=np.zeros(len(m.rhs)+1+2*nc, bool), obj=np.r_[np.zeros(nc+B), np.ones(nc)],
             q=np.zeros(2*nc+B), lb=np.r_[m.lb, np.zeros(nc)], ub=np.r_[m.ub, np.full(nc, np.inf)], binary=[])
+        stable.purpose = 'coordination_minimum_l1_lp'
         raw = optimize(stable, seconds-(perf_counter()-started))
         if raw.status != "OPTIMAL":
             raise RuntimeError(f"Multiplier selection LP failed: {raw.status}")

@@ -67,24 +67,46 @@ def test_real_small_qubo(authorized, options):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("scenario", ["deterministic", "stochastic"])
-def test_real_rts_short_run(authorized, scenario):
+@pytest.mark.parametrize("mode", ["relaxation", "integer_benders"])
+def test_real_classic10_short_run(authorized, scenario, mode, monkeypatch):
     from run_suc import run_suc
-    o = {"scenario_file": str(ROOT / f"data/{scenario}.json"), "max_outer": 6, "max_inner": 2,
-         "time_limit": 120, "sa_reads": 4, "sa_sweeps": 2, "sa_cooling": .8,
-         "sa_temperature": 10, "verbose": False, "llm_enabled": False}
+    from suc_benders import bound_advisor, llm
+    from suc_benders.data import load_data
+    from suc_benders.startup import fixed_cost
+    from suc_benders.validation import validate
+
+    monkeypatch.setattr(llm, "request", lambda *a, **k: pytest.fail("Real LLM requests are disabled"))
+    monkeypatch.setattr(bound_advisor, "BoundAdvisor", lambda *a, **k: pytest.fail("Real LLM requests are disabled"))
+    o = {"scenario_file": str(ROOT / f"data/{scenario}.json"), "max_outer": 2, "max_inner": 2,
+         "time_limit": 60, "bound_mode": mode, "bound_slice_seconds": 1,
+         "sa_reads": 4, "sa_sweeps": 2, "sa_cooling": .8, "sa_temperature": 10,
+         "verbose": False, "llm_enabled": False}
     before = np.random.get_state()
     a = run_suc(o)
     after = np.random.get_state()
     assert all(np.array_equal(x, y) for x, y in zip(before, after))
-    assert a.status in ("MAX_ITERATIONS", "DUAL_CONVERGED", "TIME_LIMIT"), a
+    assert a.status in ("MAX_ITERATIONS", "DUAL_CONVERGED", "TIME_LIMIT", "CONVERGED"), a.message
     assert a.validation["feasible"] and np.isfinite(a.objective)
+    assert a.u.shape == a.v.shape == a.w.shape == (10, 24)
+    assert all(s.p.shape == s.r.shape == (10, 24) for s in a.scenarios)
     assert a.lower_bound <= a.objective + 1e-5
+    d, scenarios = load_data(ROOT / "data/units.json", o["scenario_file"])
+    assert validate(d, scenarios, a)["feasible"]
+    expected_fuel = sum(s.probability*np.sum(d.cost_a[:, None]*r.p**2+d.cost_b[:, None]*r.p)
+                        for s, r in zip(scenarios, a.scenarios))
+    assert a.objective == pytest.approx(fixed_cost(d, a.u, a.w)+expected_fuel, abs=1e-4)
     assert a.history and a.history[0]["sampling"]["bits"] > 0
     assert a.diagnostics["sa_calls"] > 0 and a.llm_calls == 0
     assert {row["block"] for row in a.diagnostics["blocks"] if row["visits"]} == set(range(1, 9))
     assert all(row["sa_calls"] > 0 or row["converged"] for row in a.diagnostics["blocks"])
-    assert a.diagnostics["coordination_count"] == 6 and len(a.outer_history) == 6
+    assert a.diagnostics["coordination_count"] == len(a.outer_history)
+    assert a.outer_history or a.status == "CONVERGED"
     assert a.diagnostics["complete_rounds"] >= 1
     assert all(row["seed"] == 7 for row in a.diagnostics["sampling"])
     assert a.diagnostics["timings"]["qubo"] > 0
-    print(f"\n{scenario}: status={a.status} cost={a.objective:.9f} LB={a.lower_bound:.9f} gap={a.relative_gap:.6%} residual={a.validation['max_residual_mw']:.3g} seconds={a.elapsed_seconds:.3f}")
+    if mode == "integer_benders":
+        assert a.certification_history and a.diagnostics["hourly_certificate_cuts"]
+        assert all(row["lower"] <= row["upper"]+1e-5 for row in a.certification_history)
+        if a.status == "CONVERGED":
+            assert a.relative_gap <= 1e-4+1e-7
+    print(f"\n{scenario}/{mode}: status={a.status} cost={a.objective:.9f} LB={a.lower_bound:.9f} gap={a.relative_gap:.6%} residual={a.validation['max_residual_mw']:.3g} seconds={a.elapsed_seconds:.3f}")

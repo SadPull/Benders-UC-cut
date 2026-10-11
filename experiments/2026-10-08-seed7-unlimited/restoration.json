@@ -1,8 +1,0 @@
-{
-  "status": "PASSED",
-  "objective": 887405.2480700463,
-  "commitment_id": "4baa1cc2e6788b82920af94e6b36954bfbc9f906c023f0612cd8c806ea07e79e",
-  "archive_contexts_matched": true,
-  "historical_active_seconds": 1642.6678791000013,
-  "historical_curve_times": "Reconstructed from archived request waits; not original evaluation timestamps"
-}

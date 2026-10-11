@@ -20,7 +20,8 @@ from suc_benders.validation import pack, repair, unpack, validate
     ("deterministic", (12648, 3840), 30636, 1223143.1202172905, 815439.9035949688),
     ("stochastic", (21960, 6912), 56996, 1220423.7732877277, 841376.5248539273)])
 def test_rts_model_reference(name, shape, nnz, fixed_cost, relaxed):
-    d, s = load_data(ROOT / "data/units.json", ROOT / f"data/{name}.json")
+    fixture = ROOT / "tests/fixtures/rts24"
+    d, s = load_data(fixture / "units.json", fixture / f"{name}.json")
     m = model(d, s)
     assert m.A.shape == shape and m.A.nnz == nnz
     # Digests come from the archived MATLAB model, not the Python builder.

@@ -58,9 +58,40 @@ def fixed_binary(m):
     return fixed
 
 
+def activity_fixed_binary(m):
+    """Propagate only binary implications proved by conservative row activities."""
+    fixed = fixed_binary(m)
+    changed = True
+    while changed:
+        changed = False
+        for k in range(len(m.rhs)):
+            if m.A[k, len(fixed)] != 0:
+                continue
+            row = m.A[k, :len(fixed)].tocsr()
+            js, values = row.indices, row.data
+            known = ~np.isnan(fixed[js])
+            constant = float(values[known] @ fixed[js[known]] - m.rhs[k])
+            free, a = js[~known], values[~known]
+            low = constant + np.minimum(a, 0).sum()
+            high = constant + np.maximum(a, 0).sum()
+            tolerance = 1e-9 + 1e-12*(abs(m.rhs[k])+abs(values).sum())
+            if low > tolerance or (m.eq[k] and high < -tolerance):
+                raise ValueError('Inconsistent binary row activities')
+            for index, value in zip(free, a):
+                possible = []
+                for bit in (0, 1):
+                    lo = low-min(value, 0)+value*bit
+                    hi = high-max(value, 0)+value*bit
+                    possible.append(lo <= tolerance and (not m.eq[k] or hi >= -tolerance))
+                if possible.count(True) == 1:
+                    fixed[index] = possible.index(True)
+                    changed = True
+    return fixed
+
+
 def qubo(m, o, upper):
     nb = len(m.binary)
-    fixed = fixed_binary(m)
+    fixed = activity_fixed_binary(m) if getattr(o, 'paper_sa', False) else fixed_binary(m)
     free, known = np.flatnonzero(np.isnan(fixed)), np.flatnonzero(~np.isnan(fixed))
     mapping = dict(zip(free, range(len(free))))
     lower = math.floor(m.lb[-1] / o.theta_step) * o.theta_step
@@ -94,9 +125,17 @@ def qubo(m, o, upper):
         for i, j, coefficient in ((v, w, 1), (v, z, -2), (w, z, -2), (z, z, 3)):
             add_product(i, j, coefficient)
 
+    seen_rows, removed_rows = set(), []
     for k, label in enumerate(m.kind):
         if label == "and":
             continue
+        if getattr(o, 'paper_sa', False):
+            native = m.A[k].tocsr()
+            identity = (tuple(native.indices), tuple(native.data), float(m.rhs[k]), bool(m.eq[k]), label)
+            if identity in seen_rows:
+                removed_rows.append(k)
+                continue
+            seen_rows.add(identity)
         row = m.A[k, :nb].tocsr()
         a = {mapping[j]: float(v) for j, v in zip(row.indices, row.data) if j in mapping and v}
         c = float((m.A[k, known] @ fixed[known]).item() - m.rhs[k] + m.A[k, nb] * lower)
@@ -135,6 +174,7 @@ def qubo(m, o, upper):
         low = c + sum(min(0, v) for v in a.values())
         high = c + sum(max(0, v) for v in a.values())
         if not m.eq[k] and high <= 0:
+            removed_rows.append(k)
             continue
         sw = bit_weights(max(0, -low)) if not m.eq[k] else np.array([])
         ids = np.arange(nv, nv + len(sw)); nv += len(sw)
@@ -151,4 +191,5 @@ def qubo(m, o, upper):
     Q.eliminate_zeros()
     offset += o.penalty * (c @ c)
     return NS(Q=Q.tocsr(), offset=float(offset), fixed=fixed, free=free, nx=m.nx,
-              theta_ids=theta_ids, theta_weights=weights, theta_lower=lower, energy_unit=o.theta_step / m.scale)
+              theta_ids=theta_ids, theta_weights=weights, theta_lower=lower, energy_unit=o.theta_step / m.scale,
+              removed_rows=removed_rows)

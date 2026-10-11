@@ -11,7 +11,8 @@ import numpy as np
 
 
 def request_body(d, scenarios, best, o, context, base_candidates, iteration):
-    system, user = _prompt(d, scenarios, iteration, best, base_candidates, 4, context)
+    system, user = _prompt(d, scenarios, iteration, best, base_candidates,
+                           2 if o.rts24_improvements else 4, context)
     return {"model": o.llm_model, "instructions": system, "input": user, "stream": False, "store": False,
             "reasoning": {"effort": "max"}}
 
@@ -144,6 +145,21 @@ def _prompt(
         ],
         "requested_candidates": max_candidates,
     }
+    if hasattr(data, "cold_startup_cost"):
+        body.update(cold_startup_cost=data.cold_startup_cost.tolist(),
+                    cold_start_hours=data.cold_start_hours.tolist(),
+                    startup_rule="startup_cost is the hot fee; use cold_startup_cost only when consecutive "
+                                 "offline hours > min_down + cold_start_hours. Include initial offline history; "
+                                 "do not reset it at block boundaries. Charge startup fees once across scenarios.")
     if context is not None:
         body["context"] = context
+    if getattr(data, "model_profile", "") == "azema_sms":
+        body.update(model_profile="azema_sms", shedding_cost=data.shedding_cost,
+            curtailment_cost=data.curtailment_cost,
+            balance_rule="Generation + shedding - curtailment = net load; imbalances are penalized, not forbidden.",
+            terminal_rule="Shutdown in the last hour is allowed; minimum times truncate at the horizon.",
+            ramp_rule="Startup output and pre-shutdown output equal Pmin; on-to-on ramp limits are ramp_up/down.")
+        body["rules"] = [r for r in body["rules"] if "violate reserve" not in r]
+        body["rules"].append("Respect minimum times and initial power; minimize fuel + fixed + imbalance penalties.")
+        system += " This SMS case permits penalized shedding and curtailment and has no reserve constraint."
     return system, json.dumps(body, separators=(",", ":"), allow_nan=False)
