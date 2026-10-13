@@ -1,4 +1,32 @@
-# v0.25.0 归档与恢复
+# v0.26.0 归档与恢复
+
+[GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.26.0) 保存 2026-10-12 至 13 日全部现有实验证据和清理前源码。仓库为私有仓库，下载需要有权限的账户。附件名称、字节数、SHA256、原始文件数与分包内容见本目录 v0.26.0.json 及 Release 的 release-manifest.json。
+
+| 附件 | 内容 |
+|---|---|
+| source-before-cleanup-v0.26.0-part001.zip | 清理前源码、全部原测试、计划、输入、历史参考数据和原文档 |
+| experiments-v0.26.0-partNNN.zip | 所有现有 results 文件，保留原项目相对路径；各分包独立可解压 |
+| experiment-summary-v0.26.0.md 和 JSON | 阶段结果、正式计分、独立审计、LLM 归因限制及停滞诊断 |
+| integer-bounds-v0.26.0.png 和 continuous-bounds-v0.26.0.png | 原始上下界及连续分支增益曲线 |
+| release-validation-v0.26.0.json | 清理前与核心测试、入口检查及数值源码身份验证 |
+| SHA256SUMS.txt | 所有发布附件的 SHA256 |
+
+每包小于 1 GiB；内部 `_archive/<包名>-manifest.json` 保存逐文件哈希。分包之间的清单名称不同，解压不会相互覆盖。所有文件都经过压缩包回读校验；完成远端附件回读校验后才移出原项目。
+
+## 恢复实验
+
+1. 下载清理前源码包、实验分包和 SHA256SUMS.txt，逐包用 Get-FileHash 核对。
+2. 解压到一个空的独立目录，不覆盖当前核心代码。按清单核对所需文件；需要全套证据时解压全部实验分包。
+3. 准备 Python 3.10、Kaiwu 1.4.1 及自己的授权。当前核心 requirements 保持原 Gurobi 13.0.1 默认；此次冻结实验和发布回归使用 Gurobi 12.0.2，应在独立环境安装依赖后单独切换到 gurobipy==12.0.2。
+4. 历史复核在对应 snapshot 目录使用原协议和原输入。协议含原机绝对路径，跨机器恢复须核对路径引用；本发布不声称运行环境可无条件迁移。新的实验必须创建新的结果目录，不自动续跑已停止的批次。
+
+完整本地归档位于 `C:/Users/12433/Desktop/LLM-benders-SUC-archive/v0.26.0`。旧 Python 环境、基线备份和缓存仅保留在该目录，不作为远端附件；config.local.json 和许可证仍保留本地，未上传。
+
+## 当前核心范围
+
+保留 run_suc.py、suc_benders 求解包、必要输入及来源、核心测试与夹具、依赖和版本文档，以及 Git 历史和本地授权配置。benchmarks、实验专用模块、计划、参考求解结果、结果目录和运行环境已移出。历史性能工作树没有合入或清理。
+
+## v0.25.0 历史归档与恢复
 
 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.0) 保存非核心文件。仓库是私有仓库，下载需要使用有权限的 GitHub 账户。源码由 `v0.25.0` 标签固定；本目录的 `v0.25.0.json` 记录附件名称、字节数、SHA256 和原始文件数。
 
@@ -34,6 +62,6 @@ py -3.10 -B -m benchmarks.azema.setup
 
 此历史命令按固定上游提交及输入校验和重建 `.benchmark/azema/`，使用 Gurobi 12.0.2 与 Julia 1.11.5，只准备环境，不启动求解或 LLM 请求。需要网络；新机器优先重建，避免沿用旧机器的虚拟环境绝对路径。`config.local.json`、`.local/` 和 `*.lic` 均被 Git 忽略，本地配置不在 Release 附件内。
 
-## 本地保留范围
+## v0.25.0 当时的保留范围
 
 `suc_benders/`、精简后的 `benchmarks/`、`run_suc.py`、`run_rts24_paper_c.py`、`tests/`、`data/`、原始 Azema 输入包、依赖和文档，以及 `.git/` 与本地授权配置。回归夹具属于核心验证数据，保留历史对照源码；历史大文件仍可通过原标签和 Release 找回。本次归档只包含清理时实际存在的项目文件和已记录的外部缓存暂存目录，不声称恢复更早已丢失的文件。

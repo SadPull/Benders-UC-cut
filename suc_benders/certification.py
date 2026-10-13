@@ -26,11 +26,31 @@ class Certification:
         self.scenario_variables, self.scenario_synced = None, 0
         self.window_index, self.window_stalls = 0, 0
         self.callback_error = None
+        self.cover_cuts = []
         whole.diagnostics.update(certificate_cuts=[], hourly_certificate_cuts=self.hourly.cuts,
                                  bound_probes=[], llm_background_seconds=0.)
         if self.scenario is not None:
             whole.diagnostics.update(scenario_certificate_cuts=self.scenario.cuts, native_bounds=[])
         whole.timings["certification"] = 0.
+
+    def inherit(self, evidence):
+        """Import a separately replayed global floor; never treat it as an LP dual."""
+        from .model import fingerprint
+        from .lower_bound import verify_cut
+        if (evidence.get('model_fingerprint') != fingerprint(self.whole.m)
+                or not evidence.get('source_sha256') or evidence.get('verified') is not True):
+            raise ValueError('Inherited bound lacks verified model-bound provenance')
+        floor = float(evidence['lower_bound'])
+        if not np.isfinite(floor) or floor > self.result.objective+1e-5:
+            raise ValueError('Invalid inherited certified lower bound')
+        covers = evidence.get('cover_cuts', [])
+        for cut in covers:
+            if cut.get('kind') != 'cover':
+                raise ValueError('Only global capacity covers may be inherited')
+            verify_cut(self.whole.m, cut)
+        self.cover_cuts = list(covers)
+        self.whole.diagnostics['inherited_evidence'] = evidence
+        self.update_bound(floor)
 
     def restore_cuts(self, diagnostic):
         self.whole.diagnostics["certificate_cuts"] = diagnostic["certificate_cuts"]
@@ -90,6 +110,9 @@ class Certification:
         self.variables = self.g.addMVar(len(m.obj), lb=m.lb, ub=m.ub, vtype=kinds)
         self.g.setObjective(m.obj @ self.variables)
         self.g.addMConstr(m.A, self.variables, np.where(m.eq, "=", "<"), m.rhs)
+        mapping = {int(column): j for j, column in enumerate(self.b.binary)}
+        for cut in self.cover_cuts:
+            self.g.addConstr(self.variables[[mapping[i] for i in cut['indices']]].sum() >= 1.)
         lower, upper = [], []
         for part in self.hourly.parts:
             b, Y = part.b, part.b.continuous
@@ -243,10 +266,12 @@ class Certification:
             self.g.Params.MIPFocus = 3 if self.window_index else 0
             self.callback_saved = -np.inf
             self.active_floor = before
+            self.whole.emit('master_solve_start')
             self.g.optimize(self._callback)
             if self.callback_error is not None:
                 raise self.callback_error
         else:
+            self.whole.emit('master_solve_start')
             self.g.optimize()
         elapsed = perf_counter()-started
         self.whole.timings["certification"] += elapsed

@@ -28,6 +28,7 @@ class Options:
     reserve_scale: float = 100
     sa_reads: int = 16
     sa_enabled: bool = True
+    sa_budget_seconds: float | None = None
     sa_sweeps: int = 5
     sa_temperature: float = 100
     sa_cooling: float = .98
@@ -84,6 +85,11 @@ def load_options(overrides=None, config_path=None):
         raise ValueError("llm_enabled and verbose must be boolean")
     if not isinstance(o.sa_enabled, bool):
         raise ValueError("sa_enabled must be boolean")
+    if o.sa_budget_seconds is not None:
+        v = o.sa_budget_seconds
+        if (isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v)
+                or v < 0 or o.bound_mode != 'integer_benders'):
+            raise ValueError('SA budget requires a nonnegative finite value and integer_benders')
     if not o.sa_enabled and (o.bound_mode != "integer_benders" or o.llm_enabled):
         raise ValueError("Disabling SA requires integer_benders with LLM disabled")
     for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key", "llm_agent_directory"):

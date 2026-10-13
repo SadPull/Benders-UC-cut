@@ -5,7 +5,7 @@ from types import SimpleNamespace as NS
 import numpy as np
 import pytest
 
-from benchmarks.paper_audit import verify_cut
+from audit_helpers import verify_cut
 from suc_benders import solver
 from suc_benders.benders import dispatch
 from suc_benders.model import model, partition

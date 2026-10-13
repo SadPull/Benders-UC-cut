@@ -166,7 +166,7 @@ def test_sms_certificate_only_never_samples_or_calls_llm(sms, numerical_memory, 
 @pytest.mark.numerical
 def test_bounded_farkas_cut_separates_infeasible_recourse(numerical_memory):
     from scipy import sparse
-    from benchmarks.paper_audit import verify_cut
+    from audit_helpers import verify_cut
     b = NS(binary=np.array([0]), continuous=np.array([1]), A=sparse.csr_matrix([[2., -1.]]),
            rhs=np.array([0.]), eq=np.array([False]), obj=np.array([0., 1.]), q=np.zeros(2),
            lb=np.zeros(2), ub=np.ones(2), constant=0., audit_cuts=True)

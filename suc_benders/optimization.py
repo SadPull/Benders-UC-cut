@@ -22,12 +22,14 @@ def continuous_only(record):
         _continuous_guard.reset(token)
 
 
-def optimize(m, seconds, integral=False, *, method=None, log_file=None):
+def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=False):
     record = _continuous_guard.get()
     if record is not None and integral:
         raise ValueError('Integer Gurobi optimization is forbidden in paper SA')
     if seconds <= 0:
         raise TimeoutError("No time remaining for optimization")
+    if farkas and (integral or np.any(m.q)):
+        raise ValueError('Farkas extraction requires a continuous LP')
     with gp.Env(empty=True) as env:
         env.setParam("OutputFlag", 0)
         env.start()
@@ -38,6 +40,9 @@ def optimize(m, seconds, integral=False, *, method=None, log_file=None):
                 g.setParam(name, value)
             if method is not None:
                 g.setParam('Method', method)
+            if farkas:
+                g.setParam('InfUnbdInfo', 1)
+                g.setParam('DualReductions', 0)
             if log_file is not None:
                 g.setParam('LogToConsole', 0)
                 g.setParam('LogFile', str(log_file))
@@ -63,7 +68,12 @@ def optimize(m, seconds, integral=False, *, method=None, log_file=None):
             statuses = {2: "OPTIMAL", 3: "INFEASIBLE", 4: "INF_OR_UNBD", 5: "UNBOUNDED",
                         9: "TIME_LIMIT", 11: "INTERRUPTED", 12: "NUMERIC", 13: "SUBOPTIMAL"}
             result = NS(status=statuses.get(g.Status, f"STATUS_{g.Status}"), lower=-np.inf,
-                        x=None, objval=np.inf, prices=None)
+                        x=None, objval=np.inf, prices=None, farkas=None)
+            if farkas and g.Status == gp.GRB.INFEASIBLE:
+                try:
+                    result.farkas = np.asarray(constraints.FarkasDual)
+                except (AttributeError, gp.GurobiError):
+                    pass
             if g.SolCount:
                 result.x, result.objval = np.asarray(x.X), float(g.ObjVal)
             if integral:

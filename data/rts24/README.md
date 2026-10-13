@@ -1,9 +1,7 @@
-# RTS-24 核心数据
+# RTS-24 核心输入
 
-`inputs/` 是本项目实际使用的 RTS-24 派生算例：32 台机组、24 小时、三个场景、5% 备用，保留二次燃料费用。它与 `results/rts24-pilot-20261011/inputs/` 的原文件逐字节一致。当前论文分工 C 的入口直接读取此目录，不依赖本地历史实验目录；旧 C/D 入口保留在 v0.25.0 源码中。
+`inputs/` 保存当前 RTS-24 派生算例：32 台机组、24 小时、3 个场景、5% 备用及二次燃料费用。其原始字节与来源记录保持完整；求解核心读取输入不依赖实验目录。
 
-`reference/manifest.json` 和 `reference/result.json` 原样保留独立 Gurobi MIQP 的输入哈希、模型指纹、开机矩阵、认证界和费用审计。参考方案成本为 **885066.704430**，参考认证下界为 **885065.981876**。参考数据仅用于独立对照，不作为正式搜索的初始化、割或下界输入。
+历史独立 Gurobi 参考的 manifest 和 result 已移至 [v0.26.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.26.0) 清理前源码包，原路径为 `data/rts24/reference/`。参考方案成本 885066.704430；2026-10-13 轮次重新核验其开机矩阵后用于 UB，未导入参考整数下界。更早日志和源码仍在 v0.25.0 的实验包中。
 
-原始参考脚本、日志和冻结源码位于 [v0.25.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.0) 的 `experiments-v0.25.0.zip`，路径为 `results/rts24-pilot-20261011/reference/`。原 manifest 的 `../snapshot` 保持历史含义，应在解压后的历史目录中解析。
-
-默认经典 10 机组输入仍位于上级 `data/`；`tests/fixtures/rts24/` 保留独立的历史回归夹具。
+默认经典 10 机组输入位于上级 `data/`，独立历史回归夹具保存在 `tests/fixtures/rts24/`。

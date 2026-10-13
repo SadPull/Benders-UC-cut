@@ -1,26 +1,14 @@
 # Python：Kaiwu SA + LLM Benders SUC
 
-**版本：v0.25.1（2026-10-11）**。变更见 [CHANGELOG.md](CHANGELOG.md)，当前源码见 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.1)，历史实验和运行环境见 [版本归档与恢复说明](archives/README.md)。
+**版本：v0.26.0（2026-10-13）**。变更见 [CHANGELOG.md](CHANGELOG.md)，发布源码与完整实验证据见 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.26.0)。
 
-本地只保留两个运行入口：`run_suc.py` 用于核心求解，`run_rts24_paper_c.py` 用于当前 C 组。`benchmarks/` 仅保留 C 组执行、数据核验、连续证明审计、检查点、进程监控和 Python 环境记录。旧 SMS100、600 秒短测及整数认证 C/D 入口已移除，需要时从 `v0.25.0` 恢复。
+当前项目保留通用求解核心、`run_suc.py`、必要输入和核心回归测试。实验编排入口、结果、计划、参考求解数据和运行环境已归档；复现时按 [恢复说明](archives/README.md) 使用相应冻结源码。
 
-默认算例为 **Kazarlis 经典 10 机组 UC**，支持冷热启动费用，继续使用聚合 SUC。RTS-24 实验显式读取 [独立核心数据](data/rts24/README.md)。
+RTS-24 最新正式结果为 UB **885066.704430**、认证 LB **880447.427679**、gap **0.521913%**。整数 Benders 轮次按 7200 秒预算结束，独立审计通过，尚未达到 0.1% 收敛目标；本轮新增下界为零。连续阶段、失败批次、SA／LLM 明细与停滞诊断见 [实验汇总](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.26.0/experiment-summary-v0.26.0.md)。
 
-最新论文分工 C/seed 7 已完成：整数主问题仅使用 Kaiwu SA，正式运行中的 Gurobi 优化全部为连续计算。1800 秒预算内得到 UB **933522.215366**、认证 LB **841376.524852**、gap **9.870755%**，未达到 0.1% 目标；相对独立 Gurobi 参考成本高 **5.474786%**。完成 2603 次 SA 和 16 次协调，正式整数 Gurobi 调用为零。报告与全部证据保存在 [v0.25.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.0)。
+历史可行方案与已审计下界用于明确的热启动；参考完整模型的整数下界未导入。Gurobi 求解整数 Benders 主问题，SA 和 LLM 提供辅助信息，本次结果不证明 SA／LLM 有额外收益。此前隔离的性能优化未合入。
 
-经典 10 机组上下界 LLM 实验已完成，正式间隙 **0.009663%**。完整上界过程、两条真实 LLM 通道的独立验收与证据见 [中文报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/classic10-report.md)。
-
-SMS100 保持暂停，四组正式实验尚未启动；已有预检与失败记录见 [实验报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/sms100-report.md)。旧 `run_benchmark.py`、跨语言检查和 Julia 环境准备工具均已归档至 `v0.25.0`，复现时使用该版本源码。
-
-RTS-24 完整方法短测已完成：600 秒内 UB **885637.947869**、LB **881636.274031**、gap **0.451841%**，尚未达到 0.1% 目标，独立审计通过。旧 `run_rts24_pilot.py` 及对应调度、报告工具已归档至 `v0.25.0`；结果见 [短测报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/rts24-pilot-report.md)。
-
-本地保留核心代码、回归测试、输入及来源、独立参考数据、版本索引和未提交的本地授权配置。`results/`、`.benchmark/` 和此前移出的缓存统一保存为 v0.25.0 Release 附件，提供逐文件清单和 SHA256；历史失败记录及冻结源码完整归档。当前 C 组按下文准备 Python 环境，历史实验按 [恢复说明](archives/README.md) 处理。
-
-[SA 参数调优报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/sa-tuning-report.md) 保留全部 64 次试验记录；复核数据不完整，未修改生产默认参数。`sa_tuning` 源码目录在更早清理前已缺失，专用测试位于实验压缩包内 `results/sa_tuning/20261010-115014-123203/support/test_sa_tuning.py`，不参与核心测试收集。v0.23.0 / v0.24.0 的历史实验继续保留在各自标签和 Release 中。
-
-**连续松弛初始化 → 时间分块 → Benders / QUBO / Kaiwu SA → 拉格朗日切平面协调 → 全天恢复与物理校验。**
-
-Python 为默认 `main`，原 MATLAB 代码保存在 `MATLAB` 分支。求解策略以归档提交 `1d590f8` 中 D/17 的冻结代码为基线，保留当前时间分块、连续松弛初始化和稀疏 QUBO 构建。历史实验调度、文件交换控制器和报告工具不恢复；测试中保留少量冻结源码作为独立对照。
+默认算例为 **Kazarlis 经典 10 机组 UC**，RTS-24 派生输入见 [数据说明](data/rts24/README.md)。流程为连续松弛初始化、时间分块、Benders／QUBO／Kaiwu SA、拉格朗日协调和全天物理校验；可选全天整数 Benders 下界认证保留。Python 为默认 main，历史 MATLAB 代码保存在 MATLAB 分支。
 
 ## 安装与运行
 
@@ -72,6 +60,8 @@ print(result.validation)
 | `bound_mode` | `relaxation` | 原连续松弛模式，或 `integer_benders` 全天整数主问题认证 |
 | `bound_slice_seconds` | 30 | 全天整数主问题每次求解的时间片，秒 |
 | `tolerance` | 0.0001 | 相对容差，另加固定绝对容差 0.00001 |
+| `sa_budget_seconds` | `None` | 整数认证模式的 SA 相关建模、搜索、修复、调度与协调累计配额；耗尽后继续认证 |
+| `rts24_improvements` | `false` | 可选场景割及自适应认证窗口，仅适用于整数认证模式 |
 | `seed` / `verbose` | 7 / true | 随机种子与进度输出 |
 | `theta_step` / `penalty` / `reserve_scale` | 1 / 1000000 / 100 | QUBO 目标步长、罚系数和容量缩放 |
 | `sa_reads` / `sa_sweeps` | 16 / 5 | Kaiwu 解池大小 `size_limit` 与 `iterations_per_t` |
@@ -105,7 +95,7 @@ print(result.validation)
 py -3.10 run_suc.py --bound-mode integer_benders --bound-slice-seconds 30 --llm-enabled --time-limit 3600 --seed 7 --output results/certified-seed7.json
 ```
 
-此模式保留 SA 分块搜索和拉格朗日协调，另外维护包含全部跨块离散约束的全天整数主问题。每个完整 SA 轮之后求解一个认证时间片；SA 达到内外层上限后，认证继续使用剩余预算。主问题、全天有效割和可行初值被保留，没有新信息时继续求解。该主问题不含完整 SUC 的连续出力变量。
+此模式保留 SA 分块搜索和拉格朗日协调，另外维护包含全部跨块离散约束的全天整数主问题。每个完整 SA 轮之后求解一个认证时间片；SA 达到内外层上限后，认证继续使用剩余预算。主问题、全天有效割和可行初值被保留。新增约束后不能将模型持久化描述为恢复或保留了 Gurobi 内部搜索树。该主问题不含完整 SUC 的连续出力变量。
 
 下界仅取全天连续松弛的对偶下界和整数主问题 `ObjBound` 的历史最大值。整数候选目标、SA 能量和协调上界都不能用作认证下界。认证割使用未量化系数及安全数值余量，由全天连续调度的对偶信息生成，不随块乘子变化而清空。每个主问题整数方案直接调度，不进行启发式修复；可行方案可改善上界，不可行方案用于生成可行性割。
 
@@ -124,6 +114,8 @@ py -3.10 run_suc.py --bound-mode integer_benders --bound-slice-seconds 30 --llm-
 只有独立全天物理校验通过且 `UB - LB <= 1e-5 + tolerance * max(1, abs(UB))` 才返回 `CONVERGED`；默认相对容差为 0.01%。对偶收敛单独记录，不终止此模式；超时返回 `TIME_LIMIT` 和最后有效界，下界超过上界则报告认证失败。`certification_history` 记录每次认证的上下界、求解状态与探测成本；`diagnostics.certificate_cuts` 保存割及来源，`bound_probes` 保存探测反馈，`llm_history` 保存不含凭据的请求和响应回执。后台请求耗时单独记录，与主线程墙钟时间重叠，不能相加解释为总时间。割来源和随后下界变化不是 LLM 加速效果的独立消融证明。
 
 新结果在 `diagnostics.model_fingerprint` 中保存模型指纹，恢复前核对完整约束、目标、边界及场景身份，防止不同算例或启动规则混用割和下界。冷热启动模型必须具有匹配指纹。旧固定启动费用记录仍可兼容读取，并转换旧的逐小时燃料诊断字段；恢复 RTS-24 记录时使用 `tests/fixtures/rts24/` 中的原输入。
+
+Python 接口 `run_suc` 保留 `initial_state`、`resume_state` 和 `progress`。继承认证证据位于 `initial_state["inherited_evidence"]`，必须先由调用方独立重放并绑定模型和来源；其中只允许全局容量覆盖割。`initial_state["lower_bound"]` 和 `relaxation_prices` 仍对应实际连续松弛。恢复重建模型和割，不恢复求解器内部搜索树。SA 配额耗尽后，已有方案和割继续参与认证。
 
 ## 经典 10 机组上下界 LLM 实验（2026-10-10）
 
@@ -149,37 +141,13 @@ py -3.10 run_suc.py --bound-mode integer_benders --bound-slice-seconds 30 --llm-
 
 时间按续跑口径扣除中断停机：前段依据最后落盘时间向上取整计入 1160 秒，累计求解 3540.162 秒。336 MB 详细结果的存储耗时约 66.268 秒，耗尽了 60 秒审计预留；依据进程启动和错误日志时间估算，流程累计约 3612.992 秒，**整体 3600 秒预算验收也未通过**。独立审计在预算外补做并通过，原始错误日志与结果已随历史实验移入回收站。续跑结束后已改用紧凑序列化并保留刷盘；同一结果的保存实测 21.64 秒、约 80.44 MB，回读内容完全一致，这项修复单独记录在存储基准中。
 
-## RTS-24 论文分工 C
+## RTS-24 历史实验入口
 
-`run_rts24_paper_c.py` 保留连续初始化、局部固定变量 QP、主问题 LP 松弛和乘子协调，正式整数主问题只使用 Kaiwu SA。按原始局部整数样本生成割后，再独立拼接和规则修复全天方案；正式运行断言 Gurobi 整数变量数为零。仅连续对偶证据进入认证下界，SA 能量及隔离整数诊断不作为证明。
-
-当前 C 组固定使用 Gurobi **12.0.2**，只检查实际使用的 Python 依赖，无需 Julia 或 SMS100 文件。完成上面的常规安装后，将同一虚拟环境中的 Gurobi 切换到该版本，从新目录执行预检和正式实验。每次正式运行重新初始化，预算为 1800 秒：
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install gurobipy==12.0.2
-.\.venv\Scripts\python.exe -B run_rts24_paper_c.py --phase preflight --seed 7 --directory results/rts24-paper-c-next
-.\.venv\Scripts\python.exe -B run_rts24_paper_c.py --phase run --seed 7 --directory results/rts24-paper-c-next
-```
-
-2026-10-11 的 C/7 正确性审计通过，但认证 gap 9.870755% 未达标，初始化后没有降本。原始离散可行样本为 4398/41648，完整原生主问题可行样本为零；修复后重复率 87.6735%。本次按用户明确授权取消 4 GiB 门槛，资源监控和看门狗仍启用；入口默认继续检查内存，显式 `--allow-low-memory` 才复用该例外。详细报告见 [论文分工 C 报告](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.25.0/rts24-paper-c-report.md)。
-
-## RTS-24 C/D 整数认证改进实验（历史方法）
-
-旧 `run_rts24_improved.py` 包含 Gurobi 整数认证，已从当前版本移除。其 C/7、D/7 均通过审计，成本均为 885066.704430，认证 gap 分别为 0.226751%、0.213077%，未触发多种子扩展。D 发出 5 次正式请求，其中 4 次完成评估、1 次取消。
-
-源码和入口保留在 `v0.25.0`，原始输入、冻结源码、证明、回执和成绩位于该版本实验包的 `results/rts24-improved-20261011`。核心求解器中的可选整数认证功能继续保留；当前论文分工 C 使用上面的独立入口。
+论文分工 C、连续下界筛选、时间结构强化、连续分支和整数收敛实验入口均从当前核心项目移出。2026-10-12 至 13 日的入口及其专用测试在 [v0.26.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.26.0) 的清理前源码包中；更早的 C/D 入口仍由 v0.25.0 保存。原实验必须使用原冻结源码和协议；当前核心不能冒充历史快照。
 
 ## 验证
 
-v0.25.1 清理后通过 201 项离线回归，5 项真实授权集成测试未运行。删除旧实验专用检查，保留迁移后的检查点、二次下界、割证据、资源门禁和 LLM 回执测试；新增当前 C 的独立依赖与过期预检检查。本次整理未重新运行正式实验。
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-# 无真实授权时，先运行数值和 LLM 离线测试
-.\.venv\Scripts\python.exe -m pytest -q -m "not integration"
-```
-
-真实 Kaiwu 测试需要本地授权；缺少授权时明确跳过，不能视为真实验收完成。测试不调用真实 LLM 服务。
+本次清理前回归 319 项通过，核心副本 220 项通过；两次均有 3 项因 4 GiB 内存门槛跳过、5 项真实授权集成检查未运行。保留整数认证、场景割、恢复、继承容量割、SA 配额、请求哈希及子代理传输检查。24 个保留求解模块与清理前源码逐字节一致；测试不调用真实 LLM 服务。
 
 经典 10 机组回归覆盖数据来源与哈希、冷热阈值前／等于／后、零冷启动小时、初始停机历史、跨块启动、多次重启及多场景单次计费。小规模穷举使用独立停机计时核算，核对全天割、小时下界及完整整数模型最优值；恢复测试核对指纹及旧固定费用记录兼容性。
 

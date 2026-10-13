@@ -1,6 +1,7 @@
 """Round-robin block search with shared whole-day validation and advice."""
 from dataclasses import dataclass, field
 from copy import deepcopy
+from contextlib import contextmanager
 from time import perf_counter
 from types import SimpleNamespace as NS
 
@@ -56,6 +57,10 @@ def discrete_feasible(b, x):
     return bool(np.isin(x, [0, 1]).all() and residual.max(initial=0) <= 1e-7)
 
 
+class SABudgetExhausted(Exception):
+    pass
+
+
 class WholeDay:
     """Shared incumbent, measured feedback and deadline across all time blocks."""
 
@@ -81,6 +86,39 @@ class WholeDay:
         self.resume_cursor = dict(outer=1, round=1)
         self.advice = DualAdvisor(self) if self.certifier is not None else None
         self.progress = progress
+        self.sa_started = None
+        self.diagnostics['sa_budget_seconds_used'] = 0.
+
+    def sa_used(self):
+        return self.diagnostics['sa_budget_seconds_used'] + (
+            0. if self.sa_started is None else perf_counter()-self.sa_started)
+
+    @contextmanager
+    def sa_work(self):
+        """Charge the complete auxiliary search operation and cap its numeric calls."""
+        quota = self.o.sa_budget_seconds
+        if quota is None:
+            yield
+            return
+        used = self.sa_used()
+        if used >= quota:
+            raise SABudgetExhausted
+        original = self.deadline
+        self.sa_started = perf_counter()
+        limit = self.sa_started + quota-used
+        self.deadline = min(original, limit)
+        try:
+            yield
+            if perf_counter() >= limit and limit < original:
+                raise SABudgetExhausted
+        except TimeoutError:
+            if perf_counter() >= limit and limit < original:
+                raise SABudgetExhausted from None
+            raise
+        finally:
+            self.diagnostics['sa_budget_seconds_used'] += perf_counter()-self.sa_started
+            self.sa_started = None
+            self.deadline = original
 
     def remaining(self):
         return self.deadline - perf_counter()
@@ -268,6 +306,12 @@ class WholeDay:
         for name in ("sa_calls", "complete_rounds", "coordination_count"):
             self.diagnostics[name] = diagnostic[name]
         self.timings["prior_execution"] = saved["charged_elapsed_seconds"]
+        self.diagnostics['sa_budget_seconds_used'] = diagnostic.get('sa_budget_seconds_used', 0.)
+        if self.o.rts24_improvements:
+            self.diagnostics['native_bounds'] = diagnostic.get('native_bounds', [])
+            restored = diagnostic.get('certifier_state', {})
+            self.certifier.window_index = restored.get('window_index', 0)
+            self.certifier.window_stalls = restored.get('window_stalls', 0)
         self.diagnostics["resume"] = saved["resume"]
         x = pack(self.d, np.asarray(saved["u"]))
         phase = perf_counter()
@@ -283,6 +327,8 @@ class WholeDay:
         for name in ("objective", "u", "v", "w", "scenarios"):
             setattr(self.result, name, getattr(point, name))
         self.result.validation = report
+        if diagnostic.get('inherited_evidence') is not None:
+            self.certifier.inherit(diagnostic['inherited_evidence'])
         labels = np.asarray(self.full.labels)
         balance = checked.prices[labels == "balance"].reshape((-1, len(self.scenarios)))
         reserve = (checked.prices[labels == "reserve"].reshape((-1, len(self.scenarios)))
@@ -299,7 +345,9 @@ class WholeDay:
         processed_before = history[-2]["elapsed_seconds"] if len(history) > 1 else -np.inf
         for proposal in known:
             x = pack(self.d, np.asarray(proposal["raw_u"]))
-            row = evaluated[commitment_hash(commitment(self.d, x))]
+            row = evaluated.get(commitment_hash(commitment(self.d, x)))
+            if row is None:
+                continue
             key = x.astype(np.uint8).tobytes()
             if key in self.cache:
                 continue
@@ -543,8 +591,6 @@ class BlockSearch:
 
 
 def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=None, started_at=None):
-    if o.rts24_improvements and resume_state is not None:
-        raise ValueError('Improved RTS24 experiments require fresh initialization')
     if resume_state is not None and initial_state is not None:
         raise ValueError("Common initialization and resume are mutually exclusive")
     prior_state = resume_state if resume_state is not None else initial_state
@@ -561,7 +607,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
     stage = "INITIALIZATION"
 
     def remaining():
-        return deadline - perf_counter()
+        return whole.remaining() if whole is not None else deadline - perf_counter()
 
     try:
         m = model(d, scenarios)
@@ -607,135 +653,147 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                 whole.accept(x, "initial", record)
         if whole.best is None:
             raise RuntimeError("No validated initial schedule")
+        if initial_state is not None and initial_state.get('inherited_evidence') is not None:
+            if whole.certifier is None:
+                raise ValueError('Inherited evidence requires integer_benders')
+            whole.certifier.inherit(initial_state['inherited_evidence'])
         whole.emit("initialization")
         if (whole.certifier is not None and (initial_state is not None or not o.sa_enabled)
                 and whole.certifier.converged()):
             result.status = "CONVERGED"
-        blocks, cross = partition(m, o.block_hours, prices) if o.sa_enabled else ([], np.array([], int))
-        planes, previous = [[] for _ in blocks], [[] for _ in blocks]
-        first_outer, first_round = whole.resume_cursor["outer"], whole.resume_cursor["round"]
-        for outer in (range(first_outer, o.max_outer + 1) if o.sa_enabled and result.status != "CONVERGED" else []):
-            if remaining() <= 0:
-                raise TimeoutError
-            blocks, _ = partition(m, o.block_hours, prices)
-            if o.paper_sa:
-                record_state(whole, prices, outer)
-            searches = [BlockSearch(b, o, outer, j + 1, whole, planes[j]) for j, b in enumerate(blocks)]
-            if whole.advice is not None and whole.advice.state["phase"] == "llm" and not o.rts24_improvements:
-                stage = "ADVISOR_RESUME"
-                whole.advice.run_batch(searches)
-                if whole.certifier.converged():
-                    result.status = "CONVERGED"
-                    break
-            for inner in range(first_round if outer == first_outer else 1, o.max_inner + 1):
-                before = result.objective
-                lower_before, sa_before = result.lower_bound, whole.diagnostics["sa_calls"]
-                before_count, before_calls = len(whole.diagnostics["evaluations"]), result.llm_calls
-                before_opt = sum(c.optimality for search in searches for c in search.cuts)
-                before_feas = sum(not c.optimality for search in searches for c in search.cuts)
-                round_record = dict(outer=outer, round=inner, complete=False, visited_blocks=[],
-                                    skipped_closed_blocks=[], started_seconds=perf_counter()-started)
-                whole.diagnostics["rounds"].append(round_record)
-                for j, search in enumerate(searches):
-                    if o.rts24_improvements:
-                        whole.advice.service(searches)
-                    if remaining() <= 0:
-                        raise TimeoutError
-                    if closed(search.lower, search.upper, o.tolerance):
-                        round_record["skipped_closed_blocks"].append(j + 1)
-                        continue
-                    b = search.b
-                    stage = f"BLOCK_{outer}_{j + 1}_ROUND_{inner}"
-                    seeds = [whole.best.point[b.cols[b.binary]], *(previous[j] if inner == 1 else []),
-                             *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
-                    search.step(seeds, inner)
-                    # Every term belongs to the current multiplier vector, including unvisited blocks.
-                    if whole.certifier is None:
-                        result.lower_bound = max(result.lower_bound, float(sum(x.lower for x in searches)))
-                    if remaining() <= 0:
-                        raise TimeoutError
-                    round_record["visited_blocks"].append(j + 1)
-                    if search.best is not None:
-                        raw = result.u.copy(); raw[:, b.times] = search.best.point[b.u]
-                        record = {"proposal_id": f"pool:{outer}:{inner}:{j+1}",
-                                  "outer": outer, "round": inner, "block": j + 1}
-                        x = whole.prepare(raw, "pool", record)
-                        whole.accept(x, "sa_pool_repaired" if o.paper_sa else "pool", record)
-                    if o.verbose:
-                        print(f"outer={outer} round={inner} block={j + 1}/{len(blocks)} "
-                              f"local=[{search.lower:.6f}, {search.upper:.6f}] "
-                              f"full={result.objective:.6f} LB={result.lower_bound:.6f}", flush=True)
-                    if remaining() <= 0:
-                        raise TimeoutError
-                round_record.update(complete=True, sa_completed_seconds=perf_counter()-started,
-                                    incumbent_before=before, incumbent_after_sa=result.objective)
-                whole.diagnostics["complete_rounds"] += 1
-                iteration = dict(iteration=len(whole.diagnostics["iterations"])+1, outer=outer, round=inner,
-                    incumbent=result.objective,
-                    optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
-                    feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
-                    new_candidates=len(whole.diagnostics["evaluations"])-before_count, llm_failed=False)
-                whole.diagnostics["iterations"].append(iteration)
-                all_closed = all(closed(x.lower, x.upper, o.tolerance) for x in searches)
-                whole.resume_cursor = (dict(outer=outer+1, round=1) if all_closed or inner == o.max_inner
-                                       else dict(outer=outer, round=inner+1))
-                if whole.certifier is not None:
-                    stage = "CERTIFICATION"
-                    whole.certifier.step()
-                    stage = "ADVISOR"
-                    whole.advice.after_round(before, lower_before, sa_before, searches, outer, inner,
-                                             not (outer == o.max_outer and inner == o.max_inner))
-                else:
-                    stage = f"ADVISOR_{outer}_ROUND_{inner}"
-                    whole.after_round(before, searches, outer, inner, not all_closed)
-                iteration.update(incumbent=result.objective,
-                    optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
-                    feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
-                    new_candidates=len(whole.diagnostics["evaluations"])-before_count,
-                    llm_failed=any(row["status"] != "OK" for row in result.llm_history[before_calls:]))
-                round_record.update(ended_seconds=perf_counter()-started, incumbent=result.objective,
-                                    llm_calls=result.llm_calls-before_calls)
-                whole.emit("round")
-                for search in searches:
-                    search.summarize()
+        try:
+            with whole.sa_work():
+                blocks, cross = partition(m, o.block_hours, prices) if o.sa_enabled else ([], np.array([], int))
+            planes, previous = [[] for _ in blocks], [[] for _ in blocks]
+            first_outer, first_round = whole.resume_cursor["outer"], whole.resume_cursor["round"]
+            for outer in (range(first_outer, o.max_outer + 1) if o.sa_enabled and result.status != "CONVERGED" else []):
                 if remaining() <= 0:
                     raise TimeoutError
-                if ((whole.certifier is not None and whole.certifier.converged())
-                        or (o.paper_sa and closed(result.lower_bound, result.objective, o.tolerance))):
-                    result.status = "CONVERGED"
+                with whole.sa_work():
+                    blocks, _ = partition(m, o.block_hours, prices)
+                    if o.paper_sa:
+                        record_state(whole, prices, outer)
+                    searches = [BlockSearch(b, o, outer, j + 1, whole, planes[j]) for j, b in enumerate(blocks)]
+                if whole.advice is not None and whole.advice.state["phase"] == "llm" and not o.rts24_improvements:
+                    stage = "ADVISOR_RESUME"
+                    whole.advice.run_batch(searches)
+                    if whole.certifier.converged():
+                        result.status = "CONVERGED"
+                        break
+                for inner in range(first_round if outer == first_outer else 1, o.max_inner + 1):
+                    before = result.objective
+                    lower_before, sa_before = result.lower_bound, whole.diagnostics["sa_calls"]
+                    before_count, before_calls = len(whole.diagnostics["evaluations"]), result.llm_calls
+                    before_opt = sum(c.optimality for search in searches for c in search.cuts)
+                    before_feas = sum(not c.optimality for search in searches for c in search.cuts)
+                    round_record = dict(outer=outer, round=inner, complete=False, visited_blocks=[],
+                                        skipped_closed_blocks=[], started_seconds=perf_counter()-started)
+                    whole.diagnostics["rounds"].append(round_record)
+                    for j, search in enumerate(searches):
+                        if o.rts24_improvements:
+                            whole.advice.service(searches)
+                        if remaining() <= 0:
+                            raise TimeoutError
+                        if closed(search.lower, search.upper, o.tolerance):
+                            round_record["skipped_closed_blocks"].append(j + 1)
+                            continue
+                        with whole.sa_work():
+                            b = search.b
+                            stage = f"BLOCK_{outer}_{j + 1}_ROUND_{inner}"
+                            seeds = [whole.best.point[b.cols[b.binary]], *(previous[j] if inner == 1 else []),
+                                     *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
+                            search.step(seeds, inner)
+                            # Every term belongs to the current multiplier vector, including unvisited blocks.
+                            if whole.certifier is None:
+                                result.lower_bound = max(result.lower_bound, float(sum(x.lower for x in searches)))
+                            if remaining() <= 0:
+                                raise TimeoutError
+                            round_record["visited_blocks"].append(j + 1)
+                            if search.best is not None:
+                                raw = result.u.copy(); raw[:, b.times] = search.best.point[b.u]
+                                record = {"proposal_id": f"pool:{outer}:{inner}:{j+1}",
+                                          "outer": outer, "round": inner, "block": j + 1}
+                                x = whole.prepare(raw, "pool", record)
+                                whole.accept(x, "sa_pool_repaired" if o.paper_sa else "pool", record)
+                            if o.verbose:
+                                print(f"outer={outer} round={inner} block={j + 1}/{len(blocks)} "
+                                      f"local=[{search.lower:.6f}, {search.upper:.6f}] "
+                                      f"full={result.objective:.6f} LB={result.lower_bound:.6f}", flush=True)
+                            if remaining() <= 0:
+                                raise TimeoutError
+                    round_record.update(complete=True, sa_completed_seconds=perf_counter()-started,
+                                        incumbent_before=before, incumbent_after_sa=result.objective)
+                    whole.diagnostics["complete_rounds"] += 1
+                    iteration = dict(iteration=len(whole.diagnostics["iterations"])+1, outer=outer, round=inner,
+                        incumbent=result.objective,
+                        optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
+                        feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
+                        new_candidates=len(whole.diagnostics["evaluations"])-before_count, llm_failed=False)
+                    whole.diagnostics["iterations"].append(iteration)
+                    all_closed = all(closed(x.lower, x.upper, o.tolerance) for x in searches)
+                    whole.resume_cursor = (dict(outer=outer+1, round=1) if all_closed or inner == o.max_inner
+                                           else dict(outer=outer, round=inner+1))
+                    if whole.certifier is not None:
+                        stage = "CERTIFICATION"
+                        whole.certifier.step()
+                        stage = "ADVISOR"
+                        whole.advice.after_round(before, lower_before, sa_before, searches, outer, inner,
+                                                 not (outer == o.max_outer and inner == o.max_inner))
+                    else:
+                        stage = f"ADVISOR_{outer}_ROUND_{inner}"
+                        whole.after_round(before, searches, outer, inner, not all_closed)
+                    iteration.update(incumbent=result.objective,
+                        optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
+                        feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
+                        new_candidates=len(whole.diagnostics["evaluations"])-before_count,
+                        llm_failed=any(row["status"] != "OK" for row in result.llm_history[before_calls:]))
+                    round_record.update(ended_seconds=perf_counter()-started, incumbent=result.objective,
+                                        llm_calls=result.llm_calls-before_calls)
+                    whole.emit("round")
+                    for search in searches:
+                        search.summarize()
+                    if remaining() <= 0:
+                        raise TimeoutError
+                    if ((whole.certifier is not None and whole.certifier.converged())
+                            or (o.paper_sa and closed(result.lower_bound, result.objective, o.tolerance))):
+                        result.status = "CONVERGED"
+                        break
+                    if all_closed:
+                        break
+                if result.status == "CONVERGED":
                     break
-                if all_closed:
-                    break
-            if result.status == "CONVERGED":
-                break
-            previous = [search.seeds for search in searches]
-            stage = "COORDINATION"
-            phase = perf_counter()
-            values, upper = coordinate(planes, m.eq[cross], result.objective, remaining())
-            whole.timings["coordination"] += perf_counter() - phase
-            if remaining() <= 0:
-                raise TimeoutError
-            result.coordination_upper = upper
-            result.outer_history.append({"outer": outer, "lower": result.lower_bound, "coordination_upper": upper,
-                                         "complete_rounds": inner,
-                                         "unconverged_blocks": [x.index for x in searches
-                                             if not closed(x.lower, x.upper, o.tolerance)]})
-            whole.diagnostics["coordination_count"] += 1
-            if o.paper_sa:
-                whole.diagnostics.setdefault('paper_coordination', []).append(dict(
-                    **result.outer_history[-1], approximate=not all_closed,
-                    elapsed_seconds=perf_counter()-started))
-            whole.emit("coordination")
-            if whole.certifier is not None:
-                dual_lower = max(relaxation.lower, float(sum(search.lower for search in searches)))
-                result.outer_history[-1]["dual_lower"] = dual_lower
-                result.outer_history[-1]["dual_converged"] = closed(dual_lower, upper, o.tolerance, dual_lower)
-            elif not o.paper_sa and closed(result.lower_bound, upper, o.tolerance, result.lower_bound):
-                result.status = "DUAL_CONVERGED"
-                break
-            prices = np.zeros(len(m.rhs)); prices[cross] = values
-            if o.rts24_improvements:
-                whole.check_repricing(prices, outer)
+                with whole.sa_work():
+                    previous = [search.seeds for search in searches]
+                    stage = "COORDINATION"
+                    phase = perf_counter()
+                    values, upper = coordinate(planes, m.eq[cross], result.objective, remaining())
+                    whole.timings["coordination"] += perf_counter() - phase
+                    if remaining() <= 0:
+                        raise TimeoutError
+                    result.coordination_upper = upper
+                    result.outer_history.append({"outer": outer, "lower": result.lower_bound, "coordination_upper": upper,
+                                                 "complete_rounds": inner,
+                                                 "unconverged_blocks": [x.index for x in searches
+                                                     if not closed(x.lower, x.upper, o.tolerance)]})
+                    whole.diagnostics["coordination_count"] += 1
+                    if o.paper_sa:
+                        whole.diagnostics.setdefault('paper_coordination', []).append(dict(
+                            **result.outer_history[-1], approximate=not all_closed,
+                            elapsed_seconds=perf_counter()-started))
+                    whole.emit("coordination")
+                    if whole.certifier is not None:
+                        dual_lower = max(relaxation.lower, float(sum(search.lower for search in searches)))
+                        result.outer_history[-1]["dual_lower"] = dual_lower
+                        result.outer_history[-1]["dual_converged"] = closed(dual_lower, upper, o.tolerance, dual_lower)
+                    elif not o.paper_sa and closed(result.lower_bound, upper, o.tolerance, result.lower_bound):
+                        result.status = "DUAL_CONVERGED"
+                        break
+                    prices = np.zeros(len(m.rhs)); prices[cross] = values
+                    if o.rts24_improvements:
+                        whole.check_repricing(prices, outer)
+        except SABudgetExhausted:
+            whole.diagnostics['sa_budget_exhausted'] = True
+            whole.emit('sa_budget_exhausted')
         if whole.certifier is not None and result.status != "CONVERGED":
             stage = "CERTIFICATION"
             while remaining() > 0 and not whole.certifier.converged():

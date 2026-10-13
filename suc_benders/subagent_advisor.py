@@ -44,9 +44,13 @@ class SubagentAdvisor:
             try:
                 done = json.loads(completed.read_text(encoding='utf-8'))
                 dispatch = json.loads((self.directory/'dispatch.json').read_text(encoding='utf-8'))
+                saved = json.loads((self.directory/'request.json').read_text(encoding='utf-8'))
+                request_hash = hashlib.sha256(json.dumps(saved['request'], sort_keys=True,
+                    separators=(',', ':')).encode()).hexdigest()
                 text = (self.directory/'reply.json').read_text(encoding='utf-8')
                 digest = hashlib.sha256(text.encode()).hexdigest()
-                if (done['request_id'] != self.directory.name or done['request_sha256'] != self.receipt['request_sha256']
+                if (request_hash != self.receipt['request_sha256']
+                        or done['request_id'] != self.directory.name or done['request_sha256'] != self.receipt['request_sha256']
                         or done['agent_id'] != dispatch['agent_id'] or done['reply_sha256'] != digest
                         or dispatch['model'] != self.receipt['request']['model']
                         or dispatch['reasoning_effort'] != self.receipt['request']['reasoning']['effort']):

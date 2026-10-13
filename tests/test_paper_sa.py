@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from scipy import sparse
 
-from benchmarks.paper_audit import verify_cut
-from benchmarks.rts24 import quadratic_dual
+from audit_helpers import verify_cut
+from audit_helpers import quadratic_dual
 from suc_benders.benders import dispatch, master
 from suc_benders.config import load_options
 from suc_benders.model import model, partition
@@ -155,36 +155,8 @@ def test_paper_budget_reserves_five_seconds(tiny, options):
     assert r.status == 'TIME_LIMIT' and not r.diagnostics['optimizer_calls']
 
 
-def test_recorded_continuous_proof_replay_and_tampering(tiny, options, tmp_path, monkeypatch):
-    import json
-    from benchmarks import paper_audit
-    from benchmarks.artifacts import read_jsonl
-    from benchmarks.rts24_paper_c import PaperRecorder
-    from suc_benders import solver
-    d, s = tiny(T=6)
-    options.paper_sa, options.max_outer, options.max_inner = True, 2, 1
-    recorder = PaperRecorder(tmp_path/'run', 30, perf_counter(), True)
-    monkeypatch.setattr(solver, 'anneal', lambda *args: ([], dict(bits=1)))
-    monkeypatch.setattr(paper_audit, 'case', lambda _: model(d, s))
-    r = solve(d, s, options, progress=recorder, started_at=recorder.started)
-    assert not r.status.endswith('FAILED'), r.message
-    result = paper_audit.audit(recorder.directory, tmp_path, 30, tmp_path/'audit', lambda: 10)
-    assert result['passed'] and result['gurobi_integer_calls'] == 0 and result['lp_proofs'] > 0
-    path = recorder.directory/'paper_bounds.jsonl'
-    rows = read_jsonl(path); rows[0]['lower'] = 1e12
-    path.write_text(''.join(json.dumps(row)+'\n' for row in rows), encoding='utf-8')
-    with pytest.raises(ValueError, match='dual proof'):
-        paper_audit.audit(recorder.directory, tmp_path, 30, tmp_path/'audit', lambda: 10)
 
 
-def test_user_memory_waiver_still_runs_watchdog(tmp_path, monkeypatch):
-    import sys
-    from benchmarks import process
-    monkeypatch.setattr(process, 'memory_gate', lambda *a: dict(passed=False, available_bytes=1, required_bytes=4*1024**3))
-    monkeypatch.setattr(process.psutil, 'virtual_memory', lambda: NS(available=1))
-    state = process.run_process([sys.executable, '-c', 'import time; time.sleep(30)'], tmp_path, .15,
-                                enforce_memory_gate=False)
-    assert state['status'] == 'TIME_LIMIT' and state['numerical_runs_started'] == 1
 
 
 def test_paper_encoding_preserves_exhaustive_feasible_set(options):
