@@ -1,4 +1,6 @@
 """File transport for one independently dispatched Codex subagent proposal."""
+# 模块职责：为单个外部子代理请求提供原子 JSON 文件交换、身份/哈希核对和截止时间处理。
+# 单调时钟用于本进程计时，Unix 时间戳用于跨进程回执；本模块不自行派发外部子代理。
 import hashlib
 import json
 import os
@@ -9,6 +11,7 @@ from uuid import uuid4
 from . import llm
 
 
+# 先写同目录临时文件并 flush/fsync，再原子替换目标 JSON，减少检查点半写和断电丢失风险。
 def save(path, value):
     temporary = path.with_suffix(path.suffix+'.tmp')
     with temporary.open('w', encoding='utf-8') as stream:
@@ -17,7 +20,9 @@ def save(path, value):
     os.replace(temporary, path)
 
 
+# 管理一个独立请求目录及其 request/dispatch/reply/completion/closed 文件生命周期。
 class SubagentAdvisor:
+    # 生成唯一请求目录，保存请求体哈希、矩阵形状、创建时间及请求截止时间，供外部调度器读取。
     def __init__(self, d, o, body, iteration, seconds):
         self.started, self.created = perf_counter(), time()
         self.deadline, self.deadline_epoch = self.started+seconds, self.created+seconds
@@ -33,6 +38,8 @@ class SubagentAdvisor:
             created_epoch_seconds=self.created, deadline_epoch_seconds=self.deadline_epoch,
             reply_path=str(self.directory/'reply.json')))
 
+    # 等待 completion 时返回 None；收到后验证请求、回复、agent、模型和推理档位，再适配公共解析器。
+    # 超过原截止时间的回复丢弃；消费完成或超时后写关闭标记。
     def poll(self):
         now = perf_counter()
         if self.closed:
@@ -77,6 +84,7 @@ class SubagentAdvisor:
                 proposals=[], seconds=now-self.started, background_seconds=now-self.started, **self.receipt)
         return None
 
+    # 标记本请求关闭并原子写入 closed.json；外部调度器负责实际子代理的停止。
     def close(self):
         self.closed = True
         if not (self.directory/'closed.json').exists():

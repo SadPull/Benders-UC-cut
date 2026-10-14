@@ -1,4 +1,6 @@
 """Temporal/capacity repair and independent physical/cost validation."""
+# 模块职责：转换 u/v/w 与模型向量、进行启停/容量修复，并独立校验全天物理方程与费用。
+# 修复只提供候选；通过连续调度及独立 validate 后，方案费用才可更新原问题上界。
 from types import SimpleNamespace as NS
 import hashlib
 
@@ -7,12 +9,14 @@ import numpy as np
 from .startup import fixed_cost
 
 
+# 从全天 u 和初始状态重建启动 v、停机 w，并按每类变量的列主序拼成二进制向量。
 def pack(d, u):
     previous = np.column_stack([d.initial_on, u[:, :-1]])
     v, w = np.maximum(u - previous, 0), np.maximum(previous - u, 0)
     return np.concatenate([z.ravel(order="F") for z in (u, v, w)])
 
 
+# 将 u/v/w 向量按变量类型分段，恢复为机组 × 小时矩阵并复制，避免修改原缓存。
 def commitment(d, x):
     # Each variable type occupies a contiguous, column-major unit/hour matrix.
     n = d.n_units * d.horizon
@@ -20,16 +24,20 @@ def commitment(d, x):
                  for j, name in enumerate(("u", "v", "w"))})
 
 
+# 对完整 u/v/w 的二进制字节生成 SHA256，作为全天方案去重与反馈关联身份。
 def commitment_hash(z):
     return hashlib.sha256(np.r_[z.u.ravel(), z.v.ravel(), z.w.ravel()].astype(np.uint8).tobytes()).hexdigest()
 
 
+# 逐机组逐小时计算启动容量与下一小时停机容量的较小值，供备用检查及独立物理验证使用。
 def capacity(d, u, v, w):
     startup = d.pmax[:, None] * u - (d.pmax - d.pstart)[:, None] * v
     shutdown = d.pmax[:, None] * u - (d.pmax - d.pshut)[:, None] * np.column_stack([w[:, 1:], np.zeros(d.n_units)])
     return np.minimum(startup, shutdown)
 
 
+# 将候选 u 取整后按初始历史修复最小开停机时间、标准末小时禁停与最坏场景容量。
+# 返回重建 u/v/w 或 None；容量修复可把机组从允许最早开机时刻一直打开，因此会修改其他小时。
 def repair(d, scenarios, u):
     u = np.asarray(u)
     if u.shape != (d.n_units, d.horizon) or not np.isfinite(u).all():
@@ -49,12 +57,14 @@ def repair(d, scenarios, u):
             state = target; u[i, t] = state
     required = (1 + d.reserve_fraction) * np.max([s.load for s in scenarios], axis=0)
 
+    # 重建当前试探方案的 v/w，返回打包向量及每小时最坏场景负荷加备用的容量缺口。
     def evaluate(on):
         x = pack(d, on)
         n = d.n_units * d.horizon
         v, w = x[n:2 * n].reshape(on.shape, order="F"), x[2 * n:].reshape(on.shape, order="F")
         return x, np.maximum(0, required - capacity(d, on, v, w).sum(axis=0))
 
+    # 每轮只选择能减少首个容量缺口且不扩大其他缺口的开机扩展；不能修复则返回 None。
     for _ in range(d.n_units + 1):
         candidate, deficit = evaluate(u)
         if (deficit <= 1e-6).all():
@@ -76,6 +86,8 @@ def repair(d, scenarios, u):
     return None
 
 
+# 从完整模型点恢复 u/v/w 和分场景 p/r，返回原目标费用及未乘概率的场景燃料明细。
+# SMS 另保存 shed/curtail 与罚费用；场景 objective 字段仍只表示燃料。
 def unpack(m, point):
     d = m.d
     result = NS(objective=float(m.obj @ point + m.q @ (point ** 2)), scenarios=[])
@@ -94,6 +106,8 @@ def unpack(m, point):
     return result
 
 
+# 不用稀疏模型行标签，直接重算二进制时序、初始/终端规则、出力、备用、爬坡和费用。
+# 失败抛 ValueError；成功返回物理最大残差与总费用残差，SMS 使用独立分支口径。
 def validate(d, scenarios, result):
     if getattr(d, "model_profile", "") == "azema_sms":
         from .azema import validate as sms_validate
@@ -139,6 +153,7 @@ def validate(d, scenarios, result):
             raise ValueError("Scenario fuel cost mismatch")
         fuel += s.probability * cost
     fixed = fixed_cost(d, u, w)
+    # 冷启动差额已包含在实际 fixed 中；总费用只能再加概率加权的纯燃料，不能重复加小时补偿。
     error = float(abs(fixed + fuel - result.objective))
     if maximum > 1e-5 or error > 1e-4:
         raise ValueError("Physical or total cost validation failed")

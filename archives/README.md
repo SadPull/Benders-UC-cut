@@ -1,3 +1,11 @@
+# v0.28.0 下界强化核心与本地证据
+
+源码固定为 [v0.28.0 Git 标签](https://github.com/SadPull/LLM-benders-SUC/tree/v0.28.0)。本地归档位于 `C:/Users/12433/Desktop/LLM-benders-SUC-archive/v0.28.0`，ZIP 名称、SHA256、成绩和归因范围见本目录 `v0.28.0.json`。逐文件清单和回读校验保留在归档 `manifest.json`。
+
+`before-cleanup-v0.28.0.zip` 保存清理前工作区、两轮快筛、完整模型／割／证明和必要恢复辅助。解压到独立目录并核对逐文件哈希；最新后续快筛的 `snapshot` 自包含核心数值代码，历史第一轮入口仍含原绝对路径，不能直接当作当前入口运行。原数值结果使用 Python 3.10、Gurobi 13.0.1，源于共同历史证据，不代表冷启动成绩。授权配置和许可证保持本地，不进入包中。
+
+核心与已计分 M1 的数值矩阵一致，验证见归档 `verification/core-numerical-identity.json`。一份变动 MPS 副本已保留在 `verification/corrupted-source-base.mps`，由匹配协议的原始副本恢复并重验；原因未确定，记录见 `verification/source-recovery.json`，不改写成绩。
+
 # v0.26.0 归档与恢复
 
 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.26.0) 保存 2026-10-12 至 13 日全部现有实验证据和清理前源码。仓库为私有仓库，下载需要有权限的账户。附件名称、字节数、SHA256、原始文件数与分包内容见本目录 v0.26.0.json 及 Release 的 release-manifest.json。

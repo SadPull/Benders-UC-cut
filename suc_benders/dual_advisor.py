@@ -1,4 +1,6 @@
 """Separate upper/lower advice bursts, triggered only by completed SA rounds."""
+# 模块职责：分别跟踪上界降本与下界探测的停滞，管理两通道批次和唯一在途请求。
+# 常规模式按实际采样的完整 SA 轮触发；改进模式独立统计下界认证周期并非阻塞调度。
 from copy import deepcopy
 import json
 from time import perf_counter, sleep
@@ -6,7 +8,9 @@ from time import perf_counter, sleep
 from . import bound_advisor, llm
 
 
+# 上下界 LLM 调度状态机；建议由数值求解器评估，模型不能直接修改认证费用或界。
 class DualAdvisor:
+    # 初始化两侧停滞计数、批次记录和唯一工作进程；改进模式使用 version=2 的独立触发状态。
     def __init__(self, whole):
         self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
         self.worker, self.pending, self.baseline = None, None, None
@@ -16,10 +20,12 @@ class DualAdvisor:
         if self.o.rts24_improvements:
             self.state.update(version=2, certification_cycles=0, last_served='upper')
 
+    # 同时检查 LLM 开关、全局剩余时间和两侧共享的请求次数上限。
     def available(self):
         return (self.o.llm_enabled and self.whole.remaining() > 0
                 and (self.o.llm_max_calls is None or self.result.llm_calls < self.o.llm_max_calls))
 
+    # 根据所选模式的阈值判断本通道是否显著改善：上界比较降本，下界比较 LB 增长。
     def improved(self, channel, upper, lower):
         if self.o.rts24_improvements:
             gain = upper-self.result.objective if channel == 'upper' else self.result.lower_bound-lower
@@ -28,6 +34,8 @@ class DualAdvisor:
             return upper-self.result.objective >= .0005*max(1., abs(upper))
         return self.result.lower_bound-lower >= 1e-5+self.o.tolerance*max(1., abs(self.result.objective))
 
+    # 仅在完整 SA 轮实际新增采样后更新停滞统计，并按模式触发批次或执行调度 tick。
+    # 中断轮与没有新采样的轮不通过此方法增加停滞计数。
     def after_round(self, upper, lower, sa_before, searches, outer, inner, allow=True):
         if self.whole.diagnostics["sa_calls"] <= sa_before:
             return
@@ -50,11 +58,14 @@ class DualAdvisor:
             self.begin(channels, outer=outer, inner=inner)
             self.run_batch(searches)
 
+    # 改进模式专用：在认证周期后按实际 LB 增长更新下界停滞次数。
     def after_certificate(self, lower_before):
         self.state['certification_cycles'] += 1
         self.state['stalled']['lower'] = (0 if self.improved('lower', self.result.objective, lower_before)
                                           else self.state['stalled']['lower']+1)
 
+    # 改进模式的非阻塞调度 tick：先消费在途回复，再按停滞条件公平选择上下界通道。
+    # 只在数值求解之间调用，保证评估与模型修改仍在父线程顺序执行。
     def service(self, searches):
         """One nonblocking scheduling tick, called only outside numeric solves."""
         if not self.o.rts24_improvements or self.cert.converged() or self.whole.remaining() <= 0:
@@ -87,6 +98,7 @@ class DualAdvisor:
         order = ('lower', 'upper') if self.state['last_served'] == 'upper' else ('upper', 'lower')
         self.start_request(next(c for c in order if c in due))
 
+    # 创建带触发原因和起始上下界快照的新批次，formal 与 validation 阶段分别标记。
     def begin(self, channels, *, outer=None, inner=None, validation=False):
         if self.state["phase"] != "sa" or self.worker is not None:
             raise RuntimeError("An advice batch is already active")
@@ -101,6 +113,8 @@ class DualAdvisor:
         self.state.update(phase="llm", batch=batch)
         self.whole.diagnostics["llm_batches"].append(batch)
 
+    # 为所选通道刷新上下文、登记路由和回执，再发起一个限时后台请求。
+    # 发出请求前即消耗全局与批次额度，因此传输失败也占一次；每侧每批最多三次。
     def start_request(self, channel):
         batch = self.state["batch"]
         if self.worker is not None or not self.available() or batch["counts"][channel] >= 3:
@@ -145,6 +159,8 @@ class DualAdvisor:
             print(f"advice channel={channel} batch={batch['batch_id']} call={iteration} "
                   f"batch_call={batch['counts'][channel]} status={self.pending['status']}", flush=True)
 
+    # 非阻塞接收回复并交给对应数值评估路径，记录实际降本、割增量和评估是否完成。
+    # 下界通道接受数按新增全天割计，上界通道接受数按通过全天验证的建议计，二者不能混用。
     def poll(self, searches):
         if self.worker is None:
             return False
@@ -188,6 +204,8 @@ class DualAdvisor:
                   f"new_cuts={self.pending['new_global_cuts']} UB={self.result.objective:.6f}", flush=True)
         return True
 
+    # 运行常规上下界批次：等待 LLM 时继续整数认证，暂停新的 SA 采样，并按两侧改善提前结束。
+    # 每次候选处理后下一请求重建上下文；批次结束或预算耗尽时关闭在途请求。
     def run_batch(self, searches):
         batch = self.state["batch"]
         if batch is None:
@@ -227,6 +245,8 @@ class DualAdvisor:
                      ended_seconds=perf_counter()-self.whole.started)
         self.state.update(phase="sa", batch=None, stalled=dict(upper=0, lower=0))
 
+    # 按模式版本恢复停滞和批次已用额度；旧记录从新的停滞窗口迁移。
+    # 原进程不能随检查点恢复，历史 RUNNING 回执标为 CANCELLED。
     def restore(self, diagnostic):
         saved = diagnostic.get("advisor_state")
         if saved is None:
@@ -246,6 +266,7 @@ class DualAdvisor:
                 row.update(status="CANCELLED", message="ResumeWorkerUnavailable", accepted=0)
         self.whole.feedback = deepcopy(diagnostic.get("upper_advice_feedback"))
 
+    # 取消在途请求、登记后台占用时间并保存上界反馈；后台时长与主线程墙钟时间可能重叠。
     def close(self):
         if self.worker is not None:
             elapsed = perf_counter()-self.worker.started

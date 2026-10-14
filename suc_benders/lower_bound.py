@@ -1,4 +1,6 @@
 """Finite continuous proof models for the first lower-bound screening experiment."""
+# 模块职责：生成可重建验证的透视割/容量覆盖割，并构造有限连续证明模型与候选割池。
+# 割及下界来自数值证明；LLM 只能选择冻结候选编号，候选库结果不表示理论最优界。
 from copy import copy
 from fractions import Fraction
 
@@ -9,6 +11,8 @@ from .benders import master
 from .model import fingerprint, partition
 
 
+# 在给定机组、小时、场景和支撑出力处生成 eta >= 2*a*support*p-a*support^2*u 的整数有效割。
+# 支撑必须位于 Pmin/Pmax 之间，a 已包含场景概率；同时绑定原模型指纹。
 def perspective_cut(m, unit, hour, scenario, support):
     if (type(unit) is not int or not 0 <= unit < m.d.n_units
             or type(hour) is not int or not 0 <= hour < m.d.horizon
@@ -27,6 +31,8 @@ def perspective_cut(m, unit, hour, scenario, support):
                 proof='a*(p-support)**2 >= 0 when u=1; p=0 when u=0')
 
 
+# 若所选机组集的总 Pmax 严格不足以覆盖最坏场景负荷及备用，则要求补集至少一台机组开机。
+# 容量比较使用 Fraction 精确算术，避免临界容量因浮点误差错误判定。
 def cover_cut(m, hour, below_capacity_set):
     units = list(below_capacity_set)
     if (type(hour) is not int or not 0 <= hour < m.d.horizon
@@ -47,6 +53,7 @@ def cover_cut(m, hour, below_capacity_set):
                 proof='binary feasible schedules need at least one unit outside the set')
 
 
+# 从原模型和割的索引/支撑重新生成完整证明记录，逐字段检查模型身份与系数未被修改。
 def verify_cut(m, cut):
     if cut.get('kind') == 'perspective':
         expected = perspective_cut(m, cut['unit'], cut['hour'], cut['scenario'], cut['support'])
@@ -58,6 +65,8 @@ def verify_cut(m, cut):
         raise ValueError('Strengthening cut model or coefficients changed')
 
 
+# 保留原物理约束，抬升块容量/AND 结构，并可用有界 eta 和有限透视支撑替代正二次项。
+# 结果是整数有效的连续下估计模型，不保证其松弛值一定优于原连续 QP。
 def proof_model(m, *, perspective=True, cuts=(), block_hours=3):
     """Retain every physical row and lift the actual block capacity/AND rows.
 
@@ -139,6 +148,8 @@ def proof_model(m, *, perspective=True, cuts=(), block_hours=3):
     return out
 
 
+# 在当前证明点上按归一化违反量筛选至多十六条透视割和十六条覆盖割，输出带编号候选池。
+# 生成和评分只依赖连续解及精确容量证明，不调用整数调度或导入参考最优值。
 def cut_pool(m, proof, point, hours):
     """At most 16 supports and 16 covers, scored without integer dispatch."""
     point = np.asarray(point)
@@ -184,6 +195,7 @@ def cut_pool(m, proof, point, hours):
     return result
 
 
+# 验证外部选择是冻结候选池中一到两个互不重复的整数编号，并返回对应已证明合法的割。
 def select_ids(value, pool):
     if (not isinstance(value, list) or not 1 <= len(value) <= 2
             or any(type(i) is not int for i in value) or len(set(value)) != len(value)

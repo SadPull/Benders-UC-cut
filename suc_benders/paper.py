@@ -1,4 +1,6 @@
 """Evidence and raw-candidate processing for the paper-style SA experiment."""
+# 模块职责：保存论文式 SA 模式的价格状态、割证明、松弛下界和原始候选处理证据。
+# 未修复的局部 SA 样本负责生成局部割；全天修复方案只用于上界验证，二者来源分开记录。
 import hashlib
 from time import perf_counter
 
@@ -10,6 +12,7 @@ from .validation import pack
 STREAMS = ('paper_states', 'paper_cuts', 'paper_bounds', 'paper_candidates', 'paper_coordination')
 
 
+# 将块目标、常数和原列映射散列，并结合外轮/块编号绑定当前乘子环境，隔离不同价格的局部证据。
 def context_id(b, outer, block):
     digest = hashlib.sha256(np.asarray(b.obj, '<f8').tobytes())
     digest.update(np.asarray([b.constant], '<f8').tobytes())
@@ -17,6 +20,7 @@ def context_id(b, outer, block):
     return f'{outer}:{block}:{digest.hexdigest()}'
 
 
+# 保存当前跨块乘子的非零位置和值及时间，供后续重建对应块目标。
 def record_state(whole, prices, outer):
     active = np.flatnonzero(prices)
     whole.diagnostics.setdefault('paper_states', []).append(dict(outer=outer,
@@ -24,6 +28,8 @@ def record_state(whole, prices, outer):
         elapsed_seconds=perf_counter()-whole.started))
 
 
+# 对局部割去重并保存锚点、上下文和数值证明；没有 certified/proof 的割不能进入论文证据流。
+# 返回是否为新割，调用方据此决定加入实际割池。
 def record_cut(search, cut, x, source):
     identity = (bool(cut.optimality), float(cut.alpha), np.asarray(cut.beta, '<f8').tobytes())
     if identity in search.cut_keys:
@@ -39,6 +45,7 @@ def record_cut(search, cut, x, source):
     return True
 
 
+# 保存当前主问题的连续对偶下界证书及割数量；没有证书时不伪造记录。
 def record_bound(search, m):
     if m.bound_certificate is not None:
         search.whole.diagnostics.setdefault('paper_bounds', []).append(dict(
@@ -47,6 +54,8 @@ def record_bound(search, m):
             elapsed_seconds=perf_counter()-search.whole.started))
 
 
+# 将完整 SA 位串结合固定值/自由位映射恢复为原生主问题向量，并还原末列 theta。
+# 完整长度还包含 AND/松弛辅助位，但松弛位不属于返回的原生模型变量。
 def decode(q, text):
     bits = np.fromiter((int(v) for v in text), dtype=np.uint8)
     if len(bits) != q.Q.shape[0] or not np.isin(bits, [0, 1]).all():
@@ -57,6 +66,8 @@ def decode(q, text):
     return np.r_[binary, theta]
 
 
+# 对完整原始位串重算原生主问题所有约束残差、可行性和 theta，并保存恢复映射及 QUBO 规模。
+# 罚能量较低不能替代此处对硬约束、容量和 Benders 行的实际检查。
 def sampling_evidence(search, m, q, sampling):
     residuals, feasible, theta = [], [], []
     for text in sampling.get('raw_bits', []):
@@ -76,6 +87,8 @@ def sampling_evidence(search, m, q, sampling):
         max_coefficient=float(abs(q.Q).max()), nonzeros=int(q.Q.nnz))
 
 
+# 先去重并评估整批未修复局部候选，再从统一全天快照尝试原始和修复方案的上界评估。
+# 修复可能改动块外小时，不能把修复结果冒充原始局部样本或局部割的锚点。
 def process_raw_batch(search, proposals, baseline_u, inner):
     """All untouched local evaluations precede any whole-day repair in this batch."""
     from .benders import discrete_feasible

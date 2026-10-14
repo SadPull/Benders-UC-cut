@@ -1,4 +1,6 @@
 """Synchronous Responses transport for the archived whole-day advisor policy."""
+# 模块职责：构造全天启停提示词、发送 Responses 请求并解析候选；同步/后台发送共用同一传输。
+# LLM 只提议机组 × 小时的 u 矩阵；调度、费用、割和界由数值程序生成及验证。
 from __future__ import annotations
 
 import json
@@ -10,6 +12,8 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 
+# 将系统约束与用户上下文封装为非流式、禁止存储的 Responses 请求体，推理档位为 max。
+# 返回的请求体不含 Authorization；密钥仅由发送函数放入 HTTP 头。
 def request_body(d, scenarios, best, o, context, base_candidates, iteration):
     system, user = _prompt(d, scenarios, iteration, best, base_candidates,
                            2 if o.rts24_improvements else 4, context)
@@ -17,6 +21,8 @@ def request_body(d, scenarios, best, o, context, base_candidates, iteration):
             "reasoning": {"effort": "max"}}
 
 
+# 提取已完成响应中的 output_text，解析至多四个候选，返回 (原始矩阵及提议记录, 回执)。
+# 这里只检查 JSON 与矩阵形状；0/1、时序及调度可行性留给上/下界数值评估路径处理。
 def parse_response(response, d, iteration=1):
     info = {"status": "FAILED", "message": "", "accepted": 0, "format_valid": 0, "proposals": []}
     candidates = []
@@ -48,6 +54,8 @@ def parse_response(response, d, iteration=1):
     return candidates, info
 
 
+# 用指定 URL、密钥、请求体和超时秒数执行一次 HTTP POST，返回原始响应 JSON。
+# 此层不重试也不吞异常，调用方负责预算、脱敏和失败回执。
 def post_response(url, key, body, seconds):
     http = Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
@@ -55,6 +63,8 @@ def post_response(url, key, body, seconds):
         return json.load(response)
 
 
+# 同步建议入口：把提示词构建时间计入总预算，发送请求并返回候选及脱敏耗时回执。
+# 完整流程耗时达到 seconds 后丢弃迟到候选，避免在全局截止时间之后更新方案。
 def request(d, scenarios, best, o, seconds, context, base_candidates, iteration):
     started = perf_counter()
     info = {"status": "FAILED", "message": "", "accepted": 0, "format_valid": 0, "proposals": []}
@@ -74,6 +84,8 @@ def request(d, scenarios, best, o, seconds, context, base_candidates, iteration)
     return candidates, info
 
 
+# 返回系统提示和紧凑 JSON 用户输入，明确原物理规则、现有方案及候选输出形状。
+# 按标准 UC/SMS 分支选择末小时、备用和软平衡规则，冷热启动历史不在块边界重置。
 def _prompt(
     data: Any,
     scenarios: Sequence[Any],

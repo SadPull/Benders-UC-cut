@@ -1,14 +1,14 @@
 # Python：Kaiwu SA + LLM Benders SUC
 
-**版本：v0.27.0（2026-10-14；重构回归通过，待实验）**。变更见 [CHANGELOG.md](CHANGELOG.md)，发布源码与本次验证记录见 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.27.0)。
+**版本：v0.28.0（2026-10-14 科研成果封存；下界强化核心固定）**。变更见 [CHANGELOG.md](CHANGELOG.md)，源码见 [v0.28.0 Git 标签](https://github.com/SadPull/LLM-benders-SUC/tree/v0.28.0)。
 
-本版按 Ponytail 合并离散可行性检查、小时／场景子问题构建和 LLM HTTP 发送的重复实现，保留原算法与调用接口，并同步包内版本号。230 项离线回归与 5 项真实 Kaiwu 集成测试通过；3 项数值测试因 4 GiB 内存门槛跳过。4 组输入的 96 个小时子模型与 4 个场景子模型摘要与重构前一致。本版作为预发布，完整 RTS-24 实验待验证；下文正式实验成绩与归档仍来自 v0.26.0 及其历史版本。
+本版将成功快筛的累计时间约束、显式调度物理表述和透视费用强化提取为 `suc_benders.strengthened_master`，使用固定模型的一次整数认证取得下界。现有 SA／LLM 求解流程保留，联合算法验证另行进行。
 
-当前项目保留通用求解核心、`run_suc.py`、必要输入和核心回归测试。实验编排入口、结果、计划、参考求解数据和运行环境已归档；复现时按 [恢复说明](archives/README.md) 使用相应冻结源码。
+RTS-24 冻结状态快筛结果为 UB **885066.704430**、认证 LB **884788.284523**、gap **0.031458%**；相对历史 LB 新增 **4340.856844**，达到本轮 **0.1%** 目标。数值流程 **354.606／900 秒**，其中透视准备约 80 秒、强化整数阶段约 70 秒。该成绩继承历史割池、上下界及可行方案，不表示从零求解，不证明 SA／LLM 贡献或跨实例稳定加速。
 
-RTS-24 最新正式结果为 UB **885066.704430**、认证 LB **880447.427679**、gap **0.521913%**。整数 Benders 轮次按 7200 秒预算结束，独立审计通过，尚未达到 0.1% 收敛目标；本轮新增下界为零。连续阶段、失败批次、SA／LLM 明细与停滞诊断见 [实验汇总](https://github.com/SadPull/LLM-benders-SUC/releases/download/v0.26.0/experiment-summary-v0.26.0.md)。
+项目保留通用求解核心、`run_suc.py`、必要输入、核心测试、版本文档和恢复清单。本次实验控制器、完整结果和临时文件迁至本地外部归档，见 [恢复说明](archives/README.md)。授权配置与许可证保持本地。
 
-历史可行方案与已审计下界用于明确的热启动；参考完整模型的整数下界未导入。Gurobi 求解整数 Benders 主问题，SA 和 LLM 提供辅助信息，本次结果不证明 SA／LLM 有额外收益。此前隔离的性能优化未合入。
+历史 v0.26.0 整数轮次的 LB 为 880447.427679、gap 为 0.521913%，原结果和协议继续由该版本归档保存。参考完整模型的整数下界未导入本次快筛；此前隔离的性能优化未合入。
 
 默认算例为 **Kazarlis 经典 10 机组 UC**，RTS-24 派生输入见 [数据说明](data/rts24/README.md)。流程为连续松弛初始化、时间分块、Benders／QUBO／Kaiwu SA、拉格朗日协调和全天物理校验；可选全天整数 Benders 下界认证保留。Python 为默认 main，历史 MATLAB 代码保存在 MATLAB 分支。
 
@@ -49,6 +49,27 @@ print(result.validation)
 ```
 
 不传 `--output` 时不自动保存。`u/v/w` 和 `result.scenarios[k].p/r` 为“机组 × 小时”NumPy 矩阵。结果保留 `history` / `outer_history` / `llm_history`，新增 `diagnostics`，记录 SA 调用、原始离散可行数、候选修复距离、重复及拒绝原因、全天评估、来源、LLM 反馈与分项耗时；不持有求解器对象。Python 中无穷界保留 `inf`，JSON 中表示为 `null`。
+
+## 已验证的强化下界核心
+
+`add_temporal` 添加累计最小开停机约束，`build` 将完整物理关系和透视费用接入已有 Benders 主问题，`separate` 在连续根上添加费用支撑，`certify` 进行一次 `MIPFocus=3` 整数认证。以下展示普通核心模型的调用方式；有效费用割和经过核验的认证保底可由调用方放入 `root`。
+
+```python
+from suc_benders.benders import master
+from suc_benders.model import model, partition
+from suc_benders.strengthened_master import add_temporal, build, separate, certify
+
+m = model(d, scenarios)
+full = partition(m, d.horizon)[0][0]
+root, _ = master(full, [])
+root = add_temporal(root, m)
+strengthened = build(m, root, len(root.obj) - 1)
+refined = separate(m, strengthened, seconds=60, epsilon=0.01)
+proof = certify(refined.model, seconds=180)
+print(proof.lower)  # 认证下界；predicted_objective 不是可行上界
+```
+
+`certify` 接受模型坐标中的 `warm_start` 和可选 `target_lower` 停止门槛，使用单线程、seed 7、`IntFeasTol=1e-9`。超过时间窗口、数值异常或没有有限整数界时不计新下界。最终 SUC gap 必须配合独立物理验证的可行 UB 计算。本次成功快筛的冻结割池、热启动和完整证据保存在 v0.28.0 归档，示例不承诺复现其冷启动成绩。
 
 ## 参数与算法约定
 

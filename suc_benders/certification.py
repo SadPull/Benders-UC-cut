@@ -1,4 +1,6 @@
 """Persistent whole-day integer Benders bounds, separate from block multipliers."""
+# 模块职责：维护可选全天整数 Benders 主问题及全天/小时/场景认证割，持续更新全局下界。
+# 本模块仅用于 integer_benders 模式；主问题 ObjBound 可作下界，整数候选 ObjVal 仅用于探测。
 import hashlib
 from types import SimpleNamespace as NS
 from time import perf_counter
@@ -13,7 +15,10 @@ from .scenario_bounds import ScenarioBounds
 from .validation import commitment, commitment_hash, pack
 
 
+# 与块乘子分离的全天认证状态：保存割、已同步位置、主问题及认证窗口。
 class Certification:
+    # 绑定 WholeDay 并建立认证割池和小时子问题；改进模式另启用场景割及自适应窗口。
+    # 此时只准备数据，实际 Gurobi 模型在首次认证时创建。
     def __init__(self, whole):
         self.whole, self.b, self.o, self.result = whole, whole.full, whole.o, whole.result
         self.cuts, self.identities, self.synced = [], set(), 0
@@ -33,6 +38,8 @@ class Certification:
             whole.diagnostics.update(scenario_certificate_cuts=self.scenario.cuts, native_bounds=[])
         whole.timings["certification"] = 0.
 
+    # 接收调用方已独立回放且绑定模型指纹、来源哈希的认证证据，更新全局下界。
+    # 允许继承的加强割仅限全局容量覆盖割；继承证据与实际连续松弛来源分开记录。
     def inherit(self, evidence):
         """Import a separately replayed global floor; never treat it as an LP dual."""
         from .model import fingerprint
@@ -52,6 +59,8 @@ class Certification:
         self.whole.diagnostics['inherited_evidence'] = evidence
         self.update_bound(floor)
 
+    # 从经调用方验证的恢复记录重建全天/小时/场景割与去重集合。
+    # 恢复的是数值约束数据，不是 Gurobi 内部搜索树。
     def restore_cuts(self, diagnostic):
         self.whole.diagnostics["certificate_cuts"] = diagnostic["certificate_cuts"]
         self.cuts = [NS(alpha=c["alpha"], beta=np.asarray(c["beta"]),
@@ -64,6 +73,8 @@ class Certification:
             self.scenario.cuts.extend(diagnostic['scenario_certificate_cuts'])
             self.scenario.identities = {c['cut_id'] for c in self.scenario.cuts}
 
+    # 接收全天连续调度生成的认证割，去重后保留来源、锚点及对当前主问题的违反程度。
+    # 可行调度还提供真实小时费用并排入小时割队列，供后续同步处理。
     def observe(self, x, evaluation, source):
         cut = evaluation.cut
         if cut is None:
@@ -95,6 +106,8 @@ class Certification:
         if hasattr(cut, "proof"):
             self.whole.diagnostics["certificate_cuts"][-1]["proof"] = cut.proof
 
+    # 创建单线程整数主问题，将固定费用与小时/场景补偿费用下估计连接到总费用 theta。
+    # 主问题包含全天离散约束和已有覆盖割，不包含完整 SUC 的连续出力决策。
     def _initialize(self):
         m, _ = master(self.b, [])
         self.master_data = m
@@ -132,6 +145,8 @@ class Certification:
                              <= self.variables[-1])
             self.g.Params.PoolSolutions = 10
 
+    # 把尚未处理的小时探测和新增各类割同步到主问题，并用已验证最好方案设置 MIP Start。
+    # 模型对象持续存在，但新增约束后的内部搜索状态不能当作可恢复搜索树来承诺。
     def _sync(self):
         m = self.master_data
         for x, source, actual in self.hourly_queue:
@@ -172,6 +187,7 @@ class Certification:
                 self.scenario_variables.Start = self.scenario.recourse(self.whole.best.point)
             self.warm_key = key
 
+    # 取有限认证下界与历史值的最大值；超过已验证上界时立即报错。
     def update_bound(self, lower):
         if np.isfinite(lower):
             candidate = max(self.result.lower_bound, float(lower))
@@ -179,6 +195,7 @@ class Certification:
                 raise RuntimeError("Certified lower bound exceeds validated upper bound")
             self.result.lower_bound = candidate
 
+    # 只有全天物理验证通过，且 UB-LB 不超过 1e-5 + tolerance*max(1,|UB|)，才判定原问题收敛。
     def converged(self):
         lower, upper = self.result.lower_bound, self.result.objective
         if lower > upper + 1e-5:
@@ -187,6 +204,8 @@ class Certification:
                 and self.result.validation["feasible"]
                 and upper-lower <= 1e-5 + self.o.tolerance*max(1., abs(upper)))
 
+    # 通过 WholeDay 评估未经启发式修复的二进制探测点，记录真实费用、低估量和新增割。
+    # 可行探测可改善上界，不可行探测可产生可行性割；新增割本身不等于下界已提高。
     def _probe(self, x, source, record):
         before = len(self.cuts)
         self.whole.diagnostics["bound_probes"].append(record)
@@ -205,6 +224,8 @@ class Certification:
             self.whole.emit('probe_complete')
         return record
 
+    # 验证 LLM 下界候选的形状、0/1 和离散约束，再按已有割估算费用并执行真实探测。
+    # 本通道不调用启发式修复，避免改变用于发现低估区域的原始探测点。
     def probe_advice(self, raw, record):
         raw = np.asarray(raw, float)
         if raw.shape != (self.whole.d.n_units, self.whole.d.horizon) or not np.isin(raw, [0, 1]).all():
@@ -225,6 +246,7 @@ class Certification:
         record["predicted_cost"] = float(recourse + self.b.obj[self.b.binary] @ x + self.b.constant)
         return self._probe(x, "llm_bound", record)
 
+    # 将当前主问题方案、上下界、小时预测及近期割/探测反馈打包为下界通道请求体。
     def advice_body(self, iteration, stalled=0):
         cut_feedback = [{key: row[key] for key in ("cut_id", "source", "optimality", "master_violation")}
                         for row in self.whole.diagnostics["certificate_cuts"][-12:]]
@@ -246,6 +268,8 @@ class Certification:
         return bound_advisor.request_body(self.whole.d, self.whole.scenarios, self.result,
                                           self.o, context, iteration)
 
+    # 执行一个限时整数认证周期：同步割、优化主问题、读取 ObjBound，再评估主问题候选。
+    # 计时覆盖建模与探测；超过全局截止时间的结果不再入账。
     def step(self):
         if self.whole.remaining() <= 0:
             raise TimeoutError
@@ -290,6 +314,7 @@ class Certification:
             raise TimeoutError
         if status not in ("OPTIMAL", "TIME_LIMIT", "INTERRUPTED", "USER_OBJ_LIMIT"):
             raise RuntimeError(f"Integer Benders master failed: {status}")
+        # ObjBound 证明整个整数主问题的下界；ObjVal 只是某个候选的预测值，不能替代它。
         bound = float(self.g.ObjBound) + self.b.constant - 1e-5
         self.update_bound(bound)
         row.update(master_bound=bound, bound_used=np.isfinite(bound), lower=self.result.lower_bound)
@@ -326,6 +351,7 @@ class Certification:
             print(f"certificate={row['iteration']} status={status} LB={row['lower']:.6f} "
                   f"UB={row['upper']:.6f} cuts={len(self.cuts)} hourly_cuts={len(self.hourly.cuts)}", flush=True)
 
+    # 改进模式中，连续两次时间片耗尽且 LB 增益不足时，将窗口从 30 秒增至 90/180 秒。
     def _advance_window(self, status, gain):
         epsilon = max(1e-5, 1e-5*abs(self.result.objective))
         self.window_stalls = self.window_stalls+1 if status == 'TIME_LIMIT' and gain < epsilon else 0
@@ -333,6 +359,7 @@ class Certification:
             self.window_index = min(2, self.window_index+1)
             self.window_stalls = 0
 
+    # 保存有限的原生主问题下界及其割数量、常数项和继承下界信息，供审计区分证明来源。
     def _native_bound(self, bound, origin):
         if not np.isfinite(bound) or abs(bound) >= gp.GRB.INFINITY:
             return
@@ -341,6 +368,8 @@ class Certification:
             hourly_cuts=self.hourly_synced, scenario_cuts=self.scenario_synced,
             elapsed_seconds=perf_counter()-self.whole.started))
 
+    # 在整数求解回调中周期性记录 MIP_OBJBND；全局预算耗尽或发现异常时终止求解。
+    # 回调异常暂存到 callback_error，由 step 在 optimize 返回后统一抛出。
     def _callback(self, g, where):
         try:
             if self.whole.remaining() <= 0:
@@ -358,6 +387,8 @@ class Certification:
             self.callback_error = error
             g.terminate()
 
+    # 从 Gurobi 解池按预测费用选择至多三个未评估的精确二进制探测点。
+    # 解池方案必须重新做全天连续调度，预测目标值不能直接替代原问题费用或认证下界。
     def _pool_probes(self, row):
         candidates = []
         for index in range(self.g.SolCount):
@@ -388,6 +419,7 @@ class Certification:
                        actual_cost=self.last_probe['actual_cost'], cut_added=self.last_probe['cut_added'])
         row['pool_probes'] = count
 
+    # 释放本认证器持有的 Gurobi 模型与环境，避免保留许可证会话和原生资源。
     def close(self):
         if self.g is not None:
             self.g.dispose()

@@ -1,4 +1,6 @@
 """Round-robin block search with shared whole-day validation and advice."""
+# 模块职责：组织全天初始化、固定乘子下的分块 SA 轮询、协调、LLM 建议与可选整数认证。
+# 全天物理/费用验证通过才更新原问题上界；块价格环境、修复来源及认证证明分别维护。
 from dataclasses import dataclass, field
 from copy import deepcopy
 from contextlib import contextmanager
@@ -22,6 +24,8 @@ from .startup import fixed_cost
 from .validation import capacity, commitment, commitment_hash, pack, repair, unpack, validate
 
 
+# 可序列化求解结果：objective 是已验证方案费用，lower_bound 是当前模式认可的全局下界。
+# coordination_upper 属于协调对偶模型；状态、原问题 gap 与诊断记录需分别解释。
 @dataclass
 class Result:
     status: str = "MAX_ITERATIONS"
@@ -44,19 +48,25 @@ class Result:
     elapsed_seconds: float = 0.
 
 
+# 用固定绝对余量 1e-5 加相对容差判断有限上下界是否闭合，同时拒绝明显交叉的上下界。
+# reference 可指定相对容差的计价基准，默认使用 upper。
 def closed(lower, upper, tolerance, reference=None):
     reference = upper if reference is None else reference
     return (np.isfinite(lower) and np.isfinite(upper) and upper - lower >= -1e-5
             and upper - lower <= 1e-5 + tolerance * max(1, abs(reference)))
 
 
+# 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，以便继续整数认证。
 class SABudgetExhausted(Exception):
     pass
 
 
+# 各块共用的全天方案、调度缓存、数值反馈、预算和认证/LLM 管理状态。
 class WholeDay:
     """Shared incumbent, measured feedback and deadline across all time blocks."""
 
+    # 绑定输入模型与全局截止时间，建立按来源统计的诊断和计时器，按 bound_mode 选择认证器。
+    # paper_sa 明确禁止整数认证器和 LLM，确保其 Gurobi 调用只求连续模型。
     def __init__(self, m, full, o, deadline, result, started, progress=None):
         if o.paper_sa and (o.bound_mode != 'relaxation' or o.llm_enabled or not o.sa_enabled):
             raise ValueError('Paper SA cannot create an integer certifier or LLM advisor')
@@ -82,10 +92,13 @@ class WholeDay:
         self.sa_started = None
         self.diagnostics['sa_budget_seconds_used'] = 0.
 
+    # 返回已记账的 SA 辅助工作秒数，加上当前尚未退出计时作用域的耗时。
     def sa_used(self):
         return self.diagnostics['sa_budget_seconds_used'] + (
             0. if self.sa_started is None else perf_counter()-self.sa_started)
 
+    # 将建模、采样、修复、调度或协调整段工作记入 SA 配额，并临时收紧数值调用截止时间。
+    # 退出时恢复全局 deadline；配额耗尽转为 SABudgetExhausted，而不是结束后续认证。
     @contextmanager
     def sa_work(self):
         """Charge the complete auxiliary search operation and cap its numeric calls."""
@@ -113,13 +126,17 @@ class WholeDay:
             self.sa_started = None
             self.deadline = original
 
+    # 返回当前截止时间前的剩余秒数；非正值表示后续结果不得再入账。
     def remaining(self):
         return self.deadline - perf_counter()
 
+    # 若提供 progress 回调则发送事件和当前 WholeDay；核心求解器自身不在此处落盘。
     def emit(self, event):
         if self.progress is not None:
             self.progress(self, event)
 
+    # 对全天原始 u 做形状/有限值检查及启停/容量修复，记录变化、来源和重复状态。
+    # 返回重建的 u/v/w 向量或 None；修复可能涉及块外小时，之后仍须完成连续调度和验证。
     def prepare(self, raw, source, record):
         """Repair a whole-day u proposal; the caller then evaluates its block projection."""
         record.update(origin=source, raw_u=np.asarray(raw).tolist())
@@ -162,6 +179,8 @@ class WholeDay:
                       duplicate=x.astype(np.uint8).tobytes() in self.cache, outcome="repaired")
         return x
 
+    # 对全天二进制方案去重、做连续调度和独立物理/费用校验，记录实测结果及可用认证割。
+    # 只有真实费用更低的可行方案更新 incumbent；命中缓存的重复候选不重复贡献降本。
     def accept(self, x, source, record=None):
         if x is None or self.remaining() <= 0:
             if record is not None:
@@ -242,6 +261,8 @@ class WholeDay:
         self.emit("evaluation")
         return r.feasible
 
+    # 改进模式在新乘子下逐块试建 QUBO，记录位数、系数和稠密工作内存估计后再进入采样周期。
+    # 检查使用当前已验证方案作块种子，防止乘子变化后编码溢出才被迟发现。
     def check_repricing(self, prices, outer):
         whole, o, m = self, self.o, self.m
         remaining = self.remaining
@@ -268,6 +289,8 @@ class WholeDay:
             max_multiplier=float(abs(prices).max(initial=0)), blocks=checks))
         whole.emit('repricing')
 
+    # 恢复匹配模型的历史证据、割、调用额度和 SA 配额，并重新调度/校验保存的全天方案。
+    # 块缓存与乘子重新构建，Gurobi 内部搜索树及在途工作进程不随检查点恢复。
     def restore(self, state):
         """Recover validated global evidence; block caches and multipliers are rebuilt."""
         if self.certifier is None:
@@ -354,6 +377,8 @@ class WholeDay:
         del self.advisor_pool[16:]
         self.advice.restore(diagnostic)
 
+    # 按当前最好方案刷新费用、场景价格和上一轮反馈，返回 (上下文, 基础方案, 调用前快照)。
+    # 快照含 u、费用及已评估身份，用于区分本次候选的实测收益和历史缓存结果。
     def upper_context(self):
         phase = perf_counter()
         measurements = self.diagnostics["evaluations"]
@@ -376,6 +401,8 @@ class WholeDay:
         self.timings["context"] += perf_counter() - phase
         return context, bases, (baseline_u, costs, prior_ids)
 
+    # 默认松弛模式完整轮结束后，根据全天上界停滞及预算决定是否同步请求一次 LLM。
+    # 先消耗调用额度并重置停滞，再评估回复；失败也保留回执并继续后续 SA。
     def after_round(self, before, searches, outer, inner, allow_advice):
         due, self.stalled = call_due("stagnation_burst", before, self.result.objective,
                                      self.stalled, self.result.llm_calls, self.o.llm_patience)
@@ -398,6 +425,8 @@ class WholeDay:
         self.diagnostics["llm_calls"].append(info)
         self.consume_upper(proposals, info, searches, baseline)
 
+    # 修复并评估上界建议，通过全天验证的方案再投影到所有当前价格块，重新调度生成局部割。
+    # 全天割不能直接复制成局部割；最后按调用前快照汇总候选反馈。
     def consume_upper(self, proposals, info, searches, baseline):
         baseline_u, costs, prior_ids = baseline
         if self.remaining() > 0:
@@ -431,9 +460,11 @@ class WholeDay:
             self.diagnostics["upper_advice_feedback"] = self.feedback
 
 
+# 固定乘子下单个时间块的持久搜索状态，跨轮保存割、调度缓存、最好方案和协调平面。
 class BlockSearch:
     """One fixed-multiplier block, retained across round-robin visits."""
 
+    # 绑定块与价格上下文，初始化连续费用基础下界、空割池和局部诊断；论文模式启用割证据。
     def __init__(self, b, o, outer, index, whole, planes=None):
         self.b, self.o, self.outer, self.index, self.whole = b, o, outer, index, whole
         self.context = context_id(b, outer, index)
@@ -450,6 +481,7 @@ class BlockSearch:
         whole.diagnostics["blocks"].append(self.diagnostic)
         self.summarize()
 
+    # 刷新本块的局部上下界、gap、收敛标记及两类割数量，供进度与终态诊断读取。
     def summarize(self):
         self.diagnostic.update(lower=self.lower, upper=self.upper,
             relative_gap=(max(0., self.upper-self.lower)/max(1., abs(self.upper))
@@ -458,11 +490,14 @@ class BlockSearch:
             optimality_cuts=sum(c.optimality for c in self.cuts),
             feasibility_cuts=sum(not c.optimality for c in self.cuts))
 
+    # 返回至多十六个费用较好的历史可行二进制方案，用于重新调度；不是额外注入 SA 样本。
     @property
     def seeds(self):
         pool = sorted((r for r in self.cache.values() if r.feasible), key=lambda r: r.cost)[:16]
         return [r.point[self.b.binary].astype(np.uint8) for r in pool]
 
+    # 在当前块价格环境中评估精确二进制点，缓存调度、更新局部割和可行协调平面。
+    # 超时结果不缓存；局部费用含当前拉格朗日价格，不能直接替代全天原始费用。
     def evaluate(self, x, source):
         b, whole, result = self.b, self.whole, self
         cache, cuts = self.cache, self.cuts
@@ -498,6 +533,8 @@ class BlockSearch:
             feasible=r.feasible, cost=r.cost if r.feasible else None, context=self.context))
         return r
 
+    # 完成本块的一次访问：重调度种子、求 LP 下界，未闭合时最多采样一批 SA，再评估并刷新下界。
+    # 整批候选共享采样前的全天方案快照；论文模式先保存原始局部候选证据，再尝试全天修复。
     def step(self, seeds, inner):
         b, o, whole, result = self.b, self.o, self.whole, self
         outer, index, cuts = self.outer, self.index, self.cuts
@@ -583,10 +620,13 @@ class BlockSearch:
         self.summarize()
 
 
+# 主流程：初始化/恢复 → 固定价格轮询所有块 → 轮末建议/认证 → 协调更新价格 → 整理结果。
+# 累计历史执行时间计入预算；保留阶段名定位失败，并在最终返回前独立复核全天方案。
 def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=None, started_at=None):
     if resume_state is not None and initial_state is not None:
         raise ValueError("Common initialization and resume are mutually exclusive")
     prior_state = resume_state if resume_state is not None else initial_state
+    # 把已有执行耗时折回 started，保证恢复或共用初始化不会重置累计时间预算。
     prior = prior_state["charged_elapsed_seconds"] if prior_state is not None else 0.
     if not np.isfinite(prior) or prior < 0 or (resume_state is not None and prior >= o.time_limit):
         raise ValueError("Invalid or exhausted cumulative resume budget")
@@ -599,6 +639,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
     searches = []
     stage = "INITIALIZATION"
 
+    # 在 WholeDay 尚未构造时使用本地 deadline，构造后转用当前工作配额调整后的 deadline。
     def remaining():
         return whole.remaining() if whole is not None else deadline - perf_counter()
 
@@ -640,6 +681,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
             if whole.best is None or abs(result.objective-initial_state["objective"]) > 1e-4:
                 raise ValueError("Common initial schedule failed independent reevaluation")
         else:
+            # 连续解只负责界和初始化；取整方案与全开方案都要经修复、调度、独立校验后比较。
             for u in (np.floor(relaxation.x[m.ix.u] + .5), np.ones((d.n_units, d.horizon))):
                 record = {"proposal_id": f"initial:{len(whole.diagnostics['proposals'])}"}
                 x = whole.prepare(u, "initial", record)
@@ -663,6 +705,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                 if remaining() <= 0:
                     raise TimeoutError
                 with whole.sa_work():
+                    # 新乘子对应新的块费用与局部割环境，历史二进制种子必须重新调度。
                     blocks, _ = partition(m, o.block_hours, prices)
                     if o.paper_sa:
                         record_state(whole, prices, outer)
@@ -673,6 +716,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                     if whole.certifier.converged():
                         result.status = "CONVERGED"
                         break
+                # 每个 inner 是完整遍历轮；尚未闭合的块各最多采样一批，已闭合块跳过采样。
                 for inner in range(first_round if outer == first_outer else 1, o.max_inner + 1):
                     before = result.objective
                     lower_before, sa_before = result.lower_bound, whole.diagnostics["sa_calls"]
@@ -714,6 +758,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                                       f"full={result.objective:.6f} LB={result.lower_bound:.6f}", flush=True)
                             if remaining() <= 0:
                                 raise TimeoutError
+                    # 完整遍历才更新 SA 轮计数和轮末停滞窗口；改进模式的下界触发按认证周期另计。
                     round_record.update(complete=True, sa_completed_seconds=perf_counter()-started,
                                         incumbent_before=before, incumbent_after_sa=result.objective)
                     whole.diagnostics["complete_rounds"] += 1
@@ -726,6 +771,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                     all_closed = all(closed(x.lower, x.upper, o.tolerance) for x in searches)
                     whole.resume_cursor = (dict(outer=outer+1, round=1) if all_closed or inner == o.max_inner
                                            else dict(outer=outer, round=inner+1))
+                    # 常规模式的整数认证/双通道建议或同步上界建议都位于完整 SA 轮之后。
                     if whole.certifier is not None:
                         stage = "CERTIFICATION"
                         whole.certifier.step()
@@ -775,6 +821,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                             elapsed_seconds=perf_counter()-started))
                     whole.emit("coordination")
                     if whole.certifier is not None:
+                        # 对偶协调闭合只记录诊断；整数认证模式仍需原问题 UB/LB 达标才能停止。
                         dual_lower = max(relaxation.lower, float(sum(search.lower for search in searches)))
                         result.outer_history[-1]["dual_lower"] = dual_lower
                         result.outer_history[-1]["dual_converged"] = closed(dual_lower, upper, o.tolerance, dual_lower)
@@ -788,6 +835,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
             whole.diagnostics['sa_budget_exhausted'] = True
             whole.emit('sa_budget_exhausted')
         if whole.certifier is not None and result.status != "CONVERGED":
+            # SA 达到迭代或配额上限后，保留已有方案与割，继续使用剩余总预算进行整数认证。
             stage = "CERTIFICATION"
             while remaining() > 0 and not whole.certifier.converged():
                 if o.rts24_improvements:
@@ -827,6 +875,8 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
     return result
 
 
+# 公共求解接口；常规模式执行主流程，paper_sa 模式额外安装连续 Gurobi 守卫和调用审计。
+# 论文式 SA 要求重新初始化，拒绝继承/恢复状态以保持实验协议清晰。
 def solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=None, started_at=None):
     args = dict(resume_state=resume_state, initial_state=initial_state, progress=progress, started_at=started_at)
     if not o.paper_sa:
@@ -834,6 +884,7 @@ def solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=No
     if resume_state is not None or initial_state is not None:
         raise ValueError('Paper SA requires fresh initialization')
     calls = []
+    # 保存连续求解的开始/结束事件，并按需转发给外部审计回调。
     def record(event):
         calls.append(event)
         if hasattr(progress, 'optimizer_event'):

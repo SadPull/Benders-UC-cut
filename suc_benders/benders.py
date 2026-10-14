@@ -1,4 +1,6 @@
 """Continuous recourse cuts, LP master bounds and dual coordination."""
+# 模块职责：共享离散可行性检查、连续调度割、块主问题松弛及拉格朗日协调。
+# X/binary 为 u/v/w 等二进制列，Y/continuous 为连续列；不等式统一采用 A @ x <= rhs。
 from fractions import Fraction
 from time import perf_counter
 from types import SimpleNamespace as NS
@@ -9,6 +11,8 @@ from scipy import sparse
 from .optimization import optimize
 
 
+# 检查只含二进制变量的约束和严格 0/1 输入；连续调度行留给子问题判断。
+# hard 可复用调用方已计算的行掩码，等式残差取绝对值，容差为 1e-7。
 def discrete_feasible(b, x, hard=None):
     if hard is None:
         hard = b.A[:, b.continuous].getnnz(axis=1) == 0
@@ -17,6 +21,8 @@ def discrete_feasible(b, x, hard=None):
     return bool(np.isin(x, [0, 1]).all() and residual.max(initial=0) <= 1e-7)
 
 
+# 按指定行及原模型列投影子问题，返回局部二进制/连续索引和对应的矩阵、边界、费用。
+# 二进制费用置零，只保留连续补偿费用；固定费用由上层主问题单独计入。
 def recourse_model(full, rows, binary, continuous):
     columns = np.r_[binary, continuous]
     nx = len(binary)
@@ -26,6 +32,8 @@ def recourse_model(full, rows, binary, continuous):
               continuous=np.arange(nx, len(columns)))
 
 
+# 固定精确二进制向量 x 后求解连续调度，返回可行性、实际费用、点、对偶价格与割。
+# certified=True 时使用带安全余量的对偶下界或可验证分离式生成割；不可行探测也可产出割。
 def dispatch(b, x, seconds, *, certified=False):
     started = perf_counter()
     X, Y = b.binary, b.continuous
@@ -46,6 +54,7 @@ def dispatch(b, x, seconds, *, certified=False):
     raw = optimize(g, seconds)
     result.status = raw.status
     if raw.status == "OPTIMAL":
+        # 连续补偿函数的下估计为 alpha + beta @ x；固定二进制费用在总成本中另外加入。
         beta = np.asarray(B.T @ raw.prices)
         anchor = raw.objval
         if certified:
@@ -63,6 +72,7 @@ def dispatch(b, x, seconds, *, certified=False):
         result.feasible = True
         result.prices = np.zeros(len(b.rhs)); result.prices[rows] = raw.prices
     elif raw.status in ("INFEASIBLE", "INF_OR_UNBD") and perf_counter() - started < seconds:
+        # 用非负弹性松弛寻找分离价格；等式展开成两个方向，但仍共用原行的松弛变量。
         E = np.flatnonzero(g.eq)
         C = sparse.vstack([g.A, -g.A[E]], format="csr")
         D = sparse.vstack([B, -B[E]], format="csr")
@@ -82,6 +92,7 @@ def dispatch(b, x, seconds, *, certified=False):
             beta = np.asarray(D.T @ prices)
             alpha = float(raw.objval - beta @ x)
             if certified:
+                # 裁剪价格后重新在原有界连续域上计算截距，认证不能直接沿用旧弹性目标值。
                 # For every feasible y, prices @ (C*y + D*x - h) <= 0.
                 # Minimize C.T @ prices over the original bounded y domain.
                 # This remains valid after projecting numerical multipliers.
@@ -98,6 +109,8 @@ def dispatch(b, x, seconds, *, certified=False):
     return result
 
 
+# 把离散约束、容量/AND 关系与已有 Benders 割组装成线性主问题，并可选求其连续松弛下界。
+# 末列 theta 表示不含 b.constant 的块总费用下估计；返回的松弛解不用于替代 SA 候选。
 def master(b, cuts, seconds=0):
     X, Y = b.binary, b.continuous
     nx = len(X)
@@ -109,10 +122,12 @@ def master(b, cuts, seconds=0):
     mapping = np.full(len(b.obj), -1); mapping[X] = np.arange(nx)
     pairs, nb, capacity_rows = [], nx, {}
 
+    # 添加主问题约束及 hard/capacity/and/optimality/feasibility 标签，供 QUBO 选择对应编码。
     def add(indices, values, bound, equality=False, label="hard"):
         rows.append({int(j): float(v) for j, v in zip(indices, values) if v != 0})
         rhs.append(bound); eq.append(equality); kind.append(label)
 
+    # 用精确容量系数保留启停限制；min_up=1 时 AND 辅助位修正同小时启停容量的重叠。
     for t, hour in enumerate([] if getattr(b.d, "model_profile", "") == "azema_sms" else b.times):
         capacity = {}
         for i in range(b.d.n_units):
@@ -130,6 +145,7 @@ def master(b, cuts, seconds=0):
         required = (1 + Fraction(str(b.d.reserve_fraction))) * max(Fraction(str(s.load[hour])) for s in b.scenarios)
         capacity_rows[len(rows)] = ({j: -v for j, v in capacity.items()}, required)
         add(capacity.keys(), [-v for v in capacity.values()], -float(required), label="capacity")
+    # theta 下估计二进制固定费用加连续补偿；b.constant 保留在块模型之外，汇总时加回。
     theta = nb
     qlo = np.minimum(b.obj[Y] * b.lb[Y], b.obj[Y] * b.ub[Y]).sum()
     add([*range(nx), theta], [*b.obj[X], -1], -qlo, label="optimality")
@@ -167,6 +183,8 @@ def master(b, cuts, seconds=0):
     return m, lower
 
 
+# 用各块的可行费用平面优化跨块乘子，返回新乘子和协调对偶模型的上界。
+# 先确定原目标最优值，再选择 L1 范数最小的乘子，避免退化方向使 QUBO 编码数值过大。
 def coordinate(planes, equality, incumbent, seconds):
     started = perf_counter()
     nc, B = len(equality), len(planes)

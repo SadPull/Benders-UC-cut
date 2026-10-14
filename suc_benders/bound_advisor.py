@@ -1,4 +1,6 @@
 """One cancellable Responses request; optimization stays in the parent process."""
+# 模块职责：封装可取消的单次 LLM 请求，可使用后台 HTTP 进程或文件交换子代理。
+# 工作进程只处理传输和候选解析，求解模型、割计算和费用验证始终留在父进程。
 import hashlib
 import json
 import multiprocessing as mp
@@ -8,6 +10,8 @@ from types import SimpleNamespace as NS
 from . import llm
 
 
+# 在公共提示词上构建下界探测请求，引导候选揭示主问题低估或调度不可行区域。
+# LLM 只提议 u 矩阵，不能提供未经数值证明的费用、界或割系数。
 def request_body(d, scenarios, best, o, context, iteration):
     body = llm.request_body(d, scenarios, best, o, {"bound_search": context}, [], iteration)
     body["instructions"] = (
@@ -35,6 +39,8 @@ def request_body(d, scenarios, best, o, context, iteration):
     return body
 
 
+# 后台进程入口：发送请求、解析候选，并通过管道返回脱敏回执和完成时刻。
+# 异常只保留类型及 HTTP 状态码；无论发送结果是否成功，最后都关闭管道发送端。
 def _request(connection, url, key, body, shape, iteration, seconds):
     started = perf_counter()
     candidates = []
@@ -58,7 +64,10 @@ def _request(connection, url, key, body, shape, iteration, seconds):
         connection.close()
 
 
+# 单个在途请求的生命周期对象，提供非阻塞 poll 和终止/关闭操作。
 class BoundAdvisor:
+    # 根据 llm_agent_directory 选择文件交换或 spawn HTTP 进程，并记录总请求截止时间及请求哈希。
+    # 传给子进程的数据只包含请求体和矩阵形状，避免传递求解器对象。
     def __init__(self, d, o, body, iteration, seconds):
         self.agent = None
         if o.llm_agent_directory:
@@ -81,8 +90,11 @@ class BoundAdvisor:
             self.connection.close()
             raise
         finally:
+            # 父进程释放自己的发送端副本，保证子进程结束后读端能正确观察到 EOF。
             sender.close()
 
+    # 尚未完成时返回 None；完成、超时或进程退出时返回 (候选, 回执) 并回收资源。
+    # 完成时刻晚于请求截止时间的回复必须丢弃，即使当前已经可以读到结果。
     def poll(self):
         if self.agent is not None:
             return self.agent.poll()
@@ -108,6 +120,7 @@ class BoundAdvisor:
             return [], info
         return None
 
+    # 关闭文件交换请求，或先终止再按需强制杀死 HTTP 工作进程，最后回收管道。
     def close(self):
         if self.agent is not None:
             self.agent.close()

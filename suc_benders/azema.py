@@ -1,19 +1,26 @@
 """Author-aligned, single-bus SMS model; production UC conventions stay separate."""
+# 模块职责：单独实现 azema_sms 单母线模型的建模、时序修复和独立物理验证。
+# 本分支采用线性燃料、无备用和带罚费用的缺电/弃电平衡，末小时允许停机。
 from types import SimpleNamespace as NS
 
 import numpy as np
 from scipy import sparse
 
 
+# 判断输入数据是否选择 azema_sms 模型口径，供外部调用方分流。
 def enabled(d):
     return getattr(d, "model_profile", "") == "azema_sms"
 
 
+# 由初始出力超过 Pmin 的部分和降爬坡速度，计算必须保持开机的前置小时数。
+# 建模和修复使用 t < 返回值，避免在出力尚未降至允许停机水平时关机。
 def initial_forced_hours(d):
-    # Author thermal_unit_commit_constraints also forces t=0,...,ceil((p0-pmin)/RD).
+    # 初始出力需按 ramp_down 降至 Pmin，模型据此强制 t < 返回值的小时保持开机。
     return np.maximum(0, np.ceil((d.initial_output-d.pmin)/d.ramp_down)).astype(int)
 
 
+# 构建 SMS 稀疏模型：公共 u/v/w，分场景 p、shed、curtail；返回矩阵、索引和费用向量。
+# 出力及功率缺口沿用输入单位，燃料和不平衡罚费用按场景概率加权。
 def model(d, scenarios):
     n, T, S = d.n_units, d.horizon, len(scenarios)
     N = n*T
@@ -38,6 +45,7 @@ def model(d, scenarios):
         m.ub[ix.curtail[:, k]] = np.maximum(0., d.pmax.sum()-s.load)
     I, J, V, rhs, eq, labels = [], [], [], [], [], []
 
+    # 将一条约束写入稀疏三元组，同时保存右端、等式标记和语义标签。
     def add(js, values, bound=0., equality=False, label=""):
         js, values = np.atleast_1d(js), np.atleast_1d(values)
         keep = values != 0
@@ -83,6 +91,8 @@ def model(d, scenarios):
     return m
 
 
+# 从初始开停机状态逐小时修复 u，满足最小开停机时间和初始功率强制开机规则。
+# 返回机组 × 小时的 0/1 矩阵；修复时序不等于证明连续调度或零缺电可行。
 def repair(d, u):
     u = np.clip(np.rint(u), 0, 1).copy()
     forced = initial_forced_hours(d)
@@ -100,6 +110,8 @@ def repair(d, u):
     return u
 
 
+# 直接重算 SMS 的启停、最小时间、出力、爬坡、软平衡及各场景费用。
+# 返回物理残差、期望罚费用与缺电/弃电量；feasible=True 仍可能存在受罚的缺电。
 def validate(d, scenarios, result):
     # Direct physical equations, independent of the sparse model and its row labels.
     u, v, w = (np.asarray(getattr(result, name)) for name in ("u", "v", "w"))

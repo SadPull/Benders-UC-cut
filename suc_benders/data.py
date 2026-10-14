@@ -1,10 +1,14 @@
 """Read the original JSON inputs without changing their physical units."""
+# 模块职责：读取机组/场景 JSON，保留原物理单位，并在进入建模前检查输入边界。
+# 机组参数为长度 n_units 的向量，负荷为长度 horizon 的向量；返回 d 和场景列表。
 import json
 from types import SimpleNamespace as NS
 
 import numpy as np
 
 
+# 加载并验证机组参数、初始状态、冷热费用、场景概率和负荷，返回 NumPy 化的数据对象。
+# 初始时长的符号先决定开停机，再取绝对值；标准 UC 与 SMS 对零时长的开机口径不同。
 def load_data(unit_file, scenario_file):
     with open(unit_file, encoding="utf-8") as f:
         raw = json.load(f)
@@ -43,6 +47,7 @@ def load_data(unit_file, scenario_file):
             raise ValueError(f"Invalid integer durations: {key}")
     if any((getattr(d, key) > d.pmax).any() for key in ("pmin", "pstart", "pshut")):
         raise ValueError("Output limits exceed Pmax")
+    # 先读取时长符号中的初始开停机状态，再保存正的持续小时数，后续时序规则只使用持续长度。
     d.initial_on = ((d.initial_duration >= 0) if profile == "azema_sms" else (d.initial_duration > 0)).astype(float)
     d.initial_duration = np.abs(d.initial_duration)
     d.initial_output = np.asarray(getattr(d, "initial_output", d.pmin * d.initial_on), dtype=float)
@@ -66,6 +71,7 @@ def load_data(unit_file, scenario_file):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value != 700:
                 raise ValueError("Author SMS imbalance penalties must equal 700")
     scenarios = []
+    # 概率只用于费用加权；每个场景的负荷和备用约束都必须分别满足。
     for item in raw["scenarios"]:
         name, probability = item["name"], float(item["probability"])
         if not isinstance(name, str) or not name or not np.isfinite(probability) or probability <= 0:
@@ -90,6 +96,7 @@ def load_data(unit_file, scenario_file):
     return d, scenarios
 
 
+# 将单个小时负荷序列转为浮点向量，要求长度正确、数值有限且非负。
 def _load(value, horizon):
     value = np.asarray(value, dtype=float)
     if value.shape != (horizon,) or not np.isfinite(value).all() or (value < 0).any():
