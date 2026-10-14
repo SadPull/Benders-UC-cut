@@ -64,13 +64,17 @@ def test_transport_and_timeout(whole, monkeypatch):
     seen = {}
 
     def post(req, timeout):
-        seen.update(body=json.loads(req.data), timeout=timeout)
+        seen.update(body=json.loads(req.data), timeout=timeout, url=req.full_url,
+                    method=req.get_method(), headers=req.headers)
         return io.BytesIO(json.dumps(response([{"u": whole.result.u.tolist()}])).encode())
 
     monkeypatch.setattr(llm, "urlopen", post)
     args = (whole.d, whole.scenarios, whole.result, whole.o, 10, {}, [], 1)
     candidates, info = llm.request(*args)
     assert candidates and info["status"] == "OK" and 0 < seen["timeout"] <= 10
+    assert seen["url"] == whole.o.llm_url and seen["method"] == "POST"
+    assert seen["headers"]["Authorization"] == "Bearer offline-secret"
+    assert seen["headers"]["Content-type"] == "application/json"
 
     def failed(*args, **kwargs):
         raise RuntimeError("offline-secret must not appear in a result")

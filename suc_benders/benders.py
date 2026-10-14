@@ -9,6 +9,23 @@ from scipy import sparse
 from .optimization import optimize
 
 
+def discrete_feasible(b, x, hard=None):
+    if hard is None:
+        hard = b.A[:, b.continuous].getnnz(axis=1) == 0
+    residual = b.A[hard][:, b.binary] @ x - b.rhs[hard]
+    residual[b.eq[hard]] = np.abs(residual[b.eq[hard]])
+    return bool(np.isin(x, [0, 1]).all() and residual.max(initial=0) <= 1e-7)
+
+
+def recourse_model(full, rows, binary, continuous):
+    columns = np.r_[binary, continuous]
+    nx = len(binary)
+    return NS(A=full.A[rows][:, columns], rhs=full.rhs[rows], eq=full.eq[rows],
+              obj=np.r_[np.zeros(nx), full.obj[continuous]], q=np.r_[np.zeros(nx), full.q[continuous]],
+              lb=full.lb[columns], ub=full.ub[columns], binary=np.arange(nx),
+              continuous=np.arange(nx, len(columns)))
+
+
 def dispatch(b, x, seconds, *, certified=False):
     started = perf_counter()
     X, Y = b.binary, b.continuous
@@ -20,9 +37,7 @@ def dispatch(b, x, seconds, *, certified=False):
     keep_proof = certified and (getattr(b, "audit_cuts", False)
         or getattr(getattr(b, "d", None), "model_profile", "") == "azema_sms")
     hard = b.A[:, Y].getnnz(axis=1) == 0
-    residual = b.A[hard][:, X] @ x - b.rhs[hard]
-    residual[b.eq[hard]] = np.abs(residual[b.eq[hard]])
-    if (residual > 1e-7).any():
+    if not discrete_feasible(b, x, hard):
         return result
     rows = np.flatnonzero(~hard)
     B = b.A[rows][:, X]

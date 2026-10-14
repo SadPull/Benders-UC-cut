@@ -120,6 +120,22 @@ def test_startup_shutdown_capacity(tiny):
     assert not r.feasible and r.cut.alpha + r.cut.beta @ x > 0
 
 
+@pytest.mark.parametrize("row,rhs,equality,x,expected", [
+    ([1., 0.], 0., False, 1., False),
+    ([-1., 0.], 0., False, 1., True),
+    ([-1., 0.], 0., True, 1., False),
+    ([1., 0.], 1.+1e-8, True, 1., True),
+    ([1., 0.], 1.+1e-6, True, 1., False),
+    ([1., 1.], 0., False, 1., True),
+    ([1., 1.], 0., False, .5, False),
+])
+def test_discrete_feasibility_ignores_dispatch_rows(row, rhs, equality, x, expected):
+    from suc_benders.solver import discrete_feasible
+    b = NS(A=sparse.csr_matrix([row]), rhs=np.array([rhs]), eq=np.array([equality]),
+           binary=np.array([0]), continuous=np.array([1]))
+    assert discrete_feasible(b, np.array([x])) is expected
+
+
 def encoding_model(A, rhs, kind, scale=10, hi=4):
     return NS(A=sparse.csr_matrix(A, dtype=float), rhs=np.asarray(rhs, float), eq=np.array([False, False]),
               obj=np.array([0., 0., 1.]), q=np.zeros(3), lb=np.zeros(3), ub=np.array([1., 1., hi]),

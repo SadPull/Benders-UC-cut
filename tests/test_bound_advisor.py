@@ -2,6 +2,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from time import perf_counter, sleep
+from types import SimpleNamespace as NS
 
 import pytest
 
@@ -16,6 +17,9 @@ def local_responses():
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            if "http_status" in received[-1]:
+                self.send_error(received[-1]["http_status"], "offline-secret")
+                return
             body = {"id": "offline-response", "model": "offline", "status": "completed", "output": [
                 {"type": "message", "content": [{"type": "output_text", "text": json.dumps(
                     {"candidates": [{"u": [[1, 1, 1]]}]})}]}]}
@@ -69,6 +73,21 @@ def test_request_deadline_terminates_worker(tiny, options, local_responses):
     candidates, info = task.poll()
     assert not candidates and info["status"] == "TIME_LIMIT"
     assert not task.process.is_alive()
+
+
+@pytest.mark.parametrize("status", [401, 429, 500])
+def test_http_failure_receipt_omits_secrets_and_does_not_retry(tiny, local_responses, status):
+    d, _ = tiny(1)
+    replies, closed = [], []
+    connection = NS(send=replies.append, close=lambda: closed.append(True))
+    bound_advisor._request(connection, local_responses[0], "offline-secret",
+                           {"http_status": status}, d, 1, 5.)
+    candidates, info = replies[0]
+    assert not candidates and info["status"] == "FAILED"
+    assert info["message"] == "HTTPError" and info["http_status"] == status
+    assert info["seconds"] >= 0 and info["finished_at"] > 0
+    assert len(local_responses[1]) == 1 and closed == [True]
+    assert "offline-secret" not in json.dumps(info)
 
 
 def test_bound_prompt_targets_separation_not_only_feasible_savings(tiny, options):

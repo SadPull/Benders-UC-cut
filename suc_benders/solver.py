@@ -10,7 +10,7 @@ import numpy as np
 from . import llm
 from .advisor_feedback import call_due, summarize
 from .anneal import anneal
-from .benders import coordinate, dispatch, master
+from .benders import coordinate, discrete_feasible, dispatch, master
 from .certification import Certification
 from .context import CandidateEvaluation, LLMContextInput, build_llm_context
 from .dual_advisor import DualAdvisor
@@ -48,13 +48,6 @@ def closed(lower, upper, tolerance, reference=None):
     reference = upper if reference is None else reference
     return (np.isfinite(lower) and np.isfinite(upper) and upper - lower >= -1e-5
             and upper - lower <= 1e-5 + tolerance * max(1, abs(reference)))
-
-
-def discrete_feasible(b, x):
-    hard = b.A[:, b.continuous].getnnz(axis=1) == 0
-    residual = b.A[hard][:, b.binary] @ x - b.rhs[hard]
-    residual[b.eq[hard]] = np.abs(residual[b.eq[hard]])
-    return bool(np.isin(x, [0, 1]).all() and residual.max(initial=0) <= 1e-7)
 
 
 class SABudgetExhausted(Exception):

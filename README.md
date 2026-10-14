@@ -1,6 +1,8 @@
 # Python：Kaiwu SA + LLM Benders SUC
 
-**版本：v0.26.0（2026-10-13）**。变更见 [CHANGELOG.md](CHANGELOG.md)，发布源码与完整实验证据见 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.26.0)。
+**版本：v0.27.0（2026-10-14；重构回归通过，待实验）**。变更见 [CHANGELOG.md](CHANGELOG.md)，发布源码与本次验证记录见 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.27.0)。
+
+本版按 Ponytail 合并离散可行性检查、小时／场景子问题构建和 LLM HTTP 发送的重复实现，保留原算法与调用接口，并同步包内版本号。230 项离线回归与 5 项真实 Kaiwu 集成测试通过；3 项数值测试因 4 GiB 内存门槛跳过。4 组输入的 96 个小时子模型与 4 个场景子模型摘要与重构前一致。本版作为预发布，完整 RTS-24 实验待验证；下文正式实验成绩与归档仍来自 v0.26.0 及其历史版本。
 
 当前项目保留通用求解核心、`run_suc.py`、必要输入和核心回归测试。实验编排入口、结果、计划、参考求解数据和运行环境已归档；复现时按 [恢复说明](archives/README.md) 使用相应冻结源码。
 

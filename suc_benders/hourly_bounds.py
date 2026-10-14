@@ -4,7 +4,7 @@ from types import SimpleNamespace as NS
 
 import numpy as np
 
-from .benders import dispatch
+from .benders import dispatch, recourse_model
 
 
 class HourlyBounds:
@@ -17,14 +17,10 @@ class HourlyBounds:
             local_counts = full.A[:, variables].getnnz(axis=1)
             rows = np.flatnonzero((local_counts > 0) & (local_counts == counts))
             indices = np.flatnonzero(full.A[rows][:, X].getnnz(axis=0))
-            columns = np.r_[X[indices], variables]
-            nx = len(indices)
-            b = NS(A=full.A[rows][:, columns], rhs=full.rhs[rows], eq=full.eq[rows],
-                obj=np.r_[np.zeros(nx), full.obj[variables]], q=np.r_[np.zeros(nx), full.q[variables]],
-                lb=full.lb[columns], ub=full.ub[columns], binary=np.arange(nx),
-                continuous=np.arange(nx, len(columns)), constant=0.,
-                audit_cuts=bool(getattr(full, 'audit_cuts', False)) or
-                    getattr(getattr(full, "d", None), "model_profile", "") == "azema_sms")
+            b = recourse_model(full, rows, X[indices], variables)
+            b.constant = 0.
+            b.audit_cuts = (bool(getattr(full, 'audit_cuts', False)) or
+                           getattr(getattr(full, "d", None), "model_profile", "") == "azema_sms")
             self.parts.append(NS(hour=int(hour), b=b, indices=indices, variables=variables, cache=set()))
 
     def recourse(self, point):

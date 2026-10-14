@@ -78,7 +78,7 @@ def sampling_evidence(search, m, q, sampling):
 
 def process_raw_batch(search, proposals, baseline_u, inner):
     """All untouched local evaluations precede any whole-day repair in this batch."""
-    from .solver import discrete_feasible
+    from .benders import discrete_feasible
     whole, b = search.whole, search.b
     unique = {}
     for k, x in enumerate(proposals):

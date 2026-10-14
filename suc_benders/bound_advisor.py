@@ -4,7 +4,6 @@ import json
 import multiprocessing as mp
 from time import perf_counter
 from types import SimpleNamespace as NS
-from urllib.request import Request, urlopen
 
 from . import llm
 
@@ -41,10 +40,7 @@ def _request(connection, url, key, body, shape, iteration, seconds):
     candidates = []
     info = dict(status="FAILED", message="", accepted=0, format_valid=0, proposals=[])
     try:
-        request = Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
-                          headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-        with urlopen(request, timeout=seconds) as response:
-            raw = json.load(response)
+        raw = llm.post_response(url, key, body, seconds)
         candidates, info = llm.parse_response(raw, shape, iteration)
         info.update(response_id=raw.get("id"), response_model=raw.get("model"), usage=raw.get("usage"),
                     response_output=[part["text"] for item in raw.get("output", [])

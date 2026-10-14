@@ -48,6 +48,13 @@ def parse_response(response, d, iteration=1):
     return candidates, info
 
 
+def post_response(url, key, body, seconds):
+    http = Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
+                   headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+    with urlopen(http, timeout=seconds) as response:
+        return json.load(response)
+
+
 def request(d, scenarios, best, o, seconds, context, base_candidates, iteration):
     started = perf_counter()
     info = {"status": "FAILED", "message": "", "accepted": 0, "format_valid": 0, "proposals": []}
@@ -56,10 +63,8 @@ def request(d, scenarios, best, o, seconds, context, base_candidates, iteration)
         remaining = seconds - (perf_counter() - started)
         if remaining <= 0:
             raise TimeoutError
-        http = Request(o.llm_url, data=json.dumps(body).encode("utf-8"), method="POST",
-                       headers={"Content-Type": "application/json", "Authorization": f"Bearer {o.llm_api_key}"})
-        with urlopen(http, timeout=min(remaining, o.llm_timeout)) as response:
-            candidates, info = parse_response(json.load(response), d, iteration)
+        raw = post_response(o.llm_url, o.llm_api_key, body, min(remaining, o.llm_timeout))
+        candidates, info = parse_response(raw, d, iteration)
         if perf_counter() - started >= seconds:
             candidates = []; info.update(status="TIME_LIMIT", accepted=0)
     except Exception as error:

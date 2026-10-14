@@ -4,6 +4,8 @@ from types import SimpleNamespace as NS
 
 import numpy as np
 
+from .benders import recourse_model
+
 
 class ScenarioBounds:
     def __init__(self, full, model):
@@ -19,12 +21,7 @@ class ScenarioBounds:
             if ((local_counts > 0) & (local_counts != counts)).any():
                 raise ValueError("Cross-scenario continuous constraint")
             rows = np.flatnonzero(local_counts)
-            columns = np.r_[X, variables]
-            nx = len(X)
-            b = NS(A=full.A[rows][:, columns], rhs=full.rhs[rows], eq=full.eq[rows],
-                obj=np.r_[np.zeros(nx), full.obj[variables]], q=np.r_[np.zeros(nx), full.q[variables]],
-                lb=full.lb[columns], ub=full.ub[columns], binary=np.arange(nx),
-                continuous=np.arange(nx, len(columns)))
+            b = recourse_model(full, rows, X, variables)
             self.parts.append(NS(scenario=k, b=b, rows=rows, variables=variables))
 
     def recourse(self, point):
