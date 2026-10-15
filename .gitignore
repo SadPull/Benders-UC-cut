@@ -13,3 +13,4 @@ slprj/
 .benchmark/
 .local/
 *.lic
+tests/

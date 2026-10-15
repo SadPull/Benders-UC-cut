@@ -1,8 +1,13 @@
-"""One cancellable upper-advice request over HTTP or file exchange."""
+"""One cancellable upper-advice request over HTTP, Codex CLI or file exchange."""
 import hashlib
 import json
 import multiprocessing as mp
+import os
 from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
 from time import perf_counter, time
 from uuid import uuid4
 from types import SimpleNamespace as NS
@@ -10,14 +15,21 @@ from types import SimpleNamespace as NS
 from . import llm
 from .data import save_json
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 
 # 单个在途请求的生命周期对象，提供非阻塞 poll 和终止/关闭操作。
 class AdvisorRequest:
-    # 根据 llm_agent_directory 选择文件交换或 spawn HTTP 进程，并记录总请求截止时间及请求哈希。
+    # Codex 命令优先于手动文件交换；HTTP 与 CLI 都在独立工作进程中执行。
     # 传给子进程的数据只包含请求体和矩阵形状，避免传递求解器对象。
     def __init__(self, d, o, body, iteration, seconds):
         self.agent = None
-        if o.llm_agent_directory:
+        self.codex_directory = None
+        self.closed = False
+        if o.llm_agent_directory and not o.llm_codex_command:
             self.agent = SubagentAdvisor(d, o, body, iteration, seconds)
             self.started, self.deadline, self.receipt = self.agent.started, self.agent.deadline, self.agent.receipt
             return
@@ -25,15 +37,28 @@ class AdvisorRequest:
         self.deadline = self.started + seconds
         context = mp.get_context("spawn")
         self.connection, sender = context.Pipe(duplex=False)
-        self.process = context.Process(target=_request,
-            args=(sender, o.llm_url, o.llm_api_key, body,
-                  NS(n_units=d.n_units, horizon=d.horizon), iteration, seconds), daemon=True)
+        shape = NS(n_units=d.n_units, horizon=d.horizon)
         self.receipt = dict(request=body, request_sha256=hashlib.sha256(
             json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
+        if o.llm_codex_command:
+            self.codex_directory = Path(o.llm_agent_directory).resolve()/f'{iteration:02d}-{uuid4().hex}'
+            self.codex_directory.mkdir(parents=True)
+            self.receipt.update(transport='codex_exec', request_directory=str(self.codex_directory),
+                                requested_model=body['model'], reasoning_effort=body['reasoning']['effort'])
+            save_json(self.codex_directory/'request.json', dict(**self.receipt,
+                shape=[d.n_units, d.horizon], created_epoch_seconds=time(), timeout_seconds=seconds))
+            self.process = context.Process(target=_request_codex,
+                args=(sender, o.llm_codex_command, body, shape, iteration,
+                      self.deadline, self.codex_directory), daemon=True)
+        else:
+            self.process = context.Process(target=_request,
+                args=(sender, o.llm_url, o.llm_api_key, body, shape, iteration, seconds), daemon=True)
         try:
             self.process.start()
-        except Exception:
+        except Exception as error:
             self.connection.close()
+            self.save_receipt(dict(status='FAILED', message=f'{type(error).__name__}: {error}',
+                accepted=0, proposals=[], seconds=perf_counter()-self.started, **self.receipt))
             raise
         finally:
             # 父进程释放自己的发送端副本，保证子进程结束后读端能正确观察到 EOF。
@@ -44,40 +69,174 @@ class AdvisorRequest:
     def poll(self):
         if self.agent is not None:
             return self.agent.poll()
+        if self.closed:
+            return [], dict(status='CANCELLED', message='RequestClosed', accepted=0, proposals=[], **self.receipt)
         now = perf_counter()
         if self.connection.poll():
             try:
                 candidates, info = self.connection.recv()
             except EOFError:
-                candidates, info = [], dict(status="FAILED", message="WorkerExited", accepted=0, proposals=[])
+                candidates, info = [], dict(status="TIME_LIMIT" if now >= self.deadline else "FAILED",
+                                           message="WorkerExited", accepted=0, proposals=[])
             if info.get("finished_at", now) > self.deadline:
                 candidates = []
                 info.update(status="TIME_LIMIT", accepted=0)
             info["background_seconds"] = max(0., info.get("finished_at", now)-self.started)
+            if self.codex_directory is not None:
+                info['seconds'] = info['background_seconds']
             info.update(self.receipt)
-            self.close()
+            self.close(info)
             return candidates, info
         if now >= self.deadline or not self.process.is_alive():
             info = dict(status="TIME_LIMIT" if now >= self.deadline else "FAILED",
                         message="RequestDeadline" if now >= self.deadline else "WorkerExited",
                         seconds=now-self.started, background_seconds=now-self.started,
                         accepted=0, proposals=[], **self.receipt)
-            self.close()
+            self.close(info)
             return [], info
         return None
 
-    # 关闭文件交换请求，或先终止再按需强制杀死 HTTP 工作进程，最后回收管道。
-    def close(self):
+    def save_receipt(self, info):
+        if self.codex_directory is not None:
+            info.update(_codex_event_info(self.codex_directory))
+            info.setdefault('exit_code', None)
+            save_json(self.codex_directory/'receipt.json', info)
+
+    # CLI 的工作进程连同其 Node/native 子进程一并回收，不能只终止 Python 父进程。
+    def close(self, info=None):
         if self.agent is not None:
             self.agent.close()
             return
+        if self.closed:
+            return
+        self.closed = True
         if self.process.is_alive():
+            if self.codex_directory is not None:
+                _kill_tree(self.process.pid)
             self.process.terminate()
         self.process.join(timeout=1.)
         if self.process.is_alive():
             self.process.kill()
             self.process.join(timeout=1.)
         self.connection.close()
+        self.save_receipt(info if info is not None else dict(status='CANCELLED', message='RequestClosed',
+            accepted=0, proposals=[], exit_code=None, seconds=perf_counter()-self.started, **self.receipt))
+
+
+def _kill_tree(pid):
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       creationflags=subprocess.CREATE_NO_WINDOW, check=False)
+    else:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _codex_https_args(config_path):
+    config = tomllib.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+    provider = config.get('model_provider', 'openai')
+    # 内置 openai 不允许原地覆盖，使用仅限本次调用的 HTTPS 提供方。
+    if provider == 'openai':
+        return ['-c', 'model_provider="suc_https"', '-c',
+                'model_providers.suc_https={name="OpenAI HTTPS",wire_api="responses",'
+                'requires_openai_auth=true,supports_websockets=false}']
+    return ['-c', f'model_providers.{provider}.supports_websockets=false']
+
+
+def _codex_event_info(directory):
+    path = directory/'events.jsonl'
+    info = {}
+    if not path.exists():
+        return info
+    for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue  # 进程被回收时，最后一行可能只写了一部分。
+        if not isinstance(event, dict):
+            continue
+        if event.get('type') == 'thread.started':
+            info['thread_id'] = event['thread_id']
+        elif event.get('type') == 'turn.completed':
+            info['usage'] = event.get('usage')
+        elif event.get('type') in ('error', 'turn.failed'):
+            message = event.get('message', '') or event.get('error', {}).get('message', '')
+            message = re.sub(r'sk-[A-Za-z0-9_*\-]+', '[REDACTED_KEY]', message)
+            info['last_cli_error'] = re.sub(r'Bearer\s+[^\s,\"]+', 'Bearer [REDACTED]', message)
+    return info
+
+
+def _request_codex(connection, command, body, shape, iteration, deadline, directory):
+    # Ctrl+C 由主进程统一回收整棵进程树，工作进程不能先于 CLI 退出。
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if os.name != 'nt':
+        os.setsid()
+    started = perf_counter()
+    candidates, process = [], None
+    info = dict(status='FAILED', message='', accepted=0, format_valid=0, proposals=[], exit_code=None)
+    try:
+        prompt = (body['instructions']+'\n\n'+body['input']
+                  +'\n\nReturn only the requested JSON. Do not invoke tools, edit files, or spawn agents.\n')
+        (directory/'prompt.txt').write_bytes(prompt.encode('utf-8'))
+        info['prompt_sha256'] = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
+        matrix = dict(type='array', minItems=shape.n_units, maxItems=shape.n_units,
+            items=dict(type='array', minItems=shape.horizon, maxItems=shape.horizon,
+                       items=dict(type='integer', enum=[0, 1])))
+        save_json(directory/'schema.json', dict(type='object', additionalProperties=False,
+            required=['candidates'], properties=dict(candidates=dict(type='array', maxItems=4,
+                items=dict(type='object', additionalProperties=False, required=['name', 'reason', 'u'],
+                    properties=dict(name=dict(type='string'), reason=dict(type='string'), u=matrix))))))
+        executable = shutil.which(command)
+        if executable is None:
+            raise FileNotFoundError('Codex CLI not found; install it or set llm_codex_command')
+        args = [executable, 'exec', '--model', body['model'],
+                '-c', 'model_reasoning_effort="'+body['reasoning']['effort']+'"',
+                '-c', 'approval_policy="never"', '-c', 'agents.enabled=false',
+                '--sandbox', 'read-only', '--skip-git-repo-check', '--cd', str(directory),
+                '--json', '--output-schema', str(directory/'schema.json'),
+                '--output-last-message', str(directory/'reply.json'), '-']
+        config_path = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))/'config.toml'
+        args[2:2] = _codex_https_args(config_path)
+        save_json(directory/'command.json', dict(argv=args))
+        environment = os.environ.copy()
+        # codex exec 会优先使用此覆盖值；复用 CLI 已有登录时不能继承父代理的临时密钥。
+        environment.pop('CODEX_API_KEY', None)
+        with (directory/'prompt.txt').open('rb') as source, (directory/'events.jsonl').open('wb') as events, \
+                (directory/'stderr.log').open('wb') as errors:
+            if perf_counter() >= deadline:
+                raise subprocess.TimeoutExpired(args, 0.)
+            process = subprocess.Popen(args, stdin=source, stdout=events, stderr=errors,
+                env=environment, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            info['cli_pid'] = process.pid
+            info['exit_code'] = process.wait(timeout=max(0., deadline-perf_counter()))
+        info.update(_codex_event_info(directory))
+        if info['exit_code'] != 0:
+            raise RuntimeError('Codex CLI exited with code '+str(info['exit_code']))
+        reply = (directory/'reply.json').read_bytes()
+        info['reply_sha256'] = hashlib.sha256(reply).hexdigest()
+        text = reply.decode('utf-8')
+        raw = dict(status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
+        candidates, parsed = llm.parse_response(raw, shape, iteration)
+        info.update(parsed, response_output=[text])
+    except subprocess.TimeoutExpired:
+        info.update(status='TIME_LIMIT', message='CodexDeadline')
+    except Exception as error:
+        info.update(status='FAILED', message=f'{type(error).__name__}: {error}')
+    finished = perf_counter()
+    if finished > deadline:
+        candidates = []
+        info.update(status='TIME_LIMIT', accepted=0, message='CodexDeadline')
+    info.update(seconds=finished-started, finished_at=finished)
+    try:
+        connection.send((candidates, info))
+    finally:
+        connection.close()
+        # 保持父子关系，直到消费方收到超时回执并回收整个进程树。
+        if process is not None and process.poll() is None:
+            process.wait()
 
 
 # 管理一个独立请求目录及其 request/dispatch/reply/completion/closed 文件生命周期。

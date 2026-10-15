@@ -1,4 +1,4 @@
-"""修改顶部参数后，直接在 VS Code 中点击“运行 Python 文件”。"""
+"""输入固定读取 data 中的 JSON；在 VS Code 中点击“运行 Python 文件”。"""
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import json
@@ -16,14 +16,18 @@ from suc_benders.optimization import optimize
 from suc_benders.validation import unpack, validate
 
 
-# 修改这里后保存文件，再点击 VS Code 右上角的运行按钮。
-CASE = "classic10"        # "classic10"：10机组；"rts24"：32机组
+# 算例直接修改 data/units.json 和 data/stochastic.json；以下只设置运行参数。
 SEED = 17                # SA 随机种子
-TIME_LIMIT_SECONDS = 120  # 主算法与完整问题参考求解各自的预算，单位：秒
+TIME_LIMIT_SECONDS = 1800  # 主算法总预算，包含 Codex 启动、等待和回复处理，单位：秒
+REFERENCE_TIME_LIMIT_SECONDS = 120  # 完整问题参考求解的独立预算，单位：秒
 TARGET_GAP_PERCENT = 0.1  # 认证间隙目标，单位：%；0.1 就是 0.1%
 CHECK_ONLY = False       # True：只检查输入；False：实际求解
+LLM_ENABLED = True       # True：停滞时自动启动 Codex 独立任务；False：关闭 LLM
+LLM_MODEL = "gpt-6-astra"  # 使用 Codex 已登录账号，推理档位为 max
+LLM_TIMEOUT_SECONDS = 1200  # 单次调用上限，仍受主算法剩余预算约束
+LLM_RESERVE_SECONDS = 60  # 不用于等待 LLM，留给后续调度、校验和数值搜索
 
-# 本入口关闭 LLM，使用 SA 与独立强化下界；子代理实验需另配调度器。
+# Codex 提供上界候选，独立数值进程提供认证下界。
 PROJECT = Path(__file__).resolve().parent
 RESULTS = PROJECT / "results"
 
@@ -54,29 +58,38 @@ def solve_reference(data, scenarios, seconds, log_file):
 
 
 def main():
-    folders = {"classic10": "data", "rts24": "data/rts24/inputs"}
-    if CASE not in folders:
-        raise ValueError('CASE 请填写 "classic10" 或 "rts24"')
-    folder = PROJECT / folders[CASE]
+    stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
+    output = RESULTS / f"manual-seed{SEED}-{stamp}-{uuid4().hex[:8]}"
+    folder = PROJECT / "data"
     options = dict(data_file=str(folder / "units.json"), scenario_file=str(folder / "stochastic.json"),
                    seed=SEED, time_limit=TIME_LIMIT_SECONDS,
                    tolerance=TARGET_GAP_PERCENT / 100, block_hours=3, max_outer=1000000,
-                   max_inner=20, llm_enabled=False)
+                   max_inner=20, llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL,
+                   llm_timeout=LLM_TIMEOUT_SECONDS, llm_reserve_seconds=LLM_RESERVE_SECONDS,
+                   llm_codex_command="codex" if LLM_ENABLED else "",
+                   llm_agent_directory=str(output / "llm_requests") if LLM_ENABLED else "")
     checked = load_options(options)
     data, scenarios = load_data(checked.data_file, checked.scenario_file)
     dimensions = dict(units=data.n_units, hours=data.horizon, scenarios=len(scenarios))
-    print(f"算例：{CASE}；{data.n_units}机组；{data.horizon}小时；{len(scenarios)}场景", flush=True)
+    print(f"机组输入：{checked.data_file}", flush=True)
+    print(f"场景输入：{checked.scenario_file}", flush=True)
+    print(f"输入规模：{data.n_units}机组；{data.horizon}小时；{len(scenarios)}场景", flush=True)
     if CHECK_ONLY:
         print("输入检查通过；本次没有执行求解或检查授权。")
         return 0
 
-    stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
-    output = RESULTS / f"manual-{CASE}-seed{SEED}-{stamp}-{uuid4().hex[:8]}"
     output.mkdir(parents=True, exist_ok=False)
     save(output / "options.json", options)
     print(f"结果目录：{output}", flush=True)
     print(f"随机种子：{SEED}；主算法预算：{TIME_LIMIT_SECONDS} 秒；"
-          f"认证间隙目标：{TARGET_GAP_PERCENT}%；LLM：关闭", flush=True)
+          f"认证间隙目标：{TARGET_GAP_PERCENT}%；LLM：{'开启' if LLM_ENABLED else '关闭'}", flush=True)
+    if LLM_ENABLED:
+        print(f"调用方式：Codex 独立任务；模型：{checked.llm_model}；推理档位：max；"
+              f"连续 {checked.llm_patience} 个完整 SA 轮次改善不足时触发，"
+              f"最多调用 {checked.llm_max_calls if checked.llm_max_calls is not None else '不限'} 次。", flush=True)
+        print("复用 Codex 已有登录；请求和日志保存到 llm_requests；开启不代表立即调用。", flush=True)
+        print(f"Codex 直接使用 HTTPS；单次最多等待 {checked.llm_timeout:g} 秒，"
+              f"保留 {checked.llm_reserve_seconds:g} 秒给后续数值处理。", flush=True)
     print("指标说明：UB 是通过全天物理校验的可行方案成本；LB 是认证下界；"
           "认证间隙 = (UB - LB) / max(1, |UB|)。", flush=True)
     print("块内上下界用于分块搜索，不等于全天原问题的上下界。", flush=True)
@@ -84,17 +97,19 @@ def main():
     started = perf_counter()
     result = run_suc(options)
     save(output / "result.json", asdict(result))
-    summary = dict(scope="EXPLORATORY_NO_INDEPENDENT_AUDIT", case=CASE, **dimensions,
+    summary = dict(scope="EXPLORATORY_NO_INDEPENDENT_AUDIT", **dimensions,
                    seed=SEED, status=result.status, message=result.message,
                    upper=result.objective, lower=result.lower_bound,
-                   gap_percent=100 * result.relative_gap, validation=result.validation,
+                   gap_percent=100 * result.relative_gap, reference_gap_percent=None,
+                   validation=result.validation,
                    solver_elapsed_seconds=result.elapsed_seconds,
                    wall_to_result_saved_seconds=perf_counter() - started,
                    sa_calls=result.diagnostics.get("sa_calls", 0), llm_calls=result.llm_calls,
                    note="入门实验：无增量检查点和独立审计；保存与完整问题参考求解在主算法预算之外。")
     save(output / "summary.json", summary)
     status_text = {"CONVERGED": "已达到认证间隙目标", "TIME_LIMIT": "达到时间上限",
-                   "MAX_ITERATIONS": "达到迭代上限"}.get(result.status, "求解未正常完成")
+                   "MAX_ITERATIONS": "达到迭代上限",
+                   "PAUSED_LLM_FAILURE": "连续两次 LLM 调用失败，已停止主算法"}.get(result.status, "求解未正常完成")
     print(f"\n主算法状态：{status_text}（{result.status}）", flush=True)
     if result.message:
         print(f"状态详情：{result.message}", flush=True)
@@ -108,19 +123,23 @@ def main():
           f"SA 调用：{summary['sa_calls']} 次；LLM 调用：{result.llm_calls} 次", flush=True)
 
     print(f"\n[2/2] Gurobi 直接求解同一完整问题（保留全部整数变量、时段和场景），"
-          f"另用最多 {TIME_LIMIT_SECONDS} 秒。", flush=True)
+          f"另用最多 {REFERENCE_TIME_LIMIT_SECONDS} 秒。", flush=True)
     print("参考求解仅用于比较，其方案和下界不回填主算法；日志见 reference-gurobi.log。", flush=True)
     reference_started = perf_counter()
     try:
-        reference = solve_reference(data, scenarios, TIME_LIMIT_SECONDS, output / "reference-gurobi.log")
+        reference = solve_reference(data, scenarios, REFERENCE_TIME_LIMIT_SECONDS, output / "reference-gurobi.log")
     except Exception as error:
         reference = dict(status="REFERENCE_FAILED", message=f"{type(error).__name__}: {error}",
                          objective=None, lower=None, gap_percent=None, validation=None,
                          elapsed_seconds=perf_counter() - reference_started)
-    reference["time_limit_seconds"] = TIME_LIMIT_SECONDS
+    reference["time_limit_seconds"] = REFERENCE_TIME_LIMIT_SECONDS
     save(output / "reference.json", reference)
     summary["reference"] = {key: value for key, value in reference.items()
                             if key not in ("u", "v", "w", "scenarios")}
+    if (result.validation is not None and reference["validation"] is not None
+            and reference["objective"] != 0.):
+        summary["reference_gap_percent"] = (100 * (result.objective - reference["objective"])
+                                            / reference["objective"])
     save(output / "summary.json", summary)
     print(f"结果已保存：{output}；完整参考方案见 reference.json。", flush=True)
     print(f"参考求解状态：{reference['status']}；耗时：{reference['elapsed_seconds']:.2f} 秒", flush=True)
@@ -130,7 +149,12 @@ def main():
         print(f"Gurobi 完整问题参考成本：{reference['objective']:.6f}（{quality}）", flush=True)
     else:
         print(f"Gurobi 完整问题参考成本：未获得通过校验的参考方案。{reference.get('message', '')}", flush=True)
-    return int(result.status.endswith("FAILED") or result.validation is None
+    if summary["reference_gap_percent"] is not None:
+        print(f"主算法 UB 相对 Gurobi 参考成本的差距：{summary['reference_gap_percent']:.6f}%"
+              "（(UB - 参考成本) / 参考成本 × 100%）", flush=True)
+    else:
+        print("主算法 UB 相对 Gurobi 参考成本的差距：无法计算（缺少通过校验的可行成本，或参考成本为零）。", flush=True)
+    return int(result.status.endswith("FAILED") or result.status == "PAUSED_LLM_FAILURE" or result.validation is None
                or reference["validation"] is None)
 
 

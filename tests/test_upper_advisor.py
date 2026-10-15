@@ -133,6 +133,63 @@ def test_disabled_llm_never_creates_a_request(scheduled):
     assert not requests and whole.result.llm_calls == 0
 
 
+def test_request_honors_long_timeout_and_preserves_validation_budget(scheduled, monkeypatch):
+    whole, requests = scheduled
+    whole.o.llm_timeout = 1200.
+    whole.o.llm_reserve_seconds = 60.
+    whole.deadline = perf_counter()+1600.
+    budgets = []
+
+    def launch(*args):
+        budgets.append(args[-1])
+        return NS(poll=lambda: ([], dict(status='OK', proposals=[], seconds=0.)))
+
+    monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', launch)
+    whole.advice.begin()
+    whole.advice.start_request()
+    assert budgets == [1200.]
+    whole.advice.poll([])
+    whole.deadline = perf_counter()+100.
+    whole.advice.start_request()
+    assert 39. < budgets[-1] <= 40.
+    whole.advice.poll([])
+    whole.deadline = perf_counter()+59.
+    whole.advice.start_request()
+    assert len(budgets) == 2 and whole.result.llm_calls == 2
+    whole.advice.run_batch([])
+    assert whole.diagnostics['llm_batches'][-1]['status'] == 'VALIDATION_RESERVE'
+
+
+def test_two_failed_calls_finalize_paused_batch(scheduled, monkeypatch):
+    whole, requests = scheduled
+
+    def launch(*args):
+        return NS(poll=lambda: ([], dict(status='FAILED', proposals=[], seconds=0.)))
+
+    monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', launch)
+    whole.advice.begin()
+    with pytest.raises(upper_advisor.LLMCallFailures):
+        whole.advice.run_batch([])
+    batch = whole.diagnostics['llm_batches'][-1]
+    assert batch['status'] == 'PAUSED_LLM_FAILURE'
+    assert batch['ended_seconds'] >= batch['started_seconds']
+    assert whole.advice.state['consecutive_failures'] == whole.result.llm_calls == 2
+    assert whole.advice.worker is None
+    saved = deepcopy(whole.diagnostics)
+    whole.advice.restore(saved)
+    monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', lambda *a:
+        NS(poll=lambda: ([], dict(status='OK', proposals=[], seconds=0.))))
+    whole.advice.run_batch([])
+    assert whole.result.llm_calls == 3 and whole.advice.state['consecutive_failures'] == 0
+    assert whole.advice.state['phase'] == 'sa' and whole.advice.state['batch'] is None
+
+
+@pytest.mark.parametrize('reserve', [-1., float('nan'), True])
+def test_invalid_llm_reserve(tmp_path, reserve):
+    with pytest.raises(ValueError, match='llm_reserve_seconds'):
+        load_options(dict(llm_reserve_seconds=reserve), tmp_path/'absent')
+
+
 def test_sa_scope_caps_and_charges_dispatch_work(tiny, options, monkeypatch):
     whole = whole_day(tiny, options)
     options.sa_budget_seconds = 2.

@@ -21,7 +21,7 @@ class UpperAdvisor:
         whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[])
 
     def available(self):
-        return (self.o.llm_enabled and self.whole.remaining() > 0
+        return (self.o.llm_enabled and self.whole.remaining() > self.o.llm_reserve_seconds
                 and (self.o.llm_max_calls is None or self.result.llm_calls < self.o.llm_max_calls))
 
     def improved(self, upper):
@@ -53,6 +53,9 @@ class UpperAdvisor:
             status="RUNNING", started_seconds=perf_counter()-self.whole.started)
         self.state.update(phase="llm", batch=batch)
         self.whole.diagnostics["llm_batches"].append(batch)
+        if self.o.verbose:
+            print(f"[LLM 触发] 连续 {batch['trigger_stalled']['upper']} 个完整 SA 轮次改善不足，"
+                  f"开始第 {batch['batch_id']} 批上界建议。", flush=True)
 
     def start_request(self):
         batch = self.state["batch"]
@@ -62,7 +65,7 @@ class UpperAdvisor:
         context, bases, self.baseline = self.whole.upper_context()
         body = llm.request_body(self.whole.d, self.whole.scenarios, self.result,
                                 self.o, context, bases, iteration)
-        if self.whole.remaining() <= 0:
+        if self.whole.remaining() <= self.o.llm_reserve_seconds:
             return
         batch["counts"]["upper"] += 1
         self.result.llm_calls = iteration
@@ -81,14 +84,17 @@ class UpperAdvisor:
             self.whole.diagnostics["llm_calls"].append(self.pending)
         try:
             self.worker = advisor_request.AdvisorRequest(self.whole.d, self.o, body, iteration,
-                min(600., self.o.llm_timeout, self.whole.remaining()))
+                min(self.o.llm_timeout, self.whole.remaining()-self.o.llm_reserve_seconds))
         except Exception as error:
             self.pending.update(status="FAILED", message=type(error).__name__)
             self.record_failure()
         self.whole.emit("llm_request")
         if self.o.verbose:
-            print(f"advice channel=upper batch={batch['batch_id']} call={iteration} "
-                  f"batch_call={batch['counts']['upper']} status={self.pending['status']}", flush=True)
+            transport = ('Codex 独立任务' if self.o.llm_codex_command else
+                         '手动文件交换' if self.o.llm_agent_directory else 'HTTP')
+            print(f"[LLM 请求] 方式={transport} 模型={self.o.llm_model} 推理=max "
+                  f"批次={batch['batch_id']} 调用次数={iteration} "
+                  f"本批次数={batch['counts']['upper']} 状态={self.pending['status']}", flush=True)
 
     def poll(self, searches):
         if self.worker is None:
@@ -99,6 +105,10 @@ class UpperAdvisor:
         self.worker = None
         proposals, info = reply
         self.pending.update(info, consumed_seconds=perf_counter()-self.whole.started)
+        if self.o.verbose:
+            print(f"[LLM 回复] 调用次数={self.result.llm_calls} 状态={info['status']} "
+                  f"格式有效候选={len(proposals)} 耗时={info.get('background_seconds', 0.):.2f}秒 "
+                  f"日志={info.get('request_directory', '见结果回执')}", flush=True)
         self.whole.diagnostics["llm_background_seconds"] += info.get("background_seconds", info.get("seconds", 0.))
         if self.whole.remaining() <= 0:
             self.pending.update(status="TIME_LIMIT", accepted=0)
@@ -119,12 +129,17 @@ class UpperAdvisor:
         self.state['consecutive_failures'] = self.state['consecutive_failures']+1 if failed else 0
         self.whole.emit('llm_call_status')
         if self.state['consecutive_failures'] >= 2:
+            if self.state['batch'] is not None:
+                self.state['batch'].update(status='PAUSED_LLM_FAILURE', upper_after=self.result.objective,
+                    lower_after=self.result.lower_bound, sa_calls_at_end=self.whole.diagnostics['sa_calls'],
+                    ended_seconds=perf_counter()-self.whole.started)
             raise LLMCallFailures('Two consecutive upper subagent calls failed')
 
     def run_batch(self, searches):
         batch = self.state["batch"]
         if batch is None:
             return
+        batch['status'] = 'RUNNING'
         reason = "RETURN_TO_SA"
         while self.whole.remaining() > 0:
             if self.cert.converged():
@@ -137,7 +152,8 @@ class UpperAdvisor:
                 self.cert.step()
                 continue
             if not self.available():
-                reason = "CALL_LIMIT"
+                reason = ('VALIDATION_RESERVE' if self.whole.remaining() <= self.o.llm_reserve_seconds
+                          else 'CALL_LIMIT')
                 break
             if self.improved(batch["upper_before"]):
                 batch["done"]["upper"] = True

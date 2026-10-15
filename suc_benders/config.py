@@ -45,7 +45,9 @@ class Options:
     llm_api_key: str = field(default="", repr=False)
     llm_model: str = ""
     llm_agent_directory: str = ""
+    llm_codex_command: str = ""
     llm_timeout: float = 600
+    llm_reserve_seconds: float = 0.
     llm_patience: int = 3
     llm_max_calls: int | None = 3
 
@@ -75,9 +77,9 @@ def load_options(overrides=None, config_path=None):
             continue
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
-    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):
+    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance"):
         v = getattr(o, name)
-        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name != "tolerance"):
+        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name not in ("tolerance", "llm_reserve_seconds")):
             raise ValueError(f"Invalid numeric option: {name}")
     if not 0 < o.sa_cooling < 1 or not o.sa_cutoff < o.sa_temperature:
         raise ValueError("Require 0 < sa_cooling < 1 and sa_cutoff < sa_temperature")
@@ -92,9 +94,13 @@ def load_options(overrides=None, config_path=None):
             raise ValueError('SA budget requires a nonnegative finite value')
     if not o.sa_enabled and o.llm_enabled:
         raise ValueError("Disabling SA requires LLM disabled")
-    for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key", "llm_agent_directory"):
+    for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key", "llm_agent_directory", "llm_codex_command"):
         if not isinstance(getattr(o, name), str):
             raise ValueError(f"{name} must be a string")
-    if o.llm_enabled and (not o.llm_model or (not o.llm_agent_directory and not all((o.llm_url, o.llm_api_key)))):
+    if o.llm_codex_command and not o.llm_agent_directory:
+        raise ValueError("Codex tasks require llm_agent_directory for request evidence")
+    if o.llm_enabled and not o.llm_model:
+        raise ValueError("Set llm_model before enabling LLM")
+    if o.llm_enabled and not o.llm_agent_directory and not all((o.llm_url, o.llm_api_key)):
         raise ValueError("Fill LLM URL, model and API key before enabling LLM")
     return o

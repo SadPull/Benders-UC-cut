@@ -23,9 +23,13 @@ v0.28.0 的 **0.031458%** 是继承历史割池与方案的冻结状态快筛，
 
 ## 安装与运行
 
-在 VS Code 中可打开 [run_experiment.py](run_experiment.py)，修改顶部的算例、种子、秒预算和目标 gap 百分比，保存后直接点击“运行 Python 文件”，无需命令行参数。默认关闭 LLM、使用强化下界，命令行以中文说明阶段、分块进度与指标含义，并将每次入门实验的参数、完整结果和摘要保存到新的 `results/manual-*` 目录；该入口不包含增量检查点、独立审计或子代理派发。
+在 VS Code 中可直接运行 [run_experiment.py](run_experiment.py)。入口固定读取项目下的 `data/units.json`（机组、负荷等参数）和 `data/stochastic.json`（场景、概率、备用）；切换算例只需修改或替换这两份 JSON，无需在启动脚本里填写算例名。机组数、时段数和场景数按 JSON 内容读取，启动时打印实际输入路径与规模。种子、秒预算和目标 gap 百分比仍在脚本顶部设置，保存后点击“运行 Python 文件”，无需命令行参数。该入口默认 `LLM_ENABLED=True`、`LLM_MODEL="gpt-6-astra"`，在 SA 停滞条件满足时自动启动 Codex 独立任务（max 推理），无需另开调度器。设置 `LLM_ENABLED=False` 可关闭；开启不代表立即调用。命令行以中文说明阶段、分块进度与指标含义，每次实验的参数、完整结果和摘要保存到新的 `results/manual-seed{种子}-{时间}-{随机标识}` 目录，输入路径记录在 `options.json`，`summary.json` 不再包含 `case` 字段；该入口不包含增量检查点或独立审计。
 
-主算法结束后，入口会使用 Gurobi 单独求解同一完整整数问题，并在最后打印通过物理与成本校验的参考方案成本；未证明最优时会明确标注。完整参考方案（启停、各场景出力和备用）保存在 `reference.json`，状态、成本、参考求解自身的最优间隙和耗时同时写入 `summary.json`，日志见 `reference-gurobi.log`。主算法与参考求解各使用一次 `TIME_LIMIT_SECONDS` 预算（默认各 120 秒，另有建模与保存开销）；参考结果不回填主算法上下界。
+一键入口默认 `LLM_TIMEOUT_SECONDS=1200`、`LLM_RESERVE_SECONDS=60`：单次请求最多等待 1200 秒，同时从剩余主算法预算中预留 60 秒给后续调度、校验与数值搜索；剩余时间不足预留量时不再发起请求。实际请求时限取配置值与“剩余时间减预留量”的较小值，没有额外的 600 秒硬上限。
+
+主算法结束后，入口会使用 Gurobi 单独求解同一完整整数问题，并在最后打印通过物理与成本校验的参考方案成本；未证明最优时会明确标注。完整参考方案（启停、各场景出力和备用）保存在 `reference.json`，状态、成本、参考求解自身的最优间隙和耗时同时写入 `summary.json`，日志见 `reference-gurobi.log`。主算法使用 `TIME_LIMIT_SECONDS`（默认 1800 秒，包含 Codex 启动、等待与回复处理），参考求解独立使用 `REFERENCE_TIME_LIMIT_SECONDS`（默认 120 秒，另有建模与保存开销）；参考结果不回填主算法上下界。
+
+默认 LLM 方式需要 PATH 中可用的 Codex CLI 及已有登录，可先运行 `codex --version`、`codex login status` 检查；不需要填写本项目的 HTTP API 密钥。`CHECK_ONLY=True` 只检查参数与输入，不启动 Codex、不检查登录或创建结果目录。
 
 需要 Windows 64 位、Python 3.10、有效 Gurobi 许可证和 Kaiwu 授权。使用独立虚拟环境及提供的 SDK：
 
@@ -146,13 +150,23 @@ print(proof.lower)  # 认证下界；predicted_objective 不是可行上界
 
 ## 可选 LLM
 
-在 `config.local.json` 的 `llm` 中填写完整 Responses `url`、`model`、`api_key`，将 `enabled` 改为 `true`。默认关闭，`timeout=600`、`patience=3`、`max_calls=3`；对应 `llm_*` 运行参数可覆盖本地设置。`max_calls=null`（Python 中为 `llm_max_calls=None`）取消全局请求次数上限，仍受总时间预算和停止规则限制；`0` 表示不请求。
+核心接口默认关闭 LLM；一键入口会显式开启。核心接口可设置 `llm_enabled=True`、`llm_model`、`llm_codex_command="codex"`（也可填写可执行文件完整路径）和 `llm_agent_directory` 来自动调用 Codex。命令非空时优先使用此后端，复用 Codex 已有登录、模型提供方和代理设置，不修改全局配置；每次请求启动独立新任务，禁用再次派生代理、使用只读沙箱及无需交互审批的配置。它与 Codex 原生父子代理关系分别记录，回执中的传输名为 `codex_exec`。
 
-每个实际采样的完整 SA 轮结束后，根据全天最好成本统计停滞。连续 `patience` 轮降本不足 0.05% 时触发一批上界建议，每批最多三次请求，每次至多四个全天二进制 `u` 矩阵。某批建议使累计降本达到 0.05% 时提前结束；每次请求前重新生成上下文和反馈。未完成轮、没有采样的轮和纯认证阶段不触发新批次。失败也计入调用额度；连续两次失败暂停，成功清零失败计数。
+实验中的 Codex 任务通过单次命令覆盖禁用 WebSocket，直接使用 HTTPS，避免先反复超时再回退。自定义提供方保留原有地址和认证设置；内置 OpenAI 提供方使用仅限本次调用的 HTTPS 配置。用户全局配置不变。
 
-HTTP 使用完整 Responses URL，非流式发送 `stream=false`、`store=false`、`reasoning={"effort":"max"}`，不自动重试。也可通过 `llm_agent_directory` 使用文件交换；外部调度器使用 `python -m suc_benders.agent_bridge` 查询请求、登记派发和完成回执。文件交换检查请求和回复 SHA256、代理身份、矩阵形状及完成时间。两种传输共用严格 JSON／二进制候选解析；凭据不写入回执。
+为保证复用 CLI 已有登录，启动子进程时仅移除其环境中的 `CODEX_API_KEY` 临时覆盖值，避免父代理的密钥覆盖已保存认证；父进程环境和用户全局配置均保持不变。
 
-候选经过修复、去重、全天连续调度和独立物理校验后才更新上界；投影到各块时重新调度生成局部割。LLM 批次期间暂停新的 SA，数值认证继续。每次请求至多 600 秒且受总预算约束；迟到回复不评估。
+一键入口将调用证据保存在本次结果目录的 `llm_requests` 下，每次请求独占一个目录：`request.json` 为原始请求，`prompt.txt` 为实际 UTF-8 提示，`schema.json` 为候选结构，`command.json` 为启动参数，`events.jsonl`／`stderr.log` 为 CLI 日志，`reply.json` 为最终回复，`receipt.json` 记录哈希、退出码、耗时及 CLI 提供的会话 ID。超时或取消时仍从已生成的事件中提取会话 ID 和最近错误，错误中的密钥会脱敏。提示从标准输入传入，回复经现有严格解析与数值校验；缺失、无效、非零退出或超时不重新启动任务。取消和退出会回收本次拥有的 CLI 进程树。
+
+上述“不重试”指实验程序不重新启动失败任务；Codex CLI 内部的连接重试沿用用户已有配置，仍受本次请求的总截止时间约束。
+
+使用 HTTP 时，在 `config.local.json` 的 `llm` 中填写完整 Responses `url`、`model`、`api_key`，将 `enabled` 改为 `true`，并保持 `codex_command` 与 `agent_directory` 为空。核心接口默认 `timeout=600`、`reserve_seconds=0`、`patience=3`、`max_calls=3`；一键入口显式覆盖前两项为 1200 秒和 60 秒。对应 `llm_*` 运行参数可覆盖本地设置。`max_calls=null`（Python 中为 `llm_max_calls=None`）取消全局请求次数上限，仍受总时间预算和停止规则限制；`0` 表示不请求。
+
+每个实际采样的完整 SA 轮结束后，根据全天最好成本统计停滞。连续 `patience` 轮降本不足 0.05% 时触发一批上界建议，每批最多三次请求，每次至多四个全天二进制 `u` 矩阵。某批建议使累计降本达到 0.05% 时提前结束；每次请求前重新生成上下文和反馈。未完成轮、没有采样的轮和纯认证阶段不触发新批次。失败也计入调用额度；连续两次失败暂停，批次状态明确记为 `PAUSED_LLM_FAILURE`，成功清零失败计数。只有显式恢复才继续该批次，已花费调用次数和预算不会重置。
+
+HTTP 使用完整 Responses URL，非流式发送 `stream=false`、`store=false`、`reasoning={"effort":"max"}`，不自动重试。也可保持 `llm_codex_command` 为空，通过 `llm_agent_directory` 使用手动文件交换；外部调度器使用 `python -m suc_benders.agent_bridge` 查询请求、登记派发和完成回执。文件交换检查请求和回复 SHA256、代理身份、矩阵形状及完成时间。各传输共用严格 JSON／二进制候选解析；凭据不写入回执。
+
+候选经过修复、去重、全天连续调度和独立物理校验后才更新上界；投影到各块时重新调度生成局部割。LLM 批次期间暂停新的 SA，数值认证继续。每次请求受 `llm_timeout`、剩余总预算和 `llm_reserve_seconds` 共同约束；迟到回复不评估。
 
 ## 接口与恢复
 
