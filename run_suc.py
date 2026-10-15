@@ -59,7 +59,7 @@ def main():
     if output is not None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(_serializable(asdict(result)), ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    return 1 if result.status.endswith("FAILED") or result.validation is None else 0
+    return 1 if result.status.endswith("FAILED") or result.status == 'PAUSED_LLM_FAILURE' or result.validation is None else 0
 
 
 if __name__ == "__main__":

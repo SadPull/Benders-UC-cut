@@ -64,6 +64,51 @@ def test_subagent_configuration_does_not_require_http_credentials(tmp_path):
     assert not options.llm_api_key and not options.llm_url
 
 
+def test_atomic_save_retries_windows_reader_lock(tmp_path,monkeypatch):
+    import os
+    original = os.replace
+    calls = []
+    def replace(source,target):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PermissionError('Windows reader holds destination')
+        original(source,target)
+    monkeypatch.setattr('suc_benders.subagent_advisor.os.replace',replace)
+    target = tmp_path/'state.json'
+    save(target,dict(status='preserved'))
+    assert json.loads(target.read_text()) == dict(status='preserved')
+    assert len(calls) == 2
+
+
+def test_permanent_reader_lock_preserves_previous_checkpoint(tmp_path,monkeypatch):
+    target = tmp_path/'state.json'
+    target.write_text('{"status":"previous"}')
+    def locked(*args):
+        raise PermissionError('Still locked')
+    monkeypatch.setattr('suc_benders.subagent_advisor.os.replace',locked)
+    monkeypatch.setattr('suc_benders.subagent_advisor.sleep',lambda seconds:None)
+    with pytest.raises(PermissionError):
+        save(target,dict(status='new'))
+    assert json.loads(target.read_text()) == dict(status='previous')
+    assert json.loads(target.with_suffix('.json.tmp').read_text()) == dict(status='new')
+
+
+@pytest.mark.parametrize('rows', [
+    [dict(u=[[1, 1]])],
+    [dict(u=[[1, .5, 1]])],
+    [dict(u=[[1, 1, 1]])]*5,
+])
+def test_strengthened_transport_rejects_malformed_candidates(tmp_path, tiny, options, rows):
+    options.bound_mode = 'strengthened'
+    advisor = task(tmp_path, tiny, options)
+    folder = advisor.agent.directory
+    dispatch(folder/'request.json', 'agent', 'upper')
+    save(folder/'reply.json', dict(candidates=rows))
+    complete(folder/'request.json', 'agent')
+    candidates, receipt = advisor.poll()
+    assert not candidates and receipt['status'] == 'FAILED'
+
+
 def test_cancelled_request_cannot_consume_a_later_reply(tmp_path, tiny, options):
     advisor = task(tmp_path, tiny, options)
     folder = advisor.agent.directory

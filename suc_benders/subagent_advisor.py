@@ -5,8 +5,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from time import perf_counter, time
+from time import perf_counter, sleep, time
 from uuid import uuid4
+
+import numpy as np
 
 from . import llm
 
@@ -17,7 +19,15 @@ def save(path, value):
     with temporary.open('w', encoding='utf-8') as stream:
         json.dump(value, stream, ensure_ascii=False, allow_nan=False)
         stream.flush(); os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    for attempt in range(20):
+        try:
+            os.replace(temporary, path)
+            break
+        except PermissionError:
+            if attempt == 19:
+                raise
+            # Windows readers can briefly hold a handle without FILE_SHARE_DELETE.
+            sleep(.02)
 
 
 # 管理一个独立请求目录及其 request/dispatch/reply/completion/closed 文件生命周期。
@@ -27,6 +37,7 @@ class SubagentAdvisor:
         self.started, self.created = perf_counter(), time()
         self.deadline, self.deadline_epoch = self.started+seconds, self.created+seconds
         self.d, self.iteration = d, iteration
+        self.strict = o.bound_mode == 'strengthened'
         self.closed = False
         self.directory = Path(o.llm_agent_directory).resolve()/f'{iteration:02d}-{uuid4().hex}'
         self.directory.mkdir(parents=True)
@@ -56,7 +67,13 @@ class SubagentAdvisor:
                     separators=(',', ':')).encode()).hexdigest()
                 text = (self.directory/'reply.json').read_text(encoding='utf-8')
                 digest = hashlib.sha256(text.encode()).hexdigest()
+                if self.strict:
+                    parsed = json.loads(text)
+                    rows = parsed.get('candidates') if isinstance(parsed, dict) else None
+                    if not isinstance(rows, list) or len(rows) > 4:
+                        raise ValueError('Invalid candidate list')
                 if (request_hash != self.receipt['request_sha256']
+                        or saved['shape'] != [self.d.n_units, self.d.horizon]
                         or done['request_id'] != self.directory.name or done['request_sha256'] != self.receipt['request_sha256']
                         or done['agent_id'] != dispatch['agent_id'] or done['reply_sha256'] != digest
                         or dispatch['model'] != self.receipt['request']['model']
@@ -65,15 +82,23 @@ class SubagentAdvisor:
                 # Adapt the generated text to the existing parser; this is not an HTTP response.
                 raw = dict(status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
                 candidates, info = llm.parse_response(raw, self.d, self.iteration)
+                if self.strict and (len(info.get('proposals', [])) > 4
+                        or any(p.get('outcome') == 'invalid_matrix' for p in info.get('proposals', []))
+                        or any(not np.isin(u, [0, 1]).all() for u, _ in candidates)):
+                    candidates = []
+                    info.update(status='FAILED', message='InvalidCandidateMatrix', accepted=0)
                 info.update(agent_id=done['agent_id'], response_id='codex-subagent:'+done['agent_id'],
                     response_model=dispatch['model'], reasoning_effort=dispatch['reasoning_effort'],
                     response_output=[text], reply_sha256=digest,
                     seconds=done['completed_epoch_seconds']-self.created)
+                if done['completed_epoch_seconds'] < self.created:
+                    raise ValueError('Invalid subagent completion time')
                 if done['completed_epoch_seconds'] > self.deadline_epoch:
                     candidates = []
                     info.update(status='TIME_LIMIT', accepted=0, message='LateSubagentReply')
             except (OSError, KeyError, ValueError, TypeError) as error:
-                info['message'] = type(error).__name__
+                candidates = []
+                info.update(status='FAILED', message=type(error).__name__, accepted=0)
             seconds = info.get('seconds', now-self.started)
             info.update(background_seconds=seconds, finished_at=self.started+seconds, **self.receipt)
             self.close()

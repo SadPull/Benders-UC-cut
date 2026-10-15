@@ -16,6 +16,8 @@ from .benders import coordinate, discrete_feasible, dispatch, master
 from .certification import Certification
 from .context import CandidateEvaluation, LLMContextInput, build_llm_context
 from .dual_advisor import DualAdvisor
+from .dual_advisor import LLMCallFailures
+from .strengthened_certification import StrengthenedCertification
 from .model import fingerprint, model, partition
 from .optimization import continuous_only, optimize
 from .paper import context_id, process_raw_batch, record_bound, record_cut, record_state, sampling_evidence
@@ -83,7 +85,9 @@ class WholeDay:
                                     "initialization", "relaxation", "qubo", "annealing", "repair",
                                     "local_dispatch", "subproblems", "validation", "context", "llm", "coordination")})
         self.timings = self.diagnostics["timings"]
-        self.certifier = Certification(self) if o.bound_mode == "integer_benders" else None
+        self.progress = progress
+        self.certifier = (StrengthenedCertification(self) if o.bound_mode == 'strengthened' else
+                          Certification(self) if o.bound_mode == "integer_benders" else None)
         self.diagnostics["bound_mode"] = o.bound_mode
         self.diagnostics["model_fingerprint"] = fingerprint(m)
         self.resume_cursor = dict(outer=1, round=1)
@@ -316,6 +320,11 @@ class WholeDay:
         self.result.llm_history, self.result.llm_calls = saved["llm_history"], saved["llm_calls"]
         for name in ("evaluations", "proposals", "bound_probes"):
             self.diagnostics[name] = diagnostic[name]
+        if self.o.bound_mode == 'strengthened':
+            for name in ('sampling', 'rounds', 'iterations', 'blocks', 'local_evaluations'):
+                self.diagnostics[name] = diagnostic.get(name, [])
+            self.result.history = saved.get('history', [])
+            self.result.outer_history = saved.get('outer_history', [])
         self.diagnostics["llm_calls"] = self.result.llm_history
         self.diagnostics["llm_background_seconds"] = sum(row.get("background_seconds", 0.) for row in self.result.llm_history)
         self.resume_cursor = saved["resume_cursor"]
@@ -581,6 +590,11 @@ class BlockSearch:
             sampling.update(outer=outer, block=index, inner=inner, round=inner, seed=sample_seed,
                             raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
                             unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
+            if o.bound_mode == 'strengthened':
+                sampling.update(raw_binary_candidates=[x.tolist() for x in proposals],
+                                baseline_u=baseline_u.tolist(), free_indices=q.free.tolist(),
+                                fixed_indices=np.flatnonzero(~np.isnan(q.fixed)).tolist(),
+                                fixed_values=q.fixed[~np.isnan(q.fixed)].tolist())
             if o.paper_sa:
                 sampling_evidence(self, m, q, sampling)
             whole.diagnostics["sampling"].append(sampling)
@@ -623,6 +637,8 @@ class BlockSearch:
 # 主流程：初始化/恢复 → 固定价格轮询所有块 → 轮末建议/认证 → 协调更新价格 → 整理结果。
 # 累计历史执行时间计入预算；保留阶段名定位失败，并在最终返回前独立复核全天方案。
 def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=None, started_at=None):
+    if o.bound_mode == 'strengthened' and initial_state is not None:
+        raise ValueError('Strengthened runs require cold initialization or their own resume state')
     if resume_state is not None and initial_state is not None:
         raise ValueError("Common initialization and resume are mutually exclusive")
     prior_state = resume_state if resume_state is not None else initial_state
@@ -633,7 +649,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
     if prior >= o.time_limit:
         raise ValueError("Common initialization exhausts the run budget")
     started = (perf_counter() if started_at is None else started_at)-prior; deadline = started + o.time_limit
-    if o.rts24_improvements or o.paper_sa:
+    if o.rts24_improvements or o.paper_sa or o.bound_mode == 'strengthened':
         deadline -= 5.
     result, whole = Result(), None
     searches = []
@@ -693,6 +709,8 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                 raise ValueError('Inherited evidence requires integer_benders')
             whole.certifier.inherit(initial_state['inherited_evidence'])
         whole.emit("initialization")
+        if o.bound_mode == 'strengthened':
+            whole.certifier.start()
         if (whole.certifier is not None and (initial_state is not None or not o.sa_enabled)
                 and whole.certifier.converged()):
             result.status = "CONVERGED"
@@ -727,6 +745,11 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                                         skipped_closed_blocks=[], started_seconds=perf_counter()-started)
                     whole.diagnostics["rounds"].append(round_record)
                     for j, search in enumerate(searches):
+                        if o.bound_mode == 'strengthened':
+                            whole.certifier.step()
+                            if whole.certifier.converged():
+                                result.status = 'CONVERGED'
+                                break
                         if o.rts24_improvements:
                             whole.advice.service(searches)
                         if remaining() <= 0:
@@ -758,6 +781,10 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                                       f"full={result.objective:.6f} LB={result.lower_bound:.6f}", flush=True)
                             if remaining() <= 0:
                                 raise TimeoutError
+                    if result.status == 'CONVERGED':
+                        round_record.update(ended_seconds=perf_counter()-started, stop_reason='CONVERGED')
+                        whole.emit('convergence')
+                        break
                     # 完整遍历才更新 SA 轮计数和轮末停滞窗口；改进模式的下界触发按认证周期另计。
                     round_record.update(complete=True, sa_completed_seconds=perf_counter()-started,
                                         incumbent_before=before, incumbent_after_sa=result.objective)
@@ -844,18 +871,25 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
             if remaining() <= 0:
                 raise TimeoutError
             result.status = "CONVERGED"
+    except LLMCallFailures as error:
+        result.status, result.message = 'PAUSED_LLM_FAILURE', str(error)
     except Exception as error:
         result.status = "TIME_LIMIT" if remaining() <= 0 or isinstance(error, TimeoutError) else f"{stage}_FAILED"
         result.message = f"{type(error).__name__}: {error}"
     finally:
         if whole is not None and whole.certifier is not None:
             whole.advice.close()
-            whole.certifier.close()
+            try:
+                whole.certifier.close()
+            except Exception as error:
+                whole.diagnostics['proof_shutdown_error'] = type(error).__name__
+                if result.status != 'PAUSED_LLM_FAILURE':
+                    result.status, result.message = 'CERTIFICATION_FAILED', str(error)
     for search in searches:
         search.summarize()
     if np.isfinite(result.objective):
         result.validation = validate(d, scenarios, result)
-        if o.bound_mode == "integer_benders" and result.lower_bound > result.objective + 1e-5:
+        if o.bound_mode in ("integer_benders", "strengthened") and result.lower_bound > result.objective + 1e-5:
             result.status, result.message = "CERTIFICATION_FAILED", "Lower bound exceeds validated cost"
             result.relative_gap = (result.objective - result.lower_bound) / max(1., abs(result.objective))
         else:

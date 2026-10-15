@@ -107,19 +107,21 @@ def add_perspectives(strengthened, physical, cuts):
     return _append(strengthened, A, np.zeros(len(cuts)))
 
 
-def separate(physical, strengthened, seconds, epsilon):
+def separate(physical, strengthened, seconds, epsilon, *, callback=None):
     """Refine continuous costs until closed or timed out; never produces a UB."""
     if not np.isfinite(seconds) or seconds <= 0 or not np.isfinite(epsilon) or epsilon <= 0:
         raise ValueError("Positive finite separation budget and tolerance required")
     started = perf_counter(); deadline = started+seconds
     result = NS(status="TIME_LIMIT", model=strengthened, lower=-np.inf, gap=np.inf,
-                iterations=0, added_cuts=0)
+                iterations=0, added_cuts=0, cuts=[])
     current = strengthened
+    current_cuts = []
     while deadline-perf_counter() > .1:
-        raw = optimize(current, deadline-perf_counter()-.1)
+        raw = optimize(current, deadline-perf_counter()-.1, **({"callback": callback} if callback else {}))
         if raw.status != "OPTIMAL" or not np.isfinite(raw.lower) or perf_counter() > deadline:
             break
         result.model, result.lower = current, float(raw.lower+current.constant)
+        result.cuts = current_cuts.copy()
         result.iterations += 1
         gap, cuts = perspective_batch(physical, current, raw.x, epsilon)
         result.gap = gap
@@ -129,18 +131,22 @@ def separate(physical, strengthened, seconds, epsilon):
             result.status = "SEPARATION_CLOSED"
             break
         current = add_perspectives(current, physical, cuts)
+        current_cuts.extend(cuts)
         result.added_cuts += len(cuts)
     result.elapsed_seconds = perf_counter()-started
     return result
 
 
-def certify(strengthened, seconds, *, warm_start=None, target_lower=None):
+def certify(strengthened, seconds, *, warm_start=None, target_lower=None, callback=None,
+            log_file=None, model_file=None):
     """One fixed-model MIPFocus=3 solve; expose ObjBound, not a feasible UB."""
     if not np.isfinite(seconds) or seconds <= 0:
         raise ValueError("Positive finite certification budget required")
     started = perf_counter()
+    extra = {key: value for key, value in dict(callback=callback, log_file=log_file,
+                                               model_file=model_file).items() if value is not None}
     raw = optimize(strengthened, seconds-min(3., seconds*.1), integral=True,
-                   warm_start=warm_start, mip_focus=3, target_lower=target_lower)
+                   warm_start=warm_start, mip_focus=3, target_lower=target_lower, **extra)
     elapsed = perf_counter()-started
     usable = (elapsed <= seconds and raw.status in ("OPTIMAL", "TIME_LIMIT", "INTERRUPTED", "USER_OBJ_LIMIT")
               and np.isfinite(raw.lower) and abs(raw.lower) < 1e100)

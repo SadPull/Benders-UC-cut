@@ -1,3 +1,21 @@
+# v0.29.0 冷启动实验归档与恢复
+
+[v0.29.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.29.0) 保存本轮全部现有结果、预检与失败批次，以及此前仅在本地的 v0.28.0 快筛证据。仓库为私有仓库，下载需要有权限的账户。各包 SHA256、文件数和范围见 [v0.29.0.json](v0.29.0.json)；完整发布附件及远端校验记录见 Release 的 `release-manifest.json`、`release-transfer.json` 和 `SHA256SUMS.txt`。
+
+| 附件 | 内容 |
+|---|---|
+| `source-before-cleanup-v0.29.0-part001.zip` | 清理前源码、实验控制器与专用测试、输入和原文档 |
+| `experiments-v0.29.0-partNNN.zip` | 全部现有 `results/`，含正式快照、恢复段、原始采样、请求回执、模型、割和独立审计 |
+| `historical-v0.28.0-v0.29.0-part001.zip` | 原 v0.28.0 外部归档，置于 `historical/v0.28.0/`，含原 ZIP 与核验记录 |
+| `core-source-v0.29.0.zip` | 本标签的精简核心源码 |
+| `experiment-report-v0.29.0.md`、JSON 和 PNG | 中文报告、机器可读结果及上下界曲线 |
+
+每包小于 1 GiB；内部 `_archive/<包名>-manifest.json` 保存逐文件 SHA256，独立解压时不会覆盖其他包的清单。所有包均逐文件回读核验；上传后重新下载核对整包 SHA256，完成后才迁出项目文件。完整本地副本位于 `C:/Users/12433/Desktop/LLM-benders-SUC-archive/v0.29.0`，本地授权配置和许可证不在附件中。
+
+恢复时先下载包及 `SHA256SUMS.txt`，用 `Get-FileHash -Algorithm SHA256` 核对，再解压到空的独立目录。需要重建本轮全貌时同时解压源码包与全部实验分包。主报告位于 `results/upper-validation-20261015-085155-a4fceb4c/report.md`；正式运行入口在该目录的 `snapshot/`，A 的恢复版本链、计时和偏差见 `recovery.json`、`audit-amendment.json` 与 `postflight/`。不要用当前发布源码替代正式冻结源码。
+
+本轮环境为 Windows、Python 3.10、Gurobi 13.0.1、Kaiwu 1.4.1；有效授权须自行准备。历史协议保留原绝对路径，跨机使用前须核对。新实验使用新结果目录并重新预检；不要自动续跑本轮已完成批次。A 数值通过但预算未通过，B 冷启动收敛至 0.043655%；归档和清理不改变该结论。
+
 # v0.28.0 下界强化核心与本地证据
 
 源码固定为 [v0.28.0 Git 标签](https://github.com/SadPull/LLM-benders-SUC/tree/v0.28.0)。本地归档位于 `C:/Users/12433/Desktop/LLM-benders-SUC-archive/v0.28.0`，ZIP 名称、SHA256、成绩和归因范围见本目录 `v0.28.0.json`。逐文件清单和回读校验保留在归档 `manifest.json`。

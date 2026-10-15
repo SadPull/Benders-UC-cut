@@ -29,7 +29,7 @@ def continuous_only(record):
 # 输入稀疏模型与秒预算，返回状态、原始点/目标、对偶价格、下界和可选 Farkas 证据。
 # 整数模式取 ObjBound；连续最优时按有界拉格朗日重新计算下界，不把候选 ObjVal 当作整数证明。
 def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=False,
-             warm_start=None, mip_focus=None, target_lower=None):
+             warm_start=None, mip_focus=None, target_lower=None, callback=None, model_file=None):
     record = _continuous_guard.get()
     if record is not None and integral:
         raise ValueError('Integer Gurobi optimization is forbidden in paper SA')
@@ -89,7 +89,12 @@ def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=F
                     raise ValueError('Integer variables reached the continuous-only Gurobi guard')
                 record(dict(call, event='start'))
             started = perf_counter()
-            g.optimize()
+            if model_file is not None:
+                g.write(str(model_file))
+            if callback is None:
+                g.optimize()
+            else:
+                g.optimize(callback)
             if record is not None:
                 record(dict(call, event='complete', status=int(g.Status), seconds=perf_counter()-started))
             statuses = {2: "OPTIMAL", 3: "INFEASIBLE", 4: "INF_OR_UNBD", 5: "UNBOUNDED",

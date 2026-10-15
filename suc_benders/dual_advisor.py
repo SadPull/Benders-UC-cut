@@ -8,6 +8,10 @@ from time import perf_counter, sleep
 from . import bound_advisor, llm
 
 
+class LLMCallFailures(RuntimeError):
+    """Two consecutive failed calls require an explicit user resume."""
+
+
 # 上下界 LLM 调度状态机；建议由数值求解器评估，模型不能直接修改认证费用或界。
 class DualAdvisor:
     # 初始化两侧停滞计数、批次记录和唯一工作进程；改进模式使用 version=2 的独立触发状态。
@@ -17,6 +21,8 @@ class DualAdvisor:
         self.state = dict(version=1, phase="sa", stalled=dict(upper=0, lower=0),
                           sa_rounds=0, batch_id=0, batch=None)
         whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[])
+        if self.o.bound_mode == 'strengthened':
+            self.state['consecutive_failures'] = 0
         if self.o.rts24_improvements:
             self.state.update(version=2, certification_cycles=0, last_served='upper')
 
@@ -40,7 +46,7 @@ class DualAdvisor:
         if self.whole.diagnostics["sa_calls"] <= sa_before:
             return
         self.state["sa_rounds"] += 1
-        for channel in (('upper',) if self.o.rts24_improvements else ("upper", "lower")):
+        for channel in (('upper',) if self.o.rts24_improvements or self.o.bound_mode == 'strengthened' else ("upper", "lower")):
             self.state["stalled"][channel] = (0 if self.improved(channel, upper, lower)
                                              else self.state["stalled"][channel]+1)
         self.whole.diagnostics["advisor_rounds"].append(dict(
@@ -52,7 +58,7 @@ class DualAdvisor:
         if self.o.rts24_improvements:
             self.service(searches)
             return
-        channels = [c for c in ("upper", "lower") if self.state["stalled"][c] >= self.o.llm_patience
+        channels = [c for c in (('upper',) if self.o.bound_mode == 'strengthened' else ("upper", "lower")) if self.state["stalled"][c] >= self.o.llm_patience
                     and (c == "upper" or self.cert.last_master is not None)]
         if channels:
             self.begin(channels, outer=outer, inner=inner)
@@ -116,6 +122,8 @@ class DualAdvisor:
     # 为所选通道刷新上下文、登记路由和回执，再发起一个限时后台请求。
     # 发出请求前即消耗全局与批次额度，因此传输失败也占一次；每侧每批最多三次。
     def start_request(self, channel):
+        if self.o.bound_mode == 'strengthened' and channel != 'upper':
+            raise ValueError('Strengthened certification accepts upper advice only')
         batch = self.state["batch"]
         if self.worker is not None or not self.available() or batch["counts"][channel] >= 3:
             return
@@ -149,6 +157,7 @@ class DualAdvisor:
                 min(600., self.o.llm_timeout, self.whole.remaining()))
         except Exception as error:
             self.pending.update(status="FAILED", message=type(error).__name__)
+            self.record_failure()
             if self.o.rts24_improvements:
                 self.state['last_served'] = channel
                 if batch['counts'][channel] >= 3:
@@ -177,6 +186,7 @@ class DualAdvisor:
         if self.whole.remaining() <= 0:
             self.pending.update(status="TIME_LIMIT", accepted=0)
             return True
+        self.record_failure()
         channel = self.pending["channel"]
         before_upper, before_lower = self.result.objective, self.result.lower_bound
         cuts_before = len(self.cert.cuts)
@@ -203,6 +213,15 @@ class DualAdvisor:
             print(f"advice channel={channel} status={info['status']} "
                   f"new_cuts={self.pending['new_global_cuts']} UB={self.result.objective:.6f}", flush=True)
         return True
+
+    def record_failure(self):
+        if self.o.bound_mode != 'strengthened':
+            return
+        failed = self.pending['status'] != 'OK'
+        self.state['consecutive_failures'] = self.state.get('consecutive_failures', 0)+1 if failed else 0
+        self.whole.emit('llm_call_status')
+        if self.state['consecutive_failures'] >= 2:
+            raise LLMCallFailures('Two consecutive upper subagent calls failed')
 
     # 运行常规上下界批次：等待 LLM 时继续整数认证，暂停新的 SA 采样，并按两侧改善提前结束。
     # 每次候选处理后下一请求重建上下文；批次结束或预算耗尽时关闭在途请求。

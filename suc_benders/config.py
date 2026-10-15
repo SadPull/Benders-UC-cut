@@ -80,7 +80,7 @@ def load_options(overrides=None, config_path=None):
             continue
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
-    if o.bound_mode not in ("relaxation", "integer_benders"):
+    if o.bound_mode not in ("relaxation", "integer_benders", "strengthened"):
         raise ValueError("Unknown bound_mode")
     if not isinstance(o.rts24_improvements, bool) or (o.rts24_improvements and o.bound_mode != "integer_benders"):
         raise ValueError("RTS24 improvements require integer_benders")
@@ -100,9 +100,9 @@ def load_options(overrides=None, config_path=None):
     if o.sa_budget_seconds is not None:
         v = o.sa_budget_seconds
         if (isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v)
-                or v < 0 or o.bound_mode != 'integer_benders'):
+                or v < 0 or o.bound_mode not in ('integer_benders', 'strengthened')):
             raise ValueError('SA budget requires a nonnegative finite value and integer_benders')
-    if not o.sa_enabled and (o.bound_mode != "integer_benders" or o.llm_enabled):
+    if not o.sa_enabled and (o.bound_mode not in ("integer_benders", "strengthened") or o.llm_enabled):
         raise ValueError("Disabling SA requires integer_benders with LLM disabled")
     for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key", "llm_agent_directory"):
         if not isinstance(getattr(o, name), str):
