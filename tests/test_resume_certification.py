@@ -1,145 +1,100 @@
+from copy import deepcopy
 from dataclasses import asdict
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
+from conftest import whole_day
 from run_suc import _serializable
-from suc_benders import certification, solver
-from test_certification import whole_day
+from suc_benders import solver
+from suc_benders.validation import pack
 
 
 def saved_state(tiny, options):
     whole = whole_day(tiny, options)
-    options.bound_slice_seconds = .2
-    try:
-        whole.certifier.step()
-        state = _serializable(asdict(whole.result))
-    finally:
-        whole.certifier.close()
+    u = whole.result.u.copy(); u[0] = 0
+    assert whole.accept(pack(whole.d, u), 'initial')
+    state = _serializable(asdict(whole.result))
     state.update(charged_elapsed_seconds=2., resume_cursor=dict(outer=1, round=2),
-                 resume=dict(source="test", block_state_rebuilt=True), llm_calls=3,
-                 llm_history=[dict(status="OK", background_seconds=.1) for _ in range(3)])
-    state["lower_bound"] = min(state["lower_bound"], 220.)
-    for row in state["certification_history"]:
-        row["lower"] = min(row["lower"], 220.)
-    state["diagnostics"].update(sa_calls=8, complete_rounds=1, coordination_count=0)
+                 resume=dict(source="test", block_state_rebuilt=True))
     return state
 
 
-def test_resume_rebuilds_blocks_and_preserves_global_cuts_and_llm_limit(tiny, options, monkeypatch):
-    state = saved_state(tiny, options)
-    d, scenarios = tiny()
-    options.llm_enabled = True
-    options.max_outer, options.max_inner = 1, 2
-    monkeypatch.setattr(solver, "anneal", lambda *args: ([], {"bits": 1}))
-    monkeypatch.setattr(certification.bound_advisor, "BoundAdvisor",
-                        lambda *a, **k: pytest.fail("Three existing LLM calls exhaust the request budget"))
-    sync = certification.Certification._sync
-    synchronized = []
-
-    def checked_sync(cert):
-        sync(cert)
-        cert.g.update()
-        synchronized.append((cert.synced, cert.hourly_synced, cert.g.NumConstrs))
-
-    monkeypatch.setattr(certification.Certification, "_sync", checked_sync)
-    result = solver.solve(d, scenarios, options, resume_state=state)
-    assert result.status == "CONVERGED", result.message
-    assert result.objective == pytest.approx(225.)
-    assert state["lower_bound"] <= result.lower_bound <= result.objective+1e-5
-    assert result.elapsed_seconds >= 2.
-    assert result.diagnostics["timings"]["prior_execution"] == 2.
-    assert result.llm_calls == 3 and len(result.llm_history) == 3
-    assert result.diagnostics["rounds"][0]["round"] == 2
-    assert result.diagnostics["complete_rounds"] == 2
-    for name in ("certificate_cuts", "hourly_certificate_cuts"):
-        old = [cut["cut_id"] for cut in state["diagnostics"][name]]
-        actual = [cut["cut_id"] for cut in result.diagnostics[name]]
-        assert actual[:len(old)] == old
-    assert synchronized and synchronized[0][2] > synchronized[0][0]+synchronized[0][1]
-    assert synchronized[0][1] >= len(state["diagnostics"]["hourly_certificate_cuts"])
-    assert len(result.certification_history) > len(state["certification_history"])
-    assert all("u" in row for row in result.diagnostics["evaluations"])
+def test_original_v029_checkpoint_resumes_without_resetting_budget(tiny, options, monkeypatch):
+    state = json.loads((Path(__file__).parent/'fixtures/v029-strengthened-checkpoint.json').read_text())
+    original = deepcopy(state)
+    options.sa_enabled = False
+    options.sa_budget_seconds = 0.
+    monkeypatch.setattr(solver, 'anneal', lambda *a: pytest.fail('No SA quota'))
+    result = solver.solve(*tiny(1), options, resume_state=state)
+    assert result.status == 'CONVERGED', result.message
+    assert result.elapsed_seconds >= 3.
+    assert result.diagnostics['timings']['prior_execution'] == 3.
+    assert result.lower_bound >= state['lower_bound']
+    assert result.diagnostics['advisor_state']['consecutive_failures'] == 1
+    assert result.validation['feasible'] and state == original
 
 
-@pytest.mark.parametrize("corruption", ["bound", "incumbent"])
+@pytest.mark.parametrize('corruption', ['bound', 'incumbent', 'cost', 'profile', 'cuts', 'inherited'])
 def test_resume_rejects_invalid_recovered_evidence(tiny, options, corruption):
     state = saved_state(tiny, options)
-    d, scenarios = tiny()
-    if corruption == "bound":
-        state["lower_bound"] = state["objective"]+1.
+    if corruption == 'bound':
+        state['lower_bound'] = state['objective']+1.
+    elif corruption == 'incumbent':
+        state['u'] = np.zeros((2, 3)).tolist()
+    elif corruption == 'cost':
+        state['objective'] += 1.
+    elif corruption == 'profile':
+        del state['diagnostics']['strengthened_proof']
+    elif corruption == 'cuts':
+        state['diagnostics']['certificate_cuts'] = [dict(alpha=1.)]
     else:
-        state["u"] = np.zeros((d.n_units, d.horizon)).tolist()
-    result = solver.solve(d, scenarios, options, resume_state=state)
-    assert result.status == "RESUME_FAILED"
+        state['diagnostics']['inherited_evidence'] = dict(lower_bound=1.)
+    result = solver.solve(*tiny(), options, resume_state=state)
+    assert result.status == 'RESUME_FAILED'
 
 
-@pytest.mark.parametrize("prior", [-1., float("nan"), 30., 31.])
+@pytest.mark.parametrize('prior', [-1., float('nan'), 30., 31.])
 def test_resume_cannot_reset_or_extend_exhausted_budget(tiny, options, prior):
-    d, scenarios = tiny()
-    with pytest.raises(ValueError, match="resume budget"):
-        solver.solve(d, scenarios, options, resume_state={"charged_elapsed_seconds": prior})
+    with pytest.raises(ValueError, match='resume budget'):
+        solver.solve(*tiny(), options, resume_state=dict(charged_elapsed_seconds=prior))
 
 
-@pytest.mark.parametrize("change", [None, "cold_cost", "cold_hours", "initial_history", "scenario", "missing"])
+@pytest.mark.parametrize('change', ['cold_cost', 'cold_hours', 'initial_history', 'scenario', 'missing'])
 def test_cold_resume_fingerprint(tiny, options, monkeypatch, change):
     def cold_tiny(n=2):
         d, scenarios = tiny(n)
         d.cold_startup_cost = np.full(n, 11.)
         d.cold_start_hours = np.ones(n)
         return d, scenarios
-
     state = saved_state(cold_tiny, options)
     d, scenarios = cold_tiny()
-    options.max_outer, options.max_inner = 1, 2
-    monkeypatch.setattr(solver, "anneal", lambda *args: ([], {"bits": 1}))
-    if change == "cold_cost":
-        d.cold_startup_cost += 1
-    elif change == "cold_hours":
-        d.cold_start_hours += 1
-    elif change == "initial_history":
-        d.initial_duration += 1
-    elif change == "scenario":
-        scenarios[0].name = "renamed"
-    elif change == "missing":
-        del state["diagnostics"]["model_fingerprint"]
-    if change:
-        # All of these leave the saved incumbent's hot startup fees unchanged.
-        # Reject before any old cut can enter the new master.
-        monkeypatch.setattr(certification.Certification, "restore_cuts",
-                            lambda *args: pytest.fail("Mismatched cuts must not be loaded"))
+    if change == 'cold_cost': d.cold_startup_cost += 1
+    elif change == 'cold_hours': d.cold_start_hours += 1
+    elif change == 'initial_history': d.initial_duration += 1
+    elif change == 'scenario': scenarios[0].name = 'renamed'
+    else: del state['diagnostics']['model_fingerprint']
+    monkeypatch.setattr(solver.StrengthenedCertification, 'restore',
+                        lambda *a: pytest.fail('Mismatched proof must not be loaded'))
     result = solver.solve(d, scenarios, options, resume_state=state)
-    if change:
-        assert result.status == "RESUME_FAILED" and "fingerprint" in result.message
-    else:
-        assert result.status == "CONVERGED", result.message
-        assert result.validation["feasible"] and result.lower_bound <= result.objective+1e-5
-        assert result.diagnostics["model_fingerprint"] == state["diagnostics"]["model_fingerprint"]
+    assert result.status == 'RESUME_FAILED' and 'fingerprint' in result.message
 
 
-def test_legacy_fixed_resume_without_fingerprint(tiny, options, monkeypatch):
+def test_resume_keeps_spent_sa_quota_and_llm_limit(tiny, options, monkeypatch):
     state = saved_state(tiny, options)
-    del state["diagnostics"]["model_fingerprint"]
-    for row in state["diagnostics"]["evaluations"]:
-        if "hourly_recourse_costs" in row:
-            row["hourly_fuel_costs"] = row.pop("hourly_recourse_costs")
-    for row in state["diagnostics"]["bound_probes"]:
-        if "hourly_actual_recourse" in row:
-            row["hourly_actual_fuel"] = row.pop("hourly_actual_recourse")
-    d, scenarios = tiny()
-    options.max_outer, options.max_inner = 1, 2
-    monkeypatch.setattr(solver, "anneal", lambda *args: ([], {"bits": 1}))
-    result = solver.solve(d, scenarios, options, resume_state=state)
-    assert result.status == "CONVERGED", result.message
-    assert result.objective == pytest.approx(225.)
-    assert len(result.diagnostics["model_fingerprint"]) == 64
-    assert all("hourly_fuel_costs" not in row for row in result.diagnostics["evaluations"])
-    assert all("hourly_actual_fuel" not in row for row in result.diagnostics["bound_probes"])
-
-
-def test_legacy_resume_rejects_different_dimensions(tiny, options):
-    state = saved_state(tiny, options)
-    del state["diagnostics"]["model_fingerprint"]
-    d, scenarios = tiny(1)
-    result = solver.solve(d, scenarios, options, resume_state=state)
-    assert result.status == "RESUME_FAILED" and "dimensions" in result.message
+    state['diagnostics']['sa_budget_seconds_used'] = 2.
+    state['llm_calls'] = 3
+    state['llm_history'] = [dict(status='OK', background_seconds=.1) for _ in range(3)]
+    options.sa_budget_seconds = 2.
+    options.tolerance = .001
+    options.llm_enabled = True
+    monkeypatch.setattr(solver, 'anneal', lambda *a: pytest.fail('SA quota already spent'))
+    monkeypatch.setattr('suc_benders.advisor_request.AdvisorRequest',
+                        lambda *a: pytest.fail('LLM limit already spent'))
+    result = solver.solve(*tiny(), options, resume_state=state)
+    assert result.status == 'CONVERGED', result.message
+    assert result.diagnostics['sa_budget_exhausted']
+    assert result.diagnostics['sa_budget_seconds_used'] == 2.
+    assert result.llm_calls == 3 and len(result.llm_history) == 3

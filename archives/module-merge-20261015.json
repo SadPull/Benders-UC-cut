@@ -1,0 +1,182 @@
+{
+  "date": "2026-10-15",
+  "status": "MERGED_AND_VERIFIED",
+  "package_files_before": 21,
+  "package_files_after": 17,
+  "moves": {
+    "startup": "validation",
+    "advisor_feedback": "upper_advisor",
+    "lower_bound": "strengthened_master",
+    "subagent_advisor": "advisor_request"
+  },
+  "atomic_save": "suc_benders.data.save_json",
+  "archive": {
+    "directory": "C:\\Users\\12433\\Desktop\\LLM-benders-SUC-archive\\module-merge-20261015-173242",
+    "file": "source-before-merge.zip",
+    "files_verified": 72,
+    "sha256": "b02e67741f2c120ee238e66dfd7cb0d659ac1a5e1712aef7ce7cd0552d233747",
+    "excluded": [
+      "config.local.json",
+      ".local/",
+      ".vscode/",
+      "*.lic"
+    ],
+    "published": false
+  },
+  "baseline": {
+    "offline_passed": 188,
+    "integration_deselected": 3,
+    "seconds": 11.54
+  },
+  "verification": {
+    "offline": {
+      "passed": 188,
+      "integration_deselected": 3,
+      "seconds": 11.05
+    },
+    "real_kaiwu": {
+      "passed": 3,
+      "offline_deselected": 188,
+      "seconds": 36.65,
+      "scenarios": [
+        "small QUBO",
+        "classic10 deterministic",
+        "classic10 stochastic"
+      ],
+      "smoke_results": [
+        {
+          "case": "deterministic",
+          "status": "TIME_LIMIT",
+          "upper": 602192.039417134,
+          "lower": 564437.299938411,
+          "elapsed_seconds": 15.003,
+          "max_residual_mw": 4.55e-13
+        },
+        {
+          "case": "stochastic",
+          "status": "TIME_LIMIT",
+          "upper": 595625.375851489,
+          "lower": 558777.249578146,
+          "elapsed_seconds": 15.01,
+          "max_residual_mw": 4.55e-13
+        }
+      ]
+    },
+    "manual_entry_after_parallel_edits": {
+      "passed": 6,
+      "seconds": 0.09,
+      "subset_of_offline_suite": true
+    },
+    "all_modules_import": true,
+    "no_cycles": true,
+    "no_orphan_imports": true,
+    "no_removed_module_shims": true,
+    "bridge_cli_help_and_empty_listing": true,
+    "protected_files_unchanged": true
+  },
+  "numerical_identity": {
+    "all_four_cases_identical": true,
+    "cases": {
+      "classic10:stochastic": {
+        "physical": "39fc9643886b179bce2eb109a04da2ba9ff52dc09878d0969331f2d7356b0d1f",
+        "fingerprint": "96795073067078b350058e19ab8ccd6dfc1d5f22c0dc062a21142e05c20a4756",
+        "proof": "3de36ffb8bad9ee37ad39e4b0da5bf2e386d30210dd3b5cd00d1d8ff0b175eb1",
+        "physical_shape": [
+          6968,
+          2400
+        ],
+        "proof_shape": [
+          12336,
+          3259
+        ]
+      },
+      "classic10:deterministic": {
+        "physical": "74e71b068238206f0058cd5b0cad98a9d74a52b2521d8ec3e8166a82ebddedb7",
+        "fingerprint": "a6a2156cf75722d1d120d28e44564941a27748fb28f7e280eeb6eb7a3ba560b8",
+        "proof": "8b5b8ab47c939c03f4171cd383f1e3871253498d7b9830e4e0ca0bb6127b9081",
+        "physical_shape": [
+          3992,
+          1440
+        ],
+        "proof_shape": [
+          7920,
+          1819
+        ]
+      },
+      "rts24:stochastic": {
+        "physical": "cb27fbdf7eb006f96263ffd1e8e1a9cbb59e877db0b91d84d5639fb5cb667207",
+        "fingerprint": "6305934ae5da8354b2052b9dd5bca85ca19161ba082fab15e17acf8c44046b4f",
+        "proof": "da1b9be4d3e786fae84738096fefdba4eea27a1443d4a2c02aebbb63ed95f6bc",
+        "physical_shape": [
+          21960,
+          6912
+        ],
+        "proof_shape": [
+          37946,
+          9049
+        ]
+      },
+      "rts24:deterministic": {
+        "physical": "88ba87e55b4e73908304d7ca4db0ae92e2f9cc8615b04d16231e8aab6adbccbb",
+        "fingerprint": "eada876931a61b7a381b0a8ae317236935500cd122120a5a4548d3a53825d46a",
+        "proof": "b6a49f1212574b13a514025a3df35e970f438630227074fc42be7690bdad3deb",
+        "physical_shape": [
+          12648,
+          3840
+        ],
+        "proof_shape": [
+          25466,
+          4921
+        ]
+      }
+    }
+  },
+  "function_identity": {
+    "modules_checked": [
+      "validation",
+      "upper_advisor",
+      "strengthened_master",
+      "advisor_request",
+      "data",
+      "solver",
+      "context",
+      "strengthened_certification",
+      "agent_bridge"
+    ],
+    "other_runtime_modules_byte_identical": [
+      "anneal",
+      "benders",
+      "config",
+      "llm",
+      "model",
+      "optimization",
+      "qubo",
+      "__init__"
+    ],
+    "normalized": [
+      "save_json rename",
+      "relocated local import",
+      "parallel solver verbose print updates"
+    ],
+    "function_bodies_preserved": true,
+    "run_suc_unchanged": true,
+    "protected_files_unchanged": true,
+    "concurrent_changes_preserved": [
+      "run_experiment.py",
+      "suc_benders/solver.py"
+    ]
+  },
+  "unchanged_interfaces": [
+    "run_suc",
+    "solve",
+    "Options",
+    "Result",
+    "checkpoint JSON",
+    "python -m suc_benders.agent_bridge"
+  ],
+  "limitations": [
+    "Direct imports of removed modules require migration",
+    "No formal long experiment rerun",
+    "No remote publication"
+  ]
+}

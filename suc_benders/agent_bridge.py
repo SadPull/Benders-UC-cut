@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from time import time
 
-from .subagent_advisor import save
+from .data import save_json
 
 
 # 扫描请求目录，返回每个请求的剩余秒数、调度身份和文件完成状态。
@@ -33,7 +33,7 @@ def dispatch(path, agent_id, task_name):
     target = path.parent/'dispatch.json'
     if target.exists() or (path.parent/'closed.json').exists() or time() >= job['deadline_epoch_seconds']:
         raise ValueError('Request already dispatched, cancelled or expired')
-    save(target, dict(agent_id=agent_id, task_name=task_name, model=job['request']['model'],
+    save_json(target, dict(agent_id=agent_id, task_name=task_name, model=job['request']['model'],
         reasoning_effort=job['request']['reasoning']['effort'], dispatched_epoch_seconds=time()))
 
 
@@ -45,7 +45,7 @@ def complete(path, agent_id):
     if recorded['agent_id'] != agent_id or (path.parent/'completion.json').exists():
         raise ValueError('Completion agent mismatch or duplicate completion')
     reply = path.parent/'reply.json'
-    save(path.parent/'completion.json', dict(agent_id=agent_id, request_id=job['request_id'],
+    save_json(path.parent/'completion.json', dict(agent_id=agent_id, request_id=job['request_id'],
         request_sha256=job['request_sha256'], reply_sha256=hashlib.sha256(reply.read_bytes()).hexdigest(), completed_epoch_seconds=time()))
 
 

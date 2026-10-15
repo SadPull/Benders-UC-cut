@@ -1,33 +1,83 @@
-"""File transport for one independently dispatched Codex subagent proposal."""
-# 模块职责：为单个外部子代理请求提供原子 JSON 文件交换、身份/哈希核对和截止时间处理。
-# 单调时钟用于本进程计时，Unix 时间戳用于跨进程回执；本模块不自行派发外部子代理。
+"""One cancellable upper-advice request over HTTP or file exchange."""
 import hashlib
 import json
-import os
+import multiprocessing as mp
 from pathlib import Path
-from time import perf_counter, sleep, time
+from time import perf_counter, time
 from uuid import uuid4
-
-import numpy as np
+from types import SimpleNamespace as NS
 
 from . import llm
+from .data import save_json
 
 
-# 先写同目录临时文件并 flush/fsync，再原子替换目标 JSON，减少检查点半写和断电丢失风险。
-def save(path, value):
-    temporary = path.with_suffix(path.suffix+'.tmp')
-    with temporary.open('w', encoding='utf-8') as stream:
-        json.dump(value, stream, ensure_ascii=False, allow_nan=False)
-        stream.flush(); os.fsync(stream.fileno())
-    for attempt in range(20):
+# 单个在途请求的生命周期对象，提供非阻塞 poll 和终止/关闭操作。
+class AdvisorRequest:
+    # 根据 llm_agent_directory 选择文件交换或 spawn HTTP 进程，并记录总请求截止时间及请求哈希。
+    # 传给子进程的数据只包含请求体和矩阵形状，避免传递求解器对象。
+    def __init__(self, d, o, body, iteration, seconds):
+        self.agent = None
+        if o.llm_agent_directory:
+            self.agent = SubagentAdvisor(d, o, body, iteration, seconds)
+            self.started, self.deadline, self.receipt = self.agent.started, self.agent.deadline, self.agent.receipt
+            return
+        self.started = perf_counter()
+        self.deadline = self.started + seconds
+        context = mp.get_context("spawn")
+        self.connection, sender = context.Pipe(duplex=False)
+        self.process = context.Process(target=_request,
+            args=(sender, o.llm_url, o.llm_api_key, body,
+                  NS(n_units=d.n_units, horizon=d.horizon), iteration, seconds), daemon=True)
+        self.receipt = dict(request=body, request_sha256=hashlib.sha256(
+            json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
         try:
-            os.replace(temporary, path)
-            break
-        except PermissionError:
-            if attempt == 19:
-                raise
-            # Windows readers can briefly hold a handle without FILE_SHARE_DELETE.
-            sleep(.02)
+            self.process.start()
+        except Exception:
+            self.connection.close()
+            raise
+        finally:
+            # 父进程释放自己的发送端副本，保证子进程结束后读端能正确观察到 EOF。
+            sender.close()
+
+    # 尚未完成时返回 None；完成、超时或进程退出时返回 (候选, 回执) 并回收资源。
+    # 完成时刻晚于请求截止时间的回复必须丢弃，即使当前已经可以读到结果。
+    def poll(self):
+        if self.agent is not None:
+            return self.agent.poll()
+        now = perf_counter()
+        if self.connection.poll():
+            try:
+                candidates, info = self.connection.recv()
+            except EOFError:
+                candidates, info = [], dict(status="FAILED", message="WorkerExited", accepted=0, proposals=[])
+            if info.get("finished_at", now) > self.deadline:
+                candidates = []
+                info.update(status="TIME_LIMIT", accepted=0)
+            info["background_seconds"] = max(0., info.get("finished_at", now)-self.started)
+            info.update(self.receipt)
+            self.close()
+            return candidates, info
+        if now >= self.deadline or not self.process.is_alive():
+            info = dict(status="TIME_LIMIT" if now >= self.deadline else "FAILED",
+                        message="RequestDeadline" if now >= self.deadline else "WorkerExited",
+                        seconds=now-self.started, background_seconds=now-self.started,
+                        accepted=0, proposals=[], **self.receipt)
+            self.close()
+            return [], info
+        return None
+
+    # 关闭文件交换请求，或先终止再按需强制杀死 HTTP 工作进程，最后回收管道。
+    def close(self):
+        if self.agent is not None:
+            self.agent.close()
+            return
+        if self.process.is_alive():
+            self.process.terminate()
+        self.process.join(timeout=1.)
+        if self.process.is_alive():
+            self.process.kill()
+            self.process.join(timeout=1.)
+        self.connection.close()
 
 
 # 管理一个独立请求目录及其 request/dispatch/reply/completion/closed 文件生命周期。
@@ -37,14 +87,13 @@ class SubagentAdvisor:
         self.started, self.created = perf_counter(), time()
         self.deadline, self.deadline_epoch = self.started+seconds, self.created+seconds
         self.d, self.iteration = d, iteration
-        self.strict = o.bound_mode == 'strengthened'
         self.closed = False
         self.directory = Path(o.llm_agent_directory).resolve()/f'{iteration:02d}-{uuid4().hex}'
         self.directory.mkdir(parents=True)
         self.receipt = dict(transport='codex_subagent', request=body,
             request_sha256=hashlib.sha256(json.dumps(body, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
             request_directory=str(self.directory))
-        save(self.directory/'request.json', dict(request_id=self.directory.name, request=body,
+        save_json(self.directory/'request.json', dict(request_id=self.directory.name, request=body,
             request_sha256=self.receipt['request_sha256'], shape=[d.n_units, d.horizon],
             created_epoch_seconds=self.created, deadline_epoch_seconds=self.deadline_epoch,
             reply_path=str(self.directory/'reply.json')))
@@ -67,11 +116,6 @@ class SubagentAdvisor:
                     separators=(',', ':')).encode()).hexdigest()
                 text = (self.directory/'reply.json').read_text(encoding='utf-8')
                 digest = hashlib.sha256(text.encode()).hexdigest()
-                if self.strict:
-                    parsed = json.loads(text)
-                    rows = parsed.get('candidates') if isinstance(parsed, dict) else None
-                    if not isinstance(rows, list) or len(rows) > 4:
-                        raise ValueError('Invalid candidate list')
                 if (request_hash != self.receipt['request_sha256']
                         or saved['shape'] != [self.d.n_units, self.d.horizon]
                         or done['request_id'] != self.directory.name or done['request_sha256'] != self.receipt['request_sha256']
@@ -82,11 +126,6 @@ class SubagentAdvisor:
                 # Adapt the generated text to the existing parser; this is not an HTTP response.
                 raw = dict(status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
                 candidates, info = llm.parse_response(raw, self.d, self.iteration)
-                if self.strict and (len(info.get('proposals', [])) > 4
-                        or any(p.get('outcome') == 'invalid_matrix' for p in info.get('proposals', []))
-                        or any(not np.isin(u, [0, 1]).all() for u, _ in candidates)):
-                    candidates = []
-                    info.update(status='FAILED', message='InvalidCandidateMatrix', accepted=0)
                 info.update(agent_id=done['agent_id'], response_id='codex-subagent:'+done['agent_id'],
                     response_model=dispatch['model'], reasoning_effort=dispatch['reasoning_effort'],
                     response_output=[text], reply_sha256=digest,
@@ -113,4 +152,27 @@ class SubagentAdvisor:
     def close(self):
         self.closed = True
         if not (self.directory/'closed.json').exists():
-            save(self.directory/'closed.json', dict(closed_epoch_seconds=time()))
+            save_json(self.directory/'closed.json', dict(closed_epoch_seconds=time()))
+
+
+def _request(connection, url, key, body, shape, iteration, seconds):
+    started = perf_counter()
+    candidates = []
+    info = dict(status="FAILED", message="", accepted=0, format_valid=0, proposals=[])
+    try:
+        raw = llm.post_response(url, key, body, seconds)
+        candidates, info = llm.parse_response(raw, shape, iteration)
+        info.update(response_id=raw.get("id"), response_model=raw.get("model"), usage=raw.get("usage"),
+                    response_output=[part["text"] for item in raw.get("output", [])
+                                     if item.get("type") == "message" for part in item.get("content", [])
+                                     if part.get("type") == "output_text"])
+    except Exception as error:
+        info["message"] = type(error).__name__
+        if isinstance(getattr(error, "code", None), int):
+            info["http_status"] = error.code
+    finished = perf_counter()
+    info.update(seconds=finished-started, finished_at=finished)
+    try:
+        connection.send((candidates, info))
+    finally:
+        connection.close()

@@ -1,0 +1,234 @@
+"""Upper-bound advice bursts and measured candidate feedback."""
+from copy import deepcopy
+import json
+from time import perf_counter
+
+import numpy as np
+
+from . import advisor_request, llm
+
+
+class LLMCallFailures(RuntimeError):
+    """Two consecutive failed calls require an explicit user resume."""
+
+
+class UpperAdvisor:
+    def __init__(self, whole):
+        self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
+        self.worker, self.pending, self.baseline = None, None, None
+        self.state = dict(version=1, phase="sa", stalled=dict(upper=0), sa_rounds=0,
+                          batch_id=0, batch=None, consecutive_failures=0)
+        whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[])
+
+    def available(self):
+        return (self.o.llm_enabled and self.whole.remaining() > 0
+                and (self.o.llm_max_calls is None or self.result.llm_calls < self.o.llm_max_calls))
+
+    def improved(self, upper):
+        return upper-self.result.objective >= .0005*max(1., abs(upper))
+
+    def after_round(self, upper, sa_before, searches, outer, inner, allow=True):
+        if self.whole.diagnostics["sa_calls"] <= sa_before:
+            return
+        self.state["sa_rounds"] += 1
+        self.state["stalled"]["upper"] = (0 if self.improved(upper) else self.state["stalled"]["upper"]+1)
+        self.whole.diagnostics["advisor_rounds"].append(dict(
+            outer=outer, round=inner, sa_round=self.state["sa_rounds"], upper_before=upper,
+            upper=self.result.objective, lower=self.result.lower_bound,
+            stalled=self.state["stalled"].copy()))
+        if (allow and self.available() and not self.cert.converged()
+                and self.state["stalled"]["upper"] >= self.o.llm_patience):
+            self.begin(outer=outer, inner=inner)
+            self.run_batch(searches)
+
+    def begin(self, *, outer=None, inner=None):
+        if self.state["phase"] != "sa" or self.worker is not None:
+            raise RuntimeError("An advice batch is already active")
+        self.state["batch_id"] += 1
+        batch = dict(batch_id=self.state["batch_id"], channels=["upper"],
+            counts=dict(upper=0), done=dict(upper=False),
+            upper_before=self.result.objective, lower_before=self.result.lower_bound,
+            trigger_stalled=self.state["stalled"].copy(), trigger_sa_round=self.state["sa_rounds"],
+            sa_calls_at_start=self.whole.diagnostics["sa_calls"], outer=outer, round=inner,
+            status="RUNNING", started_seconds=perf_counter()-self.whole.started)
+        self.state.update(phase="llm", batch=batch)
+        self.whole.diagnostics["llm_batches"].append(batch)
+
+    def start_request(self):
+        batch = self.state["batch"]
+        if self.worker is not None or not self.available() or batch["counts"]["upper"] >= 3:
+            return
+        iteration = self.result.llm_calls+1
+        context, bases, self.baseline = self.whole.upper_context()
+        body = llm.request_body(self.whole.d, self.whole.scenarios, self.result,
+                                self.o, context, bases, iteration)
+        if self.whole.remaining() <= 0:
+            return
+        batch["counts"]["upper"] += 1
+        self.result.llm_calls = iteration
+        routing = dict(channel="upper", batch_id=batch["batch_id"],
+                       batch_call=batch["counts"]["upper"], phase="formal")
+        prompt = json.loads(body["input"])
+        prompt["advice_routing"] = routing
+        body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
+        self.pending = dict(call_id=f"llm_upper:{iteration}", stage="advice_batch", **routing,
+            status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
+            trigger_stalled=batch["trigger_stalled"].copy(),
+            request_upper=self.result.objective, request_lower=self.result.lower_bound,
+            started_seconds=perf_counter()-self.whole.started)
+        self.result.llm_history.append(self.pending)
+        if self.whole.diagnostics["llm_calls"] is not self.result.llm_history:
+            self.whole.diagnostics["llm_calls"].append(self.pending)
+        try:
+            self.worker = advisor_request.AdvisorRequest(self.whole.d, self.o, body, iteration,
+                min(600., self.o.llm_timeout, self.whole.remaining()))
+        except Exception as error:
+            self.pending.update(status="FAILED", message=type(error).__name__)
+            self.record_failure()
+        self.whole.emit("llm_request")
+        if self.o.verbose:
+            print(f"advice channel=upper batch={batch['batch_id']} call={iteration} "
+                  f"batch_call={batch['counts']['upper']} status={self.pending['status']}", flush=True)
+
+    def poll(self, searches):
+        if self.worker is None:
+            return False
+        reply = self.worker.poll()
+        if reply is None:
+            return False
+        self.worker = None
+        proposals, info = reply
+        self.pending.update(info, consumed_seconds=perf_counter()-self.whole.started)
+        self.whole.diagnostics["llm_background_seconds"] += info.get("background_seconds", info.get("seconds", 0.))
+        if self.whole.remaining() <= 0:
+            self.pending.update(status="TIME_LIMIT", accepted=0)
+            return True
+        self.record_failure()
+        before_upper = self.result.objective
+        if info["status"] == "OK":
+            self.whole.consume_upper(proposals, self.pending, searches, self.baseline)
+        self.pending.update(upper_before_probes=before_upper, upper_after_probes=self.result.objective,
+            direct_incumbent_decrease=sum(r.get("incumbent_decrease", 0.) for r in info.get("proposals", [])),
+            numerical_evaluation_completed=any(r.get("continuous_dispatch_completed")
+                                              for r in info.get("proposals", [])))
+        self.whole.emit("llm_response")
+        return True
+
+    def record_failure(self):
+        failed = self.pending['status'] != 'OK'
+        self.state['consecutive_failures'] = self.state['consecutive_failures']+1 if failed else 0
+        self.whole.emit('llm_call_status')
+        if self.state['consecutive_failures'] >= 2:
+            raise LLMCallFailures('Two consecutive upper subagent calls failed')
+
+    def run_batch(self, searches):
+        batch = self.state["batch"]
+        if batch is None:
+            return
+        reason = "RETURN_TO_SA"
+        while self.whole.remaining() > 0:
+            if self.cert.converged():
+                reason = "CONVERGED"
+                break
+            if self.worker is not None:
+                self.poll(searches)
+                if self.whole.remaining() <= 0:
+                    break
+                self.cert.step()
+                continue
+            if not self.available():
+                reason = "CALL_LIMIT"
+                break
+            if self.improved(batch["upper_before"]):
+                batch["done"]["upper"] = True
+            if batch["done"]["upper"] or batch["counts"]["upper"] >= 3:
+                break
+            self.start_request()
+        if self.whole.remaining() <= 0:
+            reason = "TIME_LIMIT"
+        self.close()
+        batch.update(status=reason, upper_after=self.result.objective, lower_after=self.result.lower_bound,
+                     sa_calls_at_end=self.whole.diagnostics["sa_calls"],
+                     ended_seconds=perf_counter()-self.whole.started)
+        self.state.update(phase="sa", batch=None, stalled=dict(upper=0))
+
+    def restore(self, diagnostic):
+        saved = diagnostic["advisor_state"]
+        if saved["version"] != 1:
+            raise ValueError("Unknown advice scheduling state version")
+        self.state.clear()
+        self.state.update(deepcopy(saved))
+        self.state['stalled'] = dict(upper=saved['stalled']['upper'])
+        for name in ("advisor_rounds", "llm_batches"):
+            self.whole.diagnostics[name] = deepcopy(diagnostic.get(name, []))
+        if self.state["batch"] is not None:
+            batch = next(b for b in self.whole.diagnostics["llm_batches"]
+                         if b["batch_id"] == self.state["batch_id"])
+            if batch['channels'] != ['upper'] or batch.get('validation', False):
+                raise ValueError('Recovered advice must be an upper search batch')
+            self.state["batch"] = batch
+        for row in self.result.llm_history:
+            if row["status"] == "RUNNING":
+                row.update(status="CANCELLED", message="ResumeWorkerUnavailable", accepted=0)
+        self.whole.feedback = deepcopy(diagnostic.get("upper_advice_feedback"))
+
+    def close(self):
+        if self.worker is not None:
+            elapsed = perf_counter()-self.worker.started
+            self.whole.diagnostics["llm_background_seconds"] += elapsed
+            self.pending.update(status="CANCELLED", message="SearchFinished", accepted=0,
+                seconds=elapsed, background_seconds=elapsed, **self.worker.receipt)
+            self.worker.close()
+            self.worker = None
+        self.whole.diagnostics["upper_advice_feedback"] = self.whole.feedback
+
+
+# 关联候选回执、调用前方案与已完成评估，返回费用变化、修复距离和缓存命中反馈。
+# 没有实际调度结果时不编造费用；历史或重复方案不记为本次刷新 incumbent。
+def summarize(advice, baseline_u, baseline, evaluations, previous_ids):
+    measured = {r["commitment_hash"]: r for r in evaluations}
+    rows = []
+    for p in advice.diagnostics.get("proposals", []):
+        identity = p.get("commitment_id")
+        r = measured.get(identity)
+        cached = identity in previous_ids or p.get("outcome") == "duplicate"
+        row = dict(proposal_id=p["proposal_id"], commitment_id=identity,
+                   proposed_changes=changes(baseline_u, p.get("raw_u")),
+                   repair_changes=changes(p.get("raw_u"), p.get("repaired_u")),
+                   repair_bits=p.get("hamming_u"), outcome=p.get("outcome"),
+                   duplicate=cached, cache_hit=bool(cached and r),
+                   continuous_dispatch_completed=bool(r or p.get("local_dispatch_completed")),
+                   local_feasible=p.get("local_feasible"),
+                   validation_completed=r is not None, feasible=r["feasible"] if r else None,
+                   repair_reason=None, infeasibility_reason=None,
+                   baseline_cost=baseline, costs=None, cost_change=None,
+                   refreshed_incumbent=bool(r and r["improved"] and not cached))
+        if r and r["feasible"]:
+            costs = dict(total=r["objective"], fixed=r["fixed_cost"], expected_fuel=r["expected_fuel_cost"])
+            row["costs"] = costs
+            if baseline is not None:
+                row["cost_change"] = {k: costs[k]-baseline[k] for k in costs}
+        rows.append(row)
+    return dict(call_id=advice.diagnostics.get("call_id"), failed=advice.failed,
+                message=advice.message, proposals=rows)
+
+
+# 把两张机组 × 小时矩阵的差异合并成连续区间；缺失、形状不符或非有限值不计入变化。
+# 输出的机组和小时编号从 1 开始，end_hour 表示包含在区间内的最后一小时。
+def changes(before, after):
+    if before is None or after is None:
+        return []
+    before, after = np.asarray(before), np.asarray(after)
+    if before.shape != after.shape:
+        return []
+    rows = []
+    for i in range(len(before)):
+        for t in np.flatnonzero(before[i] != after[i]):
+            old, new = float(before[i, t]), float(after[i, t])
+            if not np.isfinite(old) or not np.isfinite(new):
+                continue
+            if rows and rows[-1]["unit"] == i+1 and rows[-1]["end_hour"] == t and rows[-1]["from"] == old and rows[-1]["to"] == new:
+                rows[-1]["end_hour"] = int(t+1)
+            else:
+                rows.append(dict(unit=i+1, start_hour=int(t+1), end_hour=int(t+1), **{"from": old, "to": new}))
+    return rows

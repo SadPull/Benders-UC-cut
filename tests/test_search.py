@@ -9,6 +9,17 @@ from suc_benders.model import model, partition
 from suc_benders.validation import pack
 
 
+@pytest.fixture(autouse=True)
+def proof_after_upper_search(monkeypatch):
+    backend = solver.StrengthenedCertification
+    monkeypatch.setattr(backend, 'start', lambda self: None)
+    monkeypatch.setattr(backend, 'close', lambda self: None)
+    def step(cert):
+        if cert.whole.diagnostics['coordination_count'] >= cert.o.max_outer:
+            cert.update_bound(cert.result.objective)
+    monkeypatch.setattr(backend, 'step', step)
+
+
 def make_whole(d, scenarios, options):
     m = model(d, scenarios); full = partition(m, d.horizon)[0][0]
     started = perf_counter()
@@ -61,36 +72,6 @@ def test_late_relaxation_not_accepted(tiny, options, monkeypatch):
     assert result.lower == initial_bound and result.best is not None
 
 
-@pytest.mark.parametrize("max_calls,expected", [(2, 2), (0, 0), (None, 3)])
-def test_llm_failure_returns_to_full_sa_round_and_fixed_seed(tiny, options, monkeypatch, max_calls, expected):
-    d, s = tiny(2, 5)
-    options.llm_enabled = True; options.llm_patience = 1; options.llm_max_calls = max_calls
-    options.max_inner = 3; options.max_outer = 1
-    force_open_master(monkeypatch)
-    seeds, requests, events = [], [], []
-
-    def sample(q, o, seconds, seed):
-        seeds.append(seed); events.append("sa")
-        return [], {"bits": 1}
-
-    def request(*args):
-        requests.append(args); events.append("llm")
-        return [], {"status": "FAILED", "proposals": []}
-
-    monkeypatch.setattr(solver, "anneal", sample)
-    monkeypatch.setattr(solver.llm, "request", request)
-    result = solver.solve(d, s, options)
-    assert result.status == "MAX_ITERATIONS", result.message
-    assert seeds == [options.seed]*6 and result.llm_calls == expected
-    assert events == [event for i in range(3) for event in
-                      (["sa", "sa", "llm"] if i < expected else ["sa", "sa"])]
-    assert len(requests) == expected and len(result.history) == 6
-    assert [row["round"] for row in result.llm_history] == list(range(1, expected+1))
-    assert all(row["block"] is None and row["stage"] == "round_end" for row in result.llm_history)
-    if expected > 1:
-        assert requests[1][5]["previous_call_feedback"]["failed"]
-
-
 def test_late_sa_candidates_not_dispatched(tiny, options, monkeypatch):
     d, s = tiny(1); whole = make_whole(d, s, options); b = whole.full
     now = [0.]; calls = []
@@ -139,8 +120,8 @@ def test_late_full_evaluation_does_not_update_incumbent(tiny, options, monkeypat
     original = solver.dispatch
     monkeypatch.setattr(solver, "perf_counter", lambda: now[0])
 
-    def late(*args):
-        r = original(*args); now[0] = 11.
+    def late(*args, **kwargs):
+        r = original(*args, **kwargs); now[0] = 11.
         return r
 
     monkeypatch.setattr(solver, "dispatch", late)
@@ -185,7 +166,7 @@ def test_unconverged_blocks_rotate_and_coordinate(tiny, options, monkeypatch):
 
     monkeypatch.setattr(solver, "coordinate", inspect)
     r = solver.solve(d, s, options)
-    assert r.status == "MAX_ITERATIONS", r.message
+    assert r.status == "CONVERGED", r.message
     assert [entry["block"] for entry in r.history] == list(range(1, 9))*4
     assert r.diagnostics["complete_rounds"] == 4 and r.diagnostics["coordination_count"] == 2
     assert len(groups) == 2 and all(len(group) == 8 and all(group) for group in groups)
@@ -223,7 +204,7 @@ def test_incomplete_round_neither_counts_nor_requests_advice(tiny, options, monk
         return [], {"bits": 1}
 
     monkeypatch.setattr(solver, "anneal", late)
-    monkeypatch.setattr(solver.llm, "request", lambda *args: pytest.fail("incomplete round request"))
+    monkeypatch.setattr("suc_benders.upper_advisor.advisor_request.AdvisorRequest", lambda *args: pytest.fail("incomplete round request"))
     r = solver.solve(d, s, options)
     assert r.status == "TIME_LIMIT" and r.diagnostics["complete_rounds"] == 0
     assert not r.diagnostics["rounds"][0]["complete"] and not r.outer_history
@@ -231,25 +212,15 @@ def test_incomplete_round_neither_counts_nor_requests_advice(tiny, options, monk
     assert r.llm_calls == 0 and r.validation["feasible"]
 
 
-def test_patience_counts_complete_rounds(tiny, options, monkeypatch):
-    d, s = tiny(2, 6)
-    options.max_outer = 1; options.max_inner = 7; options.llm_patience = 3; options.llm_enabled = True
-    force_open_master(monkeypatch)
-    monkeypatch.setattr(solver, "anneal", lambda *args: ([], {"bits": 1}))
-    monkeypatch.setattr(solver.llm, "request", lambda *args: ([], {"status": "FAILED", "proposals": []}))
-    r = solver.solve(d, s, options)
-    assert [row["round"] for row in r.llm_history] == [3, 6]
-    assert r.diagnostics["complete_rounds"] == 7 and r.diagnostics["sa_calls"] == 14
-
-
-def test_closed_blocks_still_coordinate(tiny, options, monkeypatch):
+def test_initial_global_convergence_skips_search(tiny, options, monkeypatch):
     d, s = tiny(1, 5)
     d.initial_on[:] = 1; d.initial_duration[:] = 1; d.initial_output[:] = 10
     d.min_up[:] = 10
     monkeypatch.setattr(solver, "anneal", lambda *args: ([], {"bits": 1}))
     r = solver.solve(d, s, options)
-    assert r.status == "DUAL_CONVERGED", r.message
-    assert r.validation["feasible"] and r.outer_history
+    assert r.status == "CONVERGED", r.message
+    assert r.validation["feasible"] and not r.outer_history
+    assert r.diagnostics['sa_calls'] == 0
 
 
 def test_master_solves_only_continuous_relaxation(tiny, monkeypatch):

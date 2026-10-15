@@ -4,9 +4,9 @@ from time import time
 import pytest
 
 from suc_benders.agent_bridge import complete, dispatch, requests
-from suc_benders.bound_advisor import BoundAdvisor
+from suc_benders.advisor_request import AdvisorRequest
 from suc_benders.config import load_options
-from suc_benders.subagent_advisor import save
+from suc_benders.data import save_json
 
 
 def task(tmp_path, tiny, options, seconds=30):
@@ -14,18 +14,18 @@ def task(tmp_path, tiny, options, seconds=30):
     options.llm_model = 'gpt-6-astra'
     options.llm_api_key = 'must-not-be-exported'
     body = dict(model=options.llm_model, reasoning=dict(effort='max'), input=json.dumps(dict(advice_routing=dict(channel='upper'))))
-    return BoundAdvisor(tiny(1)[0], options, body, 1, seconds)
+    return AdvisorRequest(tiny(1)[0], options, body, 1, seconds)
 
 
 def test_subagent_reply_requires_dispatch_and_completion_receipts(tmp_path, tiny, options, monkeypatch):
-    monkeypatch.setattr('suc_benders.bound_advisor.mp.get_context', lambda *a: pytest.fail('HTTP process started'))
+    monkeypatch.setattr('suc_benders.advisor_request.mp.get_context', lambda *a: pytest.fail('HTTP process started'))
     advisor = task(tmp_path, tiny, options)
     folder = advisor.agent.directory
     request = folder/'request.json'
     assert len(requests(tmp_path)) == 1 and requests(tmp_path)[0]['agent_id'] is None
     assert 'must-not-be-exported' not in request.read_text()
     dispatch(request, 'real-agent-id', 'upper')
-    save(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
+    save_json(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
     assert advisor.poll() is None
     complete(request, 'real-agent-id')
     candidates, receipt = advisor.poll()
@@ -49,12 +49,12 @@ def test_late_or_unrelated_completion_cannot_supply_candidates(tmp_path, tiny, o
     advisor = task(tmp_path, tiny, options)
     folder = advisor.agent.directory
     dispatch(folder/'request.json', 'agent', 'upper')
-    save(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
+    save_json(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
     complete(folder/'request.json', 'agent')
     done = json.loads((folder/'completion.json').read_text())
     done.update({'completed_epoch_seconds':time()+100} if alter == 'late' else
                 {'request_sha256':'wrong'} if alter == 'hash' else {'agent_id':'other-agent'})
-    save(folder/'completion.json', done)
+    save_json(folder/'completion.json', done)
     candidates, receipt = advisor.poll()
     assert not candidates and receipt['status'] in ('TIME_LIMIT', 'FAILED')
 
@@ -73,9 +73,9 @@ def test_atomic_save_retries_windows_reader_lock(tmp_path,monkeypatch):
         if len(calls) == 1:
             raise PermissionError('Windows reader holds destination')
         original(source,target)
-    monkeypatch.setattr('suc_benders.subagent_advisor.os.replace',replace)
+    monkeypatch.setattr('suc_benders.data.os.replace',replace)
     target = tmp_path/'state.json'
-    save(target,dict(status='preserved'))
+    save_json(target,dict(status='preserved'))
     assert json.loads(target.read_text()) == dict(status='preserved')
     assert len(calls) == 2
 
@@ -85,10 +85,10 @@ def test_permanent_reader_lock_preserves_previous_checkpoint(tmp_path,monkeypatc
     target.write_text('{"status":"previous"}')
     def locked(*args):
         raise PermissionError('Still locked')
-    monkeypatch.setattr('suc_benders.subagent_advisor.os.replace',locked)
-    monkeypatch.setattr('suc_benders.subagent_advisor.sleep',lambda seconds:None)
+    monkeypatch.setattr('suc_benders.data.os.replace',locked)
+    monkeypatch.setattr('suc_benders.data.sleep',lambda seconds:None)
     with pytest.raises(PermissionError):
-        save(target,dict(status='new'))
+        save_json(target,dict(status='new'))
     assert json.loads(target.read_text()) == dict(status='previous')
     assert json.loads(target.with_suffix('.json.tmp').read_text()) == dict(status='new')
 
@@ -99,11 +99,10 @@ def test_permanent_reader_lock_preserves_previous_checkpoint(tmp_path,monkeypatc
     [dict(u=[[1, 1, 1]])]*5,
 ])
 def test_strengthened_transport_rejects_malformed_candidates(tmp_path, tiny, options, rows):
-    options.bound_mode = 'strengthened'
     advisor = task(tmp_path, tiny, options)
     folder = advisor.agent.directory
     dispatch(folder/'request.json', 'agent', 'upper')
-    save(folder/'reply.json', dict(candidates=rows))
+    save_json(folder/'reply.json', dict(candidates=rows))
     complete(folder/'request.json', 'agent')
     candidates, receipt = advisor.poll()
     assert not candidates and receipt['status'] == 'FAILED'
@@ -114,7 +113,7 @@ def test_cancelled_request_cannot_consume_a_later_reply(tmp_path, tiny, options)
     folder = advisor.agent.directory
     dispatch(folder/'request.json', 'agent', 'upper')
     advisor.close()
-    save(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
+    save_json(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
     complete(folder/'request.json', 'agent')
     candidates, receipt = advisor.poll()
     assert not candidates and receipt['status'] == 'CANCELLED'
@@ -124,8 +123,21 @@ def test_timely_reply_can_be_polled_after_request_deadline(tmp_path, tiny, optio
     advisor = task(tmp_path, tiny, options)
     folder = advisor.agent.directory
     dispatch(folder/'request.json', 'agent', 'upper')
-    save(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
+    save_json(folder/'reply.json', dict(candidates=[dict(u=[[1, 1, 1]])]))
     complete(folder/'request.json', 'agent')
-    monkeypatch.setattr('suc_benders.subagent_advisor.perf_counter', lambda: advisor.deadline+1)
+    monkeypatch.setattr('suc_benders.advisor_request.perf_counter', lambda: advisor.deadline+1)
     candidates, receipt = advisor.poll()
     assert len(candidates) == 1 and receipt['status'] == 'OK'
+
+
+def test_request_modification_is_rejected(tmp_path,tiny,options):
+    from test_subagent_advisor import task
+    from suc_benders.agent_bridge import dispatch as register, complete
+    advisor=task(tmp_path,tiny,options); folder=advisor.agent.directory
+    register(folder/'request.json','agent','upper')
+    save_json(folder/'reply.json',dict(candidates=[dict(u=[[1,1,1]])]))
+    complete(folder/'request.json','agent')
+    request=json.loads((folder/'request.json').read_text()); request['request']['input']='changed'
+    save_json(folder/'request.json',request)
+    proposals,receipt=advisor.poll()
+    assert not proposals and receipt['status']=='FAILED'

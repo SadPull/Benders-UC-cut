@@ -7,10 +7,9 @@ import pytest
 
 from suc_benders import llm
 from suc_benders.benders import dispatch
-from suc_benders.hourly_bounds import HourlyBounds
 from suc_benders.model import model, partition
 from suc_benders.optimization import optimize
-from suc_benders.startup import fixed_cost, startup_costs
+from suc_benders.validation import fixed_cost, startup_costs
 from suc_benders.validation import pack, repair, unpack, validate
 
 
@@ -81,7 +80,6 @@ def test_cold_costs_and_all_cuts_against_exhaustive_schedules(tiny):
     m = model(d, scenarios)
     assert len(m.binary) == 3*d.n_units*d.horizon
     full = partition(m, d.horizon)[0][0]
-    hourly = HourlyBounds(full)
     feasible, cuts = [], []
     for bits in product([0., 1.], repeat=8):
         u = np.asarray(bits).reshape((2, 4))
@@ -99,22 +97,19 @@ def test_cold_costs_and_all_cuts_against_exhaustive_schedules(tiny):
         premium = (fees-d.startup_cost[:, None]*z.v).sum(axis=0)
         assert r.cost == pytest.approx(fuel.sum()+fees.sum()
             + np.sum(d.cost_c[:, None]*u+d.shutdown_cost[:, None]*z.w), abs=1e-5)
-        actual = hourly.recourse(r.point)
+        actual = np.array([float(full.obj[indices] @ r.point[indices]
+                                  + full.q[indices] @ r.point[indices]**2)
+                           for hour in full.times
+                           for indices in [full.continuous[full.time[full.continuous] == hour]]])
         np.testing.assert_allclose(actual, fuel+premium, atol=1e-5)
         assert actual.sum() == pytest.approx(r.recourse, abs=1e-5)
         assert validate(d, scenarios, z)["feasible"]
-        list(hourly.observe(x, "exhaustive", actual, lambda: 5.))
         feasible.append((x, r, actual))
     assert len(feasible) > 1 and any(not c.optimality for c in cuts)
     for x, r, actual in feasible:
         for c in cuts:
             assert c.alpha+c.beta@x <= (r.recourse if c.optimality else 0.)+1e-7
-        for c in hourly.cuts:
-            assert c["alpha"]+np.asarray(c["beta"])@x[c["binary_indices"]] <= actual[c["hour"]-1]+1e-7
-        assert hourly.lower(x) <= r.recourse+1e-7
     assert optimize(m, 5, integral=True).objval == pytest.approx(min(r.cost for _, r, _ in feasible))
-    # Last-hour cold-start rows retain the previous block's binary history.
-    assert set(m.ix.u[:, 1:3].ravel()) <= set(full.binary[hourly.parts[-1].indices])
 
 
 def test_cold_cost_partition_identity(tiny):
@@ -130,7 +125,7 @@ def test_cold_cost_partition_identity(tiny):
 
 
 def test_startup_details_reach_context_and_diagnostics(tiny, options):
-    from test_certification import whole_day
+    from conftest import whole_day
 
     def cold_tiny(n):
         d, scenarios = tiny(n)

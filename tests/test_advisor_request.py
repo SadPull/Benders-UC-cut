@@ -6,8 +6,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from suc_benders import bound_advisor
-from test_certification import whole_day
+from suc_benders import advisor_request
 
 
 @pytest.fixture
@@ -47,7 +46,7 @@ def test_real_process_returns_receipt_and_excludes_credentials(tiny, options, lo
     d, _ = tiny(1)
     options.llm_url = local_responses[0]
     options.llm_api_key = "offline-secret"
-    task = bound_advisor.BoundAdvisor(d, options, {"model": "offline", "input": "probe"}, 1, 8.)
+    task = advisor_request.AdvisorRequest(d, options, {"model": "offline", "input": "probe"}, 1, 8.)
     try:
         reply = None
         deadline = perf_counter()+8
@@ -69,7 +68,7 @@ def test_real_process_returns_receipt_and_excludes_credentials(tiny, options, lo
 def test_request_deadline_terminates_worker(tiny, options, local_responses):
     d, _ = tiny(1)
     options.llm_url, options.llm_api_key = local_responses[0], "offline-secret"
-    task = bound_advisor.BoundAdvisor(d, options, {}, 1, .00001)
+    task = advisor_request.AdvisorRequest(d, options, {}, 1, .00001)
     candidates, info = task.poll()
     assert not candidates and info["status"] == "TIME_LIMIT"
     assert not task.process.is_alive()
@@ -80,7 +79,7 @@ def test_http_failure_receipt_omits_secrets_and_does_not_retry(tiny, local_respo
     d, _ = tiny(1)
     replies, closed = [], []
     connection = NS(send=replies.append, close=lambda: closed.append(True))
-    bound_advisor._request(connection, local_responses[0], "offline-secret",
+    advisor_request._request(connection, local_responses[0], "offline-secret",
                            {"http_status": status}, d, 1, 5.)
     candidates, info = replies[0]
     assert not candidates and info["status"] == "FAILED"
@@ -88,14 +87,3 @@ def test_http_failure_receipt_omits_secrets_and_does_not_retry(tiny, local_respo
     assert info["seconds"] >= 0 and info["finished_at"] > 0
     assert len(local_responses[1]) == 1 and closed == [True]
     assert "offline-secret" not in json.dumps(info)
-
-
-def test_bound_prompt_targets_separation_not_only_feasible_savings(tiny, options):
-    whole = whole_day(tiny, options)
-    body = bound_advisor.request_body(whole.d, whole.scenarios, whole.result, options,
-                                     {"lower_bound": 10., "upper_bound": 20.}, 1)
-    prompt = json.loads(body["input"])
-    assert "Dispatch-infeasible" in body["instructions"]
-    assert prompt["context"]["bound_search"]["lower_bound"] == 10.
-    assert "Never turn a unit OFF" not in json.dumps(prompt["rules"])
-    assert body["reasoning"] == {"effort": "max"}

@@ -8,8 +8,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from .validation import capacity as commitment_capacity
-from .startup import fixed_cost, startup_costs
+from .validation import capacity as commitment_capacity, fixed_cost, startup_costs
 
 
 # 用于提示词的候选评估摘要，保存来源、实测费用、可行性、割数量和与当前方案的距离。
@@ -66,7 +65,7 @@ def _scenario_costs(results: Sequence[Any], scenarios: Sequence[Any]) -> dict[st
     }
 
 
-# 对各场景燃料费用乘概率求和；固定费用和 SMS 不平衡罚费用在上层另外计入。
+# 对各场景燃料费用乘概率求和；固定费用在上层另外计入。
 def _expected_fuel(results: Sequence[Any], scenarios: Sequence[Any]) -> float:
     return float(
         sum(scenario.probability * result.objective for scenario, result in zip(scenarios, results))
@@ -286,7 +285,7 @@ def _unit_cost_decomposition(
 
 
 # 接收 LLMContextInput，返回费用、候选、调度、备用裕量、敏感度及历史反馈的展示字典。
-# SMS 额外列出受罚缺电/弃电；所有费用仍来自数值结果，最后才做显示精度裁剪。
+# 所有费用来自数值结果，最后才做显示精度裁剪。
 def build_llm_context(
     data: Any,
     scenarios: Sequence[Any],
@@ -299,10 +298,6 @@ def build_llm_context(
     fixed = _fixed_cost(data, incumbent) if incumbent is not None else None
     expected_fuel = _expected_fuel(results, scenarios) if results else None
     total = fixed + expected_fuel if fixed is not None and expected_fuel is not None else None
-    sms = getattr(data, "model_profile", "") == "azema_sms"
-    expected_penalty = sum(s.probability*r.penalty_cost for s, r in zip(scenarios, results)) if sms else 0.
-    if total is not None:
-        total += expected_penalty
     incumbent_cost = None
     if total is not None:
         incumbent_cost = {
@@ -311,11 +306,6 @@ def build_llm_context(
             "expected_fuel": expected_fuel,
             "scenario_fuel": _scenario_costs(results, scenarios),
         }
-        if sms:
-            incumbent_cost.update(expected_penalty=expected_penalty,
-                expected_shed_mwh=sum(s.probability*float(r.shed.sum()) for s, r in zip(scenarios, results)),
-                expected_curtail_mwh=sum(s.probability*float(r.curtail.sum()) for s, r in zip(scenarios, results)))
-
     return _round3(
         {
             "incumbent_cost": incumbent_cost,
@@ -327,7 +317,7 @@ def build_llm_context(
                 context_input.candidate_evaluations
             ),
             "scenario_dispatch_summary": _scenario_dispatch_summary(data, scenarios, incumbent, results),
-            "reserve_margin": [] if sms else _reserve_margin(data, scenarios, incumbent),
+            "reserve_margin": _reserve_margin(data, scenarios, incumbent),
             "tight_constraints": _tight_constraints(scenarios, results),
             "infeasible_diagnostics": list(context_input.infeasible_diagnostics)[:20],
             "iteration_history": _iteration_history_rows(context_input.history),

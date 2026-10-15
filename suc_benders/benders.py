@@ -21,17 +21,6 @@ def discrete_feasible(b, x, hard=None):
     return bool(np.isin(x, [0, 1]).all() and residual.max(initial=0) <= 1e-7)
 
 
-# 按指定行及原模型列投影子问题，返回局部二进制/连续索引和对应的矩阵、边界、费用。
-# 二进制费用置零，只保留连续补偿费用；固定费用由上层主问题单独计入。
-def recourse_model(full, rows, binary, continuous):
-    columns = np.r_[binary, continuous]
-    nx = len(binary)
-    return NS(A=full.A[rows][:, columns], rhs=full.rhs[rows], eq=full.eq[rows],
-              obj=np.r_[np.zeros(nx), full.obj[continuous]], q=np.r_[np.zeros(nx), full.q[continuous]],
-              lb=full.lb[columns], ub=full.ub[columns], binary=np.arange(nx),
-              continuous=np.arange(nx, len(columns)))
-
-
 # 固定精确二进制向量 x 后求解连续调度，返回可行性、实际费用、点、对偶价格与割。
 # certified=True 时使用带安全余量的对偶下界或可验证分离式生成割；不可行探测也可产出割。
 def dispatch(b, x, seconds, *, certified=False):
@@ -42,8 +31,7 @@ def dispatch(b, x, seconds, *, certified=False):
         raise ValueError("Dispatch requires an exact binary vector")
     result = NS(feasible=False, status="DISCRETE_INFEASIBLE", cost=np.inf,
                 point=None, cut=None, recourse=np.inf, prices=None)
-    keep_proof = certified and (getattr(b, "audit_cuts", False)
-        or getattr(getattr(b, "d", None), "model_profile", "") == "azema_sms")
+    keep_proof = certified and getattr(b, "audit_cuts", False)
     hard = b.A[:, Y].getnnz(axis=1) == 0
     if not discrete_feasible(b, x, hard):
         return result
@@ -128,7 +116,7 @@ def master(b, cuts, seconds=0):
         rhs.append(bound); eq.append(equality); kind.append(label)
 
     # 用精确容量系数保留启停限制；min_up=1 时 AND 辅助位修正同小时启停容量的重叠。
-    for t, hour in enumerate([] if getattr(b.d, "model_profile", "") == "azema_sms" else b.times):
+    for t, hour in enumerate(b.times):
         capacity = {}
         for i in range(b.d.n_units):
             u, v = mapping[b.u[i, t]], mapping[b.v[i, t]]
@@ -165,20 +153,13 @@ def master(b, cuts, seconds=0):
            binary=np.arange(nb), nx=nx, and_pairs=pairs, kind=kind, scale=b.scale,
            capacity_rows=capacity_rows)
     m.purpose = 'master_lp_relaxation'
-    m.bound_certificate = None
     lower = -np.inf
     if seconds > 0:
         raw = optimize(m, seconds)
         if raw.status == "INFEASIBLE":
             raise RuntimeError("LP master is infeasible")
         if raw.status == "OPTIMAL":
-            lower = (raw.lower if getattr(b, 'paper_sa', False) else raw.objval) + b.constant - 1e-5
-            if getattr(b, 'paper_sa', False):
-                if not np.isfinite(lower):
-                    raise RuntimeError('Master LP has no finite dual certificate')
-                active = np.flatnonzero(raw.prices)
-                m.bound_certificate = dict(lower=lower, indices=active.tolist(),
-                                          prices=raw.prices[active].tolist())
+            lower = (raw.objval) + b.constant - 1e-5
     # Relaxation solutions are bounds only, not SA candidates.
     return m, lower
 

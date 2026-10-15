@@ -1,38 +1,17 @@
 """Gurobi adapter. Return numbers and arrays, never live solver objects."""
-# 模块职责：将稀疏线性/凸二次模型交给单线程 Gurobi，返回数值结果并可记录连续求解审计。
-# 连续模式默认放松 binary 列；只有 integral=True 才设为二进制，连续守卫中明确禁止该调用。
+# 模块职责：将稀疏线性/凸二次模型交给单线程 Gurobi，返回数值结果。
+# 连续模式默认放松 binary 列；只有 integral=True 才设为二进制。
 from types import SimpleNamespace as NS
-from contextlib import contextmanager
-from contextvars import ContextVar
-from time import perf_counter
 
 import gurobipy as gp
 import numpy as np
 from scipy import sparse
 
 
-_continuous_guard = ContextVar('continuous_guard', default=None)
-
-
-# 安装当前上下文的连续求解守卫和审计回调，退出时恢复原上下文。
-# 同时检查调用参数及实际模型整数变量数，确保论文式 SA 协议只使用连续 Gurobi。
-@contextmanager
-def continuous_only(record):
-    """An audited scope in which Gurobi must never optimize integer variables."""
-    token = _continuous_guard.set(record)
-    try:
-        yield
-    finally:
-        _continuous_guard.reset(token)
-
-
 # 输入稀疏模型与秒预算，返回状态、原始点/目标、对偶价格、下界和可选 Farkas 证据。
 # 整数模式取 ObjBound；连续最优时按有界拉格朗日重新计算下界，不把候选 ObjVal 当作整数证明。
 def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=False,
              warm_start=None, mip_focus=None, target_lower=None, callback=None, model_file=None):
-    record = _continuous_guard.get()
-    if record is not None and integral:
-        raise ValueError('Integer Gurobi optimization is forbidden in paper SA')
     if seconds <= 0:
         raise TimeoutError("No time remaining for optimization")
     if farkas and (integral or np.any(m.q)):
@@ -81,22 +60,12 @@ def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=F
             g.setObjective(m.obj @ x + x @ sparse.diags(m.q) @ x)
             constraints = g.addMConstr(m.A, x, np.where(m.eq, "=", "<"), m.rhs)
             g.update()
-            call = dict(purpose=getattr(m, 'purpose', 'continuous_relaxation'),
-                        integer_variables=int(g.NumIntVars), variables=int(g.NumVars),
-                        threads=int(g.Params.Threads), time_limit=float(g.Params.TimeLimit))
-            if record is not None:
-                if g.NumIntVars:
-                    raise ValueError('Integer variables reached the continuous-only Gurobi guard')
-                record(dict(call, event='start'))
-            started = perf_counter()
             if model_file is not None:
                 g.write(str(model_file))
             if callback is None:
                 g.optimize()
             else:
                 g.optimize(callback)
-            if record is not None:
-                record(dict(call, event='complete', status=int(g.Status), seconds=perf_counter()-started))
             statuses = {2: "OPTIMAL", 3: "INFEASIBLE", 4: "INF_OR_UNBD", 5: "UNBOUNDED",
                         9: "TIME_LIMIT", 11: "INTERRUPTED", 12: "NUMERIC", 13: "SUBOPTIMAL", 15: "USER_OBJ_LIMIT"}
             result = NS(status=statuses.get(g.Status, f"STATUS_{g.Status}"), lower=-np.inf,

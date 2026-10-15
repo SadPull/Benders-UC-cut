@@ -1,0 +1,268 @@
+{
+  "status": "CONVERGED",
+  "message": "",
+  "objective": 225.0,
+  "lower_bound": 224.99999989999998,
+  "relative_gap": 4.4444454437729693e-10,
+  "coordination_upper": null,
+  "u": [
+    [
+      1.0,
+      1.0,
+      1.0
+    ]
+  ],
+  "v": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "w": [
+    [
+      0.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "scenarios": [
+    {
+      "name": "tiny",
+      "probability": 1.0,
+      "p": [
+        [
+          30.0,
+          30.0,
+          30.0
+        ]
+      ],
+      "r": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "objective": 207.0
+    }
+  ],
+  "validation": {
+    "feasible": true,
+    "max_residual_mw": 0.0,
+    "cost_residual": 0.0
+  },
+  "history": [],
+  "outer_history": [],
+  "llm_calls": 0,
+  "llm_history": [],
+  "certification_history": [
+    {
+      "iteration": 1,
+      "status": "bound",
+      "lower": 224.99999989999998,
+      "upper": 225.0,
+      "elapsed_seconds": 0.5401577999946312,
+      "produced_seconds": 0.49717279999458697,
+      "master_bound": 224.99999989999998,
+      "bound_used": true,
+      "source": "strengthened_numeric",
+      "model_hash": "b04d60df8fa653191ebc372964103f8ef2f7a7a65a8c68d582819f39e3580fac"
+    },
+    {
+      "iteration": 2,
+      "status": "OPTIMAL",
+      "lower": 224.99999989999998,
+      "upper": 225.0,
+      "elapsed_seconds": 0.5401878999982728,
+      "produced_seconds": 0.5043975999942631,
+      "master_bound": 224.99999,
+      "bound_used": true,
+      "source": "strengthened_numeric",
+      "model_hash": "b04d60df8fa653191ebc372964103f8ef2f7a7a65a8c68d582819f39e3580fac"
+    }
+  ],
+  "diagnostics": {
+    "sa_calls": 0,
+    "evaluations": [
+      {
+        "source": "initial",
+        "feasible": true,
+        "objective": 225.0,
+        "fixed_cost": 18.0,
+        "expected_fuel_cost": 207.0,
+        "scenario_costs": {
+          "tiny": 207.0
+        },
+        "commitment_hash": "14ba80008e9a31953e79c7210de62fb804ca2c0c3b82aef9ac3e05b3e1f03619",
+        "incumbent_before": null,
+        "incumbent": 225.0,
+        "improved": true,
+        "elapsed_seconds": 0.03647869999986142,
+        "sa_calls": 0,
+        "proposal_id": "initial:0",
+        "hourly_recourse_costs": [
+          69.0,
+          69.0,
+          69.0
+        ],
+        "u": [
+          [
+            1.0,
+            1.0,
+            1.0
+          ]
+        ]
+      }
+    ],
+    "proposals": [
+      {
+        "proposal_id": "initial:0",
+        "origin": "initial",
+        "raw_u": [
+          [
+            1.0,
+            1.0,
+            1.0
+          ]
+        ],
+        "raw_binary": true,
+        "raw_discrete_feasible": true,
+        "repair_cache_hit": false,
+        "commitment_id": "14ba80008e9a31953e79c7210de62fb804ca2c0c3b82aef9ac3e05b3e1f03619",
+        "repaired_u": [
+          [
+            1.0,
+            1.0,
+            1.0
+          ]
+        ],
+        "hamming_u": 0,
+        "repaired_discrete_feasible": true,
+        "duplicate": false,
+        "outcome": "accepted",
+        "incumbent_decrease": null,
+        "feasible": true,
+        "continuous_dispatch_completed": true,
+        "validation_completed": true
+      },
+      {
+        "proposal_id": "initial:1",
+        "origin": "initial",
+        "raw_u": [
+          [
+            1.0,
+            1.0,
+            1.0
+          ]
+        ],
+        "raw_binary": true,
+        "raw_discrete_feasible": true,
+        "repair_cache_hit": false,
+        "commitment_id": "14ba80008e9a31953e79c7210de62fb804ca2c0c3b82aef9ac3e05b3e1f03619",
+        "repaired_u": [
+          [
+            1.0,
+            1.0,
+            1.0
+          ]
+        ],
+        "hamming_u": 0,
+        "repaired_discrete_feasible": true,
+        "duplicate": true,
+        "outcome": "duplicate",
+        "cache_hit": true,
+        "incumbent_decrease": 0.0
+      }
+    ],
+    "sampling": [],
+    "iterations": [],
+    "local_evaluations": [],
+    "llm_calls": [],
+    "blocks": [],
+    "rounds": [],
+    "complete_rounds": 0,
+    "coordination_count": 0,
+    "timings": {
+      "initialization": 0.03041269999812357,
+      "relaxation": 0.0,
+      "qubo": 0.0,
+      "annealing": 0.0,
+      "repair": 0.00013100000069243833,
+      "local_dispatch": 0.0,
+      "subproblems": 0.0025888000018312596,
+      "validation": 0.00015759999951114878,
+      "context": 0.0,
+      "llm": 0.0,
+      "coordination": 0.0,
+      "certification": 0.0,
+      "other": 0.5693317999975989
+    },
+    "certificate_cuts": [],
+    "hourly_certificate_cuts": [],
+    "bound_probes": [],
+    "llm_background_seconds": 0.0,
+    "strengthened_proof": {
+      "status": "finished",
+      "bounds": [
+        {
+          "event": "bound",
+          "elapsed_seconds": 0.49717279999458697,
+          "completed_epoch_seconds": 1792054725.0041707,
+          "physical_fingerprint": "271e00a818a6a624d3f393316577eade885e9cc87340f5e3cbc094e01d6c340b",
+          "model_hash": "b04d60df8fa653191ebc372964103f8ef2f7a7a65a8c68d582819f39e3580fac",
+          "lower": 224.99999989999998,
+          "origin": "continuous_separation"
+        },
+        {
+          "event": "finished",
+          "elapsed_seconds": 0.5043975999942631,
+          "completed_epoch_seconds": 1792054725.0120351,
+          "physical_fingerprint": "271e00a818a6a624d3f393316577eade885e9cc87340f5e3cbc094e01d6c340b",
+          "model_hash": "b04d60df8fa653191ebc372964103f8ef2f7a7a65a8c68d582819f39e3580fac",
+          "status": "OPTIMAL",
+          "lower": 224.99999,
+          "solver_wall_seconds": 0.007197799997811671,
+          "optimizer_calls": 1
+        }
+      ],
+      "upper_feedback": false,
+      "model_hash": "b04d60df8fa653191ebc372964103f8ef2f7a7a65a8c68d582819f39e3580fac",
+      "solver_status": "OPTIMAL"
+    },
+    "bound_mode": "strengthened",
+    "model_fingerprint": "271e00a818a6a624d3f393316577eade885e9cc87340f5e3cbc094e01d6c340b",
+    "advisor_state": {
+      "version": 1,
+      "phase": "sa",
+      "stalled": {
+        "upper": 0,
+        "lower": 0
+      },
+      "sa_rounds": 0,
+      "batch_id": 0,
+      "batch": null,
+      "consecutive_failures": 1
+    },
+    "advisor_rounds": [],
+    "llm_batches": [],
+    "sa_budget_seconds_used": 0.0,
+    "upper_advice_feedback": null,
+    "evaluation_count": 1,
+    "llm_call_count": 0,
+    "time_limit_overshoot": 0.0,
+    "resume_cursor": {
+      "outer": 1,
+      "round": 1
+    }
+  },
+  "elapsed_seconds": 0.6026218999977573,
+  "charged_elapsed_seconds": 3.0,
+  "resume_cursor": {
+    "outer": 1,
+    "round": 1
+  },
+  "resume": {
+    "reason": "v0.29.0 regression"
+  }
+}

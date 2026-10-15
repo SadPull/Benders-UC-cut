@@ -1,5 +1,10 @@
 from types import SimpleNamespace as NS
 
+from time import perf_counter
+from suc_benders import solver
+from suc_benders.model import model, partition
+from suc_benders.validation import pack
+
 import numpy as np
 import pytest
 
@@ -24,3 +29,13 @@ def tiny():
 def options():
     return Options(max_outer=10, max_inner=5, time_limit=30, verbose=False,
                    sa_reads=4, sa_sweeps=2, sa_temperature=10, sa_cooling=.8, sa_cutoff=.01)
+
+
+def whole_day(tiny, options, n=2):
+    d, scenarios = tiny(n)
+    m = model(d, scenarios)
+    full = partition(m, d.horizon)[0][0]
+    started = perf_counter()
+    whole = solver.WholeDay(m, full, options, started+30, solver.Result(lower_bound=0.), started)
+    assert whole.accept(pack(d, np.ones((n, d.horizon))), "initial")
+    return whole

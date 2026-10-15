@@ -10,7 +10,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 
 
-# 求解配置的数据容器：参数分为分块/预算、下界模式、QUBO/SA 和 LLM/授权四组。
+# 求解配置的数据容器：参数分为分块/预算、QUBO/SA 和 LLM/授权三组。
 # 授权与敏感 URL 字段使用 repr=False，避免对象打印时泄漏凭据。
 @dataclass
 class Options:
@@ -23,11 +23,6 @@ class Options:
     max_inner: int = 20
     tolerance: float = 1e-4
     time_limit: float = 600
-    # relaxation 保留连续块下界；integer_benders 另维护全天整数主问题认证。
-    bound_mode: str = "relaxation"
-    bound_slice_seconds: float = 30
-    rts24_improvements: bool = False
-    paper_sa: bool = False
     seed: int = 7
     verbose: bool = True
     # theta 步长控制费用编码精度；penalty 惩罚约束违反，reserve_scale 缩放容量罚项。
@@ -44,7 +39,7 @@ class Options:
     sa_cutoff: float = .01
     kaiwu_user_id: str = field(default="", repr=False)
     kaiwu_sdk_code: str = field(default="", repr=False)
-    # 两条 LLM 通道共享 llm_max_calls，单次超时和连续停滞触发次数分别由后续字段控制。
+    # 上界 LLM 请求由 llm_max_calls 限额，单次超时和连续停滞触发次数分别由后续字段控制。
     llm_enabled: bool = False
     llm_url: str = field(default="", repr=False)
     llm_api_key: str = field(default="", repr=False)
@@ -80,14 +75,7 @@ def load_options(overrides=None, config_path=None):
             continue
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
-    if o.bound_mode not in ("relaxation", "integer_benders", "strengthened"):
-        raise ValueError("Unknown bound_mode")
-    if not isinstance(o.rts24_improvements, bool) or (o.rts24_improvements and o.bound_mode != "integer_benders"):
-        raise ValueError("RTS24 improvements require integer_benders")
-    if not isinstance(o.paper_sa, bool) or (o.paper_sa and (
-            o.bound_mode != 'relaxation' or o.llm_enabled or not o.sa_enabled or o.rts24_improvements)):
-        raise ValueError('Paper SA requires continuous bounds, SA enabled and LLM disabled')
-    for name in ("time_limit", "bound_slice_seconds", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):
+    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "tolerance"):
         v = getattr(o, name)
         if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name != "tolerance"):
             raise ValueError(f"Invalid numeric option: {name}")
@@ -100,10 +88,10 @@ def load_options(overrides=None, config_path=None):
     if o.sa_budget_seconds is not None:
         v = o.sa_budget_seconds
         if (isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v)
-                or v < 0 or o.bound_mode not in ('integer_benders', 'strengthened')):
-            raise ValueError('SA budget requires a nonnegative finite value and integer_benders')
-    if not o.sa_enabled and (o.bound_mode not in ("integer_benders", "strengthened") or o.llm_enabled):
-        raise ValueError("Disabling SA requires integer_benders with LLM disabled")
+                or v < 0):
+            raise ValueError('SA budget requires a nonnegative finite value')
+    if not o.sa_enabled and o.llm_enabled:
+        raise ValueError("Disabling SA requires LLM disabled")
     for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key", "llm_agent_directory"):
         if not isinstance(getattr(o, name), str):
             raise ValueError(f"{name} must be a string")

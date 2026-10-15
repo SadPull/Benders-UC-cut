@@ -9,10 +9,9 @@ import gurobipy as gp
 import numpy as np
 
 from .benders import master
-from .certification import Certification
 from .model import fingerprint, model, partition
 from . import strengthened_master as strong
-from .subagent_advisor import save
+from .data import save_json
 
 
 def matrix_hash(m):
@@ -82,7 +81,7 @@ def _proof(sender, stop, d, scenarios, deadline, started, directory):
             inherited_evidence=False, upper_feedback=False)
         if folder:
             save_matrix(folder/'model.npz', refined.model)
-            save(folder/'preparation.json', preparation)
+            save_json(folder/'preparation.json', preparation)
         report('prepared', separation_status=refined.status, cuts=len(refined.cuts))
         if np.isfinite(refined.lower):
             report('bound', lower=float(refined.lower), origin='continuous_separation')
@@ -96,7 +95,7 @@ def _proof(sender, stop, d, scenarios, deadline, started, directory):
         values = dict(status=result.status, lower=result.lower if np.isfinite(result.lower) else None,
                       solver_wall_seconds=result.elapsed_seconds, optimizer_calls=result.optimizer_calls)
         if folder:
-            save(folder/'solve.json', dict(values, model_hash=proof_hash))
+            save_json(folder/'solve.json', dict(values, model_hash=proof_hash))
         report('finished', **values)
     except Exception as error:
         try:
@@ -110,13 +109,28 @@ def _proof(sender, stop, d, scenarios, deadline, started, directory):
         sender.close()
 
 
-class StrengthenedCertification(Certification):
-    """Reuse incumbent checks, but never pass numerical candidates to WholeDay."""
+class StrengthenedCertification:
+    """Certify the fixed cold model; only numerical bounds cross back."""
     def __init__(self, whole):
-        super().__init__(whole)
+        self.whole, self.o, self.result = whole, whole.o, whole.result
         self.process = self.connection = self.stop = None
         self.finished = False
         whole.diagnostics['strengthened_proof'] = dict(status='NOT_STARTED', bounds=[], upper_feedback=False)
+
+    def update_bound(self, lower):
+        if np.isfinite(lower):
+            candidate = max(self.result.lower_bound, float(lower))
+            if candidate > self.result.objective + 1e-5:
+                raise RuntimeError("Certified lower bound exceeds validated upper bound")
+            self.result.lower_bound = candidate
+
+    def converged(self):
+        lower, upper = self.result.lower_bound, self.result.objective
+        if lower > upper + 1e-5:
+            raise RuntimeError("Certified lower bound exceeds validated upper bound")
+        return (np.isfinite(lower) and np.isfinite(upper) and self.result.validation is not None
+                and self.result.validation["feasible"]
+                and upper-lower <= 1e-5 + self.o.tolerance*max(1., abs(upper)))
 
     def start(self):
         if self.process is not None:
@@ -132,15 +146,9 @@ class StrengthenedCertification(Certification):
         finally:
             sender.close()
 
-    def observe(self, x, evaluation, source):
-        if evaluation.feasible:
-            evaluation.hourly_recourse = self.hourly.recourse(evaluation.point)
-
-    def inherit(self, evidence):
-        raise ValueError('Strengthened proof requires its own cold model')
-
-    def restore_cuts(self, diagnostic):
-        if diagnostic.get('certificate_cuts') or diagnostic.get('hourly_certificate_cuts'):
+    def restore(self, diagnostic):
+        if any(diagnostic.get(name) for name in ('certificate_cuts', 'hourly_certificate_cuts',
+                                                'scenario_certificate_cuts', 'inherited_evidence')):
             raise ValueError('Strengthened proof cannot import Benders cuts')
         if 'strengthened_proof' not in diagnostic:
             raise ValueError('Recovered state is not a strengthened proof run')

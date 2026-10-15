@@ -59,6 +59,5 @@ def anneal(q, o, seconds, seed):
         candidates.append(x)
     statistics = {"bits": n, "candidates": len(candidates),
                   "best_energy": min(energies, default=np.inf), "seconds": perf_counter() - started}
-    if getattr(o, 'paper_sa', False) or getattr(o, 'bound_mode', '') == 'strengthened':
-        statistics.update(raw_bits=[''.join(str(int(v)) for v in x) for x in samples], raw_energies=energies)
+    statistics.update(raw_bits=[''.join(str(int(v)) for v in x) for x in samples], raw_energies=energies)
     return candidates, statistics

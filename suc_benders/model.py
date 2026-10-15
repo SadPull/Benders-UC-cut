@@ -13,12 +13,11 @@ import numpy as np
 from scipy import sparse
 
 
-# 返回 A、rhs、eq、线性/二次目标、边界及变量索引；SMS 数据交由独立模型分支构建。
+# 返回 A、rhs、eq、线性/二次目标、边界及变量索引。
 # u/v/w 费用跨场景只计一次，p 的燃料系数乘场景概率；正冷启动差额另用连续变量承载。
 def model(d, scenarios):
-    if getattr(d, "model_profile", "") == "azema_sms":
-        from .azema import model as sms_model
-        return sms_model(d, scenarios)
+    if getattr(d, "model_profile", ""):
+        raise ValueError("Unsupported model_profile")
     n, T, S = d.n_units, d.horizon, len(scenarios)
     N = n * T
     # 列主序使机组索引变化最快，其次小时、场景；与 pack/unpack 及历史 MATLAB 索引一致。
@@ -115,8 +114,6 @@ def fingerprint(m):
         digest.update(values.tobytes())
     digest.update(json.dumps([m.d.n_units, m.d.horizon, [(s.name, s.probability) for s in m.scenarios]],
                              ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    if getattr(m.d, "model_profile", "") == "azema_sms":
-        digest.update(b"azema_sms:linear:soft_balance:author_3bin:v1")
     return digest.hexdigest()
 
 

@@ -1,7 +1,8 @@
 """Round-robin block search with shared whole-day validation and advice."""
-# 模块职责：组织全天初始化、固定乘子下的分块 SA 轮询、协调、LLM 建议与可选整数认证。
+# 模块职责：组织全天初始化、固定乘子下的分块 SA 轮询、协调、LLM 建议与独立强化下界认证。
 # 全天物理/费用验证通过才更新原问题上界；块价格环境、修复来源及认证证明分别维护。
 from dataclasses import dataclass, field
+import hashlib
 from copy import deepcopy
 from contextlib import contextmanager
 from time import perf_counter
@@ -9,21 +10,22 @@ from types import SimpleNamespace as NS
 
 import numpy as np
 
-from . import llm
-from .advisor_feedback import call_due, summarize
 from .anneal import anneal
 from .benders import coordinate, discrete_feasible, dispatch, master
-from .certification import Certification
 from .context import CandidateEvaluation, LLMContextInput, build_llm_context
-from .dual_advisor import DualAdvisor
-from .dual_advisor import LLMCallFailures
+from .upper_advisor import UpperAdvisor, LLMCallFailures, summarize
 from .strengthened_certification import StrengthenedCertification
 from .model import fingerprint, model, partition
-from .optimization import continuous_only, optimize
-from .paper import context_id, process_raw_batch, record_bound, record_cut, record_state, sampling_evidence
+from .optimization import optimize
 from .qubo import qubo
-from .startup import fixed_cost
-from .validation import capacity, commitment, commitment_hash, pack, repair, unpack, validate
+from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate
+
+
+def context_id(b, outer, block):
+    digest = hashlib.sha256(np.asarray(b.obj, '<f8').tobytes())
+    digest.update(np.asarray([b.constant], '<f8').tobytes())
+    digest.update(np.asarray(b.cols, '<i8').tobytes())
+    return f'{outer}:{block}:{digest.hexdigest()}'
 
 
 # 可序列化求解结果：objective 是已验证方案费用，lower_bound 是当前模式认可的全局下界。
@@ -58,7 +60,7 @@ def closed(lower, upper, tolerance, reference=None):
             and upper - lower <= 1e-5 + tolerance * max(1, abs(reference)))
 
 
-# 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，以便继续整数认证。
+# 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，以便继续数值认证。
 class SABudgetExhausted(Exception):
     pass
 
@@ -67,32 +69,26 @@ class SABudgetExhausted(Exception):
 class WholeDay:
     """Shared incumbent, measured feedback and deadline across all time blocks."""
 
-    # 绑定输入模型与全局截止时间，建立按来源统计的诊断和计时器，按 bound_mode 选择认证器。
-    # paper_sa 明确禁止整数认证器和 LLM，确保其 Gurobi 调用只求连续模型。
+    # 绑定输入模型与全局截止时间，建立按来源统计的诊断和计时器，建立强化认证器。
     def __init__(self, m, full, o, deadline, result, started, progress=None):
-        if o.paper_sa and (o.bound_mode != 'relaxation' or o.llm_enabled or not o.sa_enabled):
-            raise ValueError('Paper SA cannot create an integer certifier or LLM advisor')
         self.m, self.full, self.o, self.deadline = m, full, o, deadline
         self.d, self.scenarios, self.result, self.started = m.d, m.scenarios, result, started
         self.best, self.dispatches = None, []
         self.cache, self.advisor_pool = {}, []
-        self.repair_cache = {}
-        self.stalled, self.feedback = 0, None
+        self.feedback = None
         self.diagnostics = result.diagnostics
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
-                                local_evaluations=[], llm_calls=[], blocks=[], rounds=[],
+                                local_evaluations=[], llm_calls=[], llm_background_seconds=0., blocks=[], rounds=[],
                                 complete_rounds=0, coordination_count=0, timings={name: 0. for name in (
                                     "initialization", "relaxation", "qubo", "annealing", "repair",
                                     "local_dispatch", "subproblems", "validation", "context", "llm", "coordination")})
         self.timings = self.diagnostics["timings"]
         self.progress = progress
-        self.certifier = (StrengthenedCertification(self) if o.bound_mode == 'strengthened' else
-                          Certification(self) if o.bound_mode == "integer_benders" else None)
-        self.diagnostics["bound_mode"] = o.bound_mode
+        self.certifier = StrengthenedCertification(self)
+        self.diagnostics["bound_mode"] = 'strengthened'
         self.diagnostics["model_fingerprint"] = fingerprint(m)
         self.resume_cursor = dict(outer=1, round=1)
-        self.advice = DualAdvisor(self) if self.certifier is not None else None
-        self.progress = progress
+        self.advice = UpperAdvisor(self)
         self.sa_started = None
         self.diagnostics['sa_budget_seconds_used'] = 0.
 
@@ -157,19 +153,9 @@ class WholeDay:
         z = commitment(self.d, raw_x)
         required = (1 + self.d.reserve_fraction) * np.max([s.load for s in self.scenarios], axis=0)
         record["raw_discrete_feasible"] = bool(discrete_feasible(self.full, raw_x)
-            and (getattr(self.d, "model_profile", "") == "azema_sms"
-                 or (capacity(self.d, z.u, z.v, z.w).sum(axis=0) >= required - 1e-6).all()))
+            and (capacity(self.d, z.u, z.v, z.w).sum(axis=0) >= required - 1e-6).all())
         phase = perf_counter()
-        repair_key = raw.astype('<f8').tobytes()
-        if (self.o.rts24_improvements or self.o.paper_sa) and repair_key in self.repair_cache:
-            cached = self.repair_cache[repair_key]
-            x = None if cached is None else cached.copy()
-            record['repair_cache_hit'] = True
-        else:
-            x = repair(self.d, self.scenarios, raw)
-            if self.o.rts24_improvements or self.o.paper_sa:
-                self.repair_cache[repair_key] = None if x is None else x.copy()
-            record['repair_cache_hit'] = False
+        x = repair(self.d, self.scenarios, raw)
         self.timings["repair"] += perf_counter() - phase
         if self.remaining() <= 0:
             record["outcome"] = "deadline"
@@ -196,8 +182,7 @@ class WholeDay:
                 record.update(outcome="duplicate", duplicate=True, cache_hit=True, incumbent_decrease=0.)
             return self.cache[key]["feasible"]
         phase = perf_counter()
-        r = (dispatch(self.full, x, self.remaining(), certified=True) if self.certifier is not None or self.o.paper_sa
-             else dispatch(self.full, x, self.remaining()))
+        r = dispatch(self.full, x, self.remaining(), certified=True)
         self.timings["subproblems"] += perf_counter() - phase
         if self.remaining() <= 0 or r.status == "TIME_LIMIT":
             if record is not None:
@@ -219,28 +204,23 @@ class WholeDay:
             if record is not None:
                 record["outcome"] = "validation_deadline"
             return False
-        if self.certifier is not None:
-            self.certifier.observe(x, r, source)
         improved = r.feasible and z.objective < before
         entry = dict(source=source, feasible=r.feasible, objective=z.objective if r.feasible else None,
                      fixed_cost=fixed, expected_fuel_cost=z.objective-fixed if r.feasible else None,
                      scenario_costs=scenario_costs, commitment_hash=commitment_hash(z),
                      incumbent_before=before, incumbent=min(before, r.cost), improved=improved,
                      elapsed_seconds=perf_counter()-self.started, sa_calls=self.diagnostics["sa_calls"])
-        if getattr(self.d, "model_profile", "") == "azema_sms" and r.feasible:
-            entry.update(expected_fuel_cost=report["expected_fuel_cost"],
-                         expected_penalty_cost=report["expected_penalty_cost"],
-                         expected_recourse_cost=z.objective-fixed,
-                         expected_shed_mwh=report["expected_shed_mwh"],
-                         expected_curtail_mwh=report["expected_curtail_mwh"])
         if record is not None:
             entry["proposal_id"] = record.get("proposal_id")
             record["incumbent_decrease"] = float(before-z.objective) if improved else 0.
         self.cache[key] = entry
-        if self.certifier is not None and r.feasible:
-            entry["hourly_recourse_costs"] = r.hourly_recourse.tolist()
-        if self.certifier is not None or self.o.paper_sa:
-            entry["u"] = z.u.tolist()
+        if r.feasible:
+            entry["hourly_recourse_costs"] = [float(
+                self.full.obj[indices] @ r.point[indices]
+                + self.full.q[indices] @ r.point[indices]**2)
+                for hour in self.full.times
+                for indices in [self.full.continuous[self.full.time[self.full.continuous] == hour]]]
+        entry["u"] = z.u.tolist()
         self.diagnostics["evaluations"].append(entry)
         if record is not None:
             record.update(outcome="accepted" if r.feasible else "infeasible", feasible=r.feasible,
@@ -258,73 +238,30 @@ class WholeDay:
             self.dispatches = [NS(**vars(z.scenarios[k]),
                 balance_dual=-balance[:, k] / s.probability,
                 reserve_dual=reserve[:, k] / s.probability) for k, s in enumerate(self.scenarios)]
-        if source in ("llm", "llm_bound") and r.feasible:
+        if source == "llm" and r.feasible:
             self.advisor_pool.append((r.cost, x.copy()))
             self.advisor_pool.sort(key=lambda item: item[0])
             del self.advisor_pool[16:]
         self.emit("evaluation")
         return r.feasible
 
-    # 改进模式在新乘子下逐块试建 QUBO，记录位数、系数和稠密工作内存估计后再进入采样周期。
-    # 检查使用当前已验证方案作块种子，防止乘子变化后编码溢出才被迟发现。
-    def check_repricing(self, prices, outer):
-        whole, o, m = self, self.o, self.m
-        remaining = self.remaining
-        # Check every next-price block before accepting a new sampling cycle.
-        next_blocks, _ = partition(m, o.block_hours, prices)
-        checks = []
-        for j, b in enumerate(next_blocks):
-            if remaining() <= 0:
-                raise TimeoutError
-            x = whole.best.point[b.cols[b.binary]]
-            local = dispatch(b, x, remaining())
-            if not local.feasible:
-                raise RuntimeError('Repriced incumbent block is infeasible')
-            encoded, lb = master(b, [local.cut], remaining())
-            encoded.lb[-1] = max(encoded.lb[-1], lb-b.constant)
-            q = qubo(encoded, o, local.cost-b.constant)
-            check = dict(outer=outer, block=j+1, bits=q.Q.shape[0], nonzeros=q.Q.nnz,
-                max_coefficient=float(abs(q.Q).max()), dense_working_bytes=32*(q.Q.shape[0]+1)**2)
-            whole.diagnostics['pending_qubo'] = check
-            whole.emit('before_sampling')
-            checks.append(check)
-            del q
-        whole.diagnostics.setdefault('repricing_checks', []).append(dict(outer=outer,
-            max_multiplier=float(abs(prices).max(initial=0)), blocks=checks))
-        whole.emit('repricing')
-
     # 恢复匹配模型的历史证据、割、调用额度和 SA 配额，并重新调度/校验保存的全天方案。
     # 块缓存与乘子重新构建，Gurobi 内部搜索树及在途工作进程不随检查点恢复。
     def restore(self, state):
-        """Recover validated global evidence; block caches and multipliers are rebuilt."""
-        if self.certifier is None:
-            raise ValueError("Resume requires integer_benders mode")
+        """Revalidate an incumbent and continue this strengthened run's charged budget."""
         saved = deepcopy(state)
         diagnostic = saved["diagnostics"]
-        signature = diagnostic.get("model_fingerprint")
-        if signature is None:
-            if hasattr(self.d, "cold_startup_cost") or getattr(self.d, "model_profile", "") == "azema_sms":
-                raise ValueError("This model profile requires a resume fingerprint")
-        elif signature != self.diagnostics["model_fingerprint"]:
+        if diagnostic.get("model_fingerprint") != self.diagnostics["model_fingerprint"]:
             raise ValueError("Recovered model fingerprint does not match the current inputs")
         if np.asarray(saved["u"]).shape != (self.d.n_units, self.d.horizon):
             raise ValueError("Recovered commitment dimensions do not match the current case")
-        for row in diagnostic["evaluations"]:
-            if "hourly_fuel_costs" in row and "hourly_recourse_costs" not in row:
-                row["hourly_recourse_costs"] = row.pop("hourly_fuel_costs")
-        for row in diagnostic["bound_probes"]:
-            if "hourly_actual_fuel" in row and "hourly_actual_recourse" not in row:
-                row["hourly_actual_recourse"] = row.pop("hourly_actual_fuel")
-        self.certifier.restore_cuts(diagnostic)
+        self.certifier.restore(diagnostic)
         self.result.certification_history = saved["certification_history"]
         self.result.llm_history, self.result.llm_calls = saved["llm_history"], saved["llm_calls"]
-        for name in ("evaluations", "proposals", "bound_probes"):
-            self.diagnostics[name] = diagnostic[name]
-        if self.o.bound_mode == 'strengthened':
-            for name in ('sampling', 'rounds', 'iterations', 'blocks', 'local_evaluations'):
-                self.diagnostics[name] = diagnostic.get(name, [])
-            self.result.history = saved.get('history', [])
-            self.result.outer_history = saved.get('outer_history', [])
+        for name in ("evaluations", "proposals", "sampling", "rounds", "iterations", "blocks", "local_evaluations"):
+            self.diagnostics[name] = diagnostic.get(name, [])
+        self.result.history = saved.get('history', [])
+        self.result.outer_history = saved.get('outer_history', [])
         self.diagnostics["llm_calls"] = self.result.llm_history
         self.diagnostics["llm_background_seconds"] = sum(row.get("background_seconds", 0.) for row in self.result.llm_history)
         self.resume_cursor = saved["resume_cursor"]
@@ -332,16 +269,13 @@ class WholeDay:
             self.diagnostics[name] = diagnostic[name]
         self.timings["prior_execution"] = saved["charged_elapsed_seconds"]
         self.diagnostics['sa_budget_seconds_used'] = diagnostic.get('sa_budget_seconds_used', 0.)
-        if self.o.rts24_improvements:
-            self.diagnostics['native_bounds'] = diagnostic.get('native_bounds', [])
-            restored = diagnostic.get('certifier_state', {})
-            self.certifier.window_index = restored.get('window_index', 0)
-            self.certifier.window_stalls = restored.get('window_stalls', 0)
         self.diagnostics["resume"] = saved["resume"]
         x = pack(self.d, np.asarray(saved["u"]))
         phase = perf_counter()
         checked = dispatch(self.full, x, self.remaining(), certified=True)
         self.timings["subproblems"] += perf_counter()-phase
+        if self.remaining() <= 0 or checked.status == 'TIME_LIMIT':
+            raise TimeoutError
         if not checked.feasible:
             raise RuntimeError("Recovered incumbent failed continuous dispatch")
         point = unpack(self.m, checked.point)
@@ -352,35 +286,19 @@ class WholeDay:
         for name in ("objective", "u", "v", "w", "scenarios"):
             setattr(self.result, name, getattr(point, name))
         self.result.validation = report
-        if diagnostic.get('inherited_evidence') is not None:
-            self.certifier.inherit(diagnostic['inherited_evidence'])
         labels = np.asarray(self.full.labels)
         balance = checked.prices[labels == "balance"].reshape((-1, len(self.scenarios)))
-        reserve = (checked.prices[labels == "reserve"].reshape((-1, len(self.scenarios)))
-                   if (labels == "reserve").any() else np.zeros_like(balance))
+        reserve = checked.prices[labels == "reserve"].reshape((-1, len(self.scenarios)))
         self.dispatches = [NS(**vars(point.scenarios[k]), balance_dual=-balance[:, k]/s.probability,
                               reserve_dual=reserve[:, k]/s.probability)
                            for k, s in enumerate(self.scenarios)]
         self.certifier.update_bound(saved["lower_bound"])
-        self.certifier.observe(x, checked, "resume_validation")
-        evaluated = {row["commitment_hash"]: row for row in self.diagnostics["evaluations"]}
-        known = [*self.diagnostics["bound_probes"],
-                 *(dict(raw_u=row["u"]) for row in evaluated.values() if "u" in row)]
-        history = self.result.certification_history
-        processed_before = history[-2]["elapsed_seconds"] if len(history) > 1 else -np.inf
-        for proposal in known:
-            x = pack(self.d, np.asarray(proposal["raw_u"]))
-            row = evaluated.get(commitment_hash(commitment(self.d, x)))
-            if row is None:
+        for row in self.diagnostics["evaluations"]:
+            if "u" not in row:
                 continue
-            key = x.astype(np.uint8).tobytes()
-            if key in self.cache:
-                continue
-            self.cache[key] = row
-            if row["feasible"] and row["elapsed_seconds"] <= processed_before:
-                for part in self.certifier.hourly.parts:
-                    part.cache.add(x[part.indices].astype(np.uint8).tobytes())
-            if row["feasible"] and row["source"] in ("llm", "llm_bound"):
+            x = pack(self.d, np.asarray(row["u"]))
+            self.cache[x.astype(np.uint8).tobytes()] = row
+            if row["feasible"] and row["source"] == "llm":
                 self.advisor_pool.append((row["objective"], x.copy()))
         self.advisor_pool.sort(key=lambda item: item[0])
         del self.advisor_pool[16:]
@@ -401,38 +319,12 @@ class WholeDay:
         baseline_u = self.result.u.copy()
         baseline = next(r for r in reversed(measurements) if r["commitment_hash"] == commitment_hash(self.result))
         costs = dict(total=baseline["objective"], fixed=baseline["fixed_cost"], expected_fuel=baseline["expected_fuel_cost"])
-        if "expected_penalty_cost" in baseline:
-            costs["expected_penalty"] = baseline["expected_penalty_cost"]
         prior_ids = {r["commitment_hash"] for r in measurements}
         pool = sorted(((key, row) for key, row in self.cache.items() if row["feasible"]),
                       key=lambda item: item[1]["objective"])[:16]
         bases = [commitment(self.d, np.frombuffer(key, dtype=np.uint8)) for key, _ in pool]
         self.timings["context"] += perf_counter() - phase
         return context, bases, (baseline_u, costs, prior_ids)
-
-    # 默认松弛模式完整轮结束后，根据全天上界停滞及预算决定是否同步请求一次 LLM。
-    # 先消耗调用额度并重置停滞，再评估回复；失败也保留回执并继续后续 SA。
-    def after_round(self, before, searches, outer, inner, allow_advice):
-        due, self.stalled = call_due("stagnation_burst", before, self.result.objective,
-                                     self.stalled, self.result.llm_calls, self.o.llm_patience)
-        if not (allow_advice and due and self.o.llm_enabled):
-            return
-        if self.remaining() <= 0 or (self.o.llm_max_calls is not None
-                                   and self.result.llm_calls >= self.o.llm_max_calls):
-            return
-        context, bases, baseline = self.upper_context()
-        if self.remaining() <= 0:
-            return
-        self.result.llm_calls += 1
-        self.stalled = 0
-        phase = perf_counter()
-        proposals, info = llm.request(self.d, self.scenarios, self.result, self.o, self.remaining(),
-                                     context, bases, self.result.llm_calls)
-        self.timings["llm"] += perf_counter() - phase
-        info.update(outer=outer, block=None, inner=inner, round=inner, stage="round_end", call_id=f"llm:{self.result.llm_calls}")
-        self.result.llm_history.append(info)
-        self.diagnostics["llm_calls"].append(info)
-        self.consume_upper(proposals, info, searches, baseline)
 
     # 修复并评估上界建议，通过全天验证的方案再投影到所有当前价格块，重新调度生成局部割。
     # 全天割不能直接复制成局部割；最后按调用前快照汇总候选反馈。
@@ -465,22 +357,17 @@ class WholeDay:
                                      message=info.get("message", "")),
                                   baseline_u, costs, self.diagnostics["evaluations"], prior_ids)
         info["feedback"] = self.feedback
-        if self.advice is not None:
-            self.diagnostics["upper_advice_feedback"] = self.feedback
+        self.diagnostics["upper_advice_feedback"] = self.feedback
 
 
 # 固定乘子下单个时间块的持久搜索状态，跨轮保存割、调度缓存、最好方案和协调平面。
 class BlockSearch:
     """One fixed-multiplier block, retained across round-robin visits."""
 
-    # 绑定块与价格上下文，初始化连续费用基础下界、空割池和局部诊断；论文模式启用割证据。
+    # 绑定块与价格上下文，初始化连续费用基础下界、空割池和局部诊断。
     def __init__(self, b, o, outer, index, whole, planes=None):
         self.b, self.o, self.outer, self.index, self.whole = b, o, outer, index, whole
         self.context = context_id(b, outer, index)
-        self.cut_keys = set()
-        b.paper_sa = o.paper_sa
-        if o.paper_sa:
-            b.audit_cuts = True
         self.lower = float(np.minimum(b.obj * b.lb, b.obj * b.ub).sum() + b.constant)
         self.upper, self.best = np.inf, None
         self.cuts, self.cache, self.history = [], {}, []
@@ -517,7 +404,7 @@ class BlockSearch:
         if key in cache:
             return cache[key]
         phase = perf_counter()
-        r = dispatch(b, x, remaining(), certified=True) if self.o.paper_sa else dispatch(b, x, remaining())
+        r = (dispatch(b, x, remaining()))
         whole.timings["local_dispatch"] += perf_counter() - phase
         if remaining() <= 0:
             return
@@ -531,7 +418,7 @@ class BlockSearch:
         if remaining() <= 0:
             return
         cache[key] = r
-        if r.cut is not None and (not self.o.paper_sa or record_cut(self, r.cut, x, source)):
+        if r.cut is not None:
             cuts.append(r.cut)
         if r.feasible:
             p = r.point
@@ -543,7 +430,7 @@ class BlockSearch:
         return r
 
     # 完成本块的一次访问：重调度种子、求 LP 下界，未闭合时最多采样一批 SA，再评估并刷新下界。
-    # 整批候选共享采样前的全天方案快照；论文模式先保存原始局部候选证据，再尝试全天修复。
+    # 整批候选共享采样前的全天方案快照。
     def step(self, seeds, inner):
         b, o, whole, result = self.b, self.o, self.whole, self
         outer, index, cuts = self.outer, self.index, self.cuts
@@ -559,8 +446,6 @@ class BlockSearch:
             return
         phase = perf_counter()
         m, bound = master(b, cuts, remaining())
-        if o.paper_sa:
-            record_bound(self, m)
         whole.timings["relaxation"] += perf_counter() - phase
         if remaining() <= 0:
             return
@@ -583,29 +468,23 @@ class BlockSearch:
             phase = perf_counter()
             whole.diagnostics["sa_calls"] += 1
             self.diagnostic["sa_calls"] += 1
-            sample_seed = (int(np.random.SeedSequence([o.seed, outer, inner, index]).generate_state(1)[0] % (2**31-1))
-                           if o.rts24_improvements or o.paper_sa else o.seed)
+            sample_seed = o.seed
             proposals, sampling = anneal(q, o, remaining(), sample_seed)
             whole.timings["annealing"] += perf_counter() - phase
             sampling.update(outer=outer, block=index, inner=inner, round=inner, seed=sample_seed,
                             raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
                             unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
-            if o.bound_mode == 'strengthened':
-                sampling.update(raw_binary_candidates=[x.tolist() for x in proposals],
-                                baseline_u=baseline_u.tolist(), free_indices=q.free.tolist(),
-                                fixed_indices=np.flatnonzero(~np.isnan(q.fixed)).tolist(),
-                                fixed_values=q.fixed[~np.isnan(q.fixed)].tolist())
-            if o.paper_sa:
-                sampling_evidence(self, m, q, sampling)
+            sampling.update(raw_binary_candidates=[x.tolist() for x in proposals],
+                            baseline_u=baseline_u.tolist(), free_indices=q.free.tolist(),
+                            fixed_indices=np.flatnonzero(~np.isnan(q.fixed)).tolist(),
+                            fixed_values=q.fixed[~np.isnan(q.fixed)].tolist())
             whole.diagnostics["sampling"].append(sampling)
             whole.emit("sampling")
             del q
             if remaining() <= 0:
                 return
-            if o.paper_sa:
-                process_raw_batch(self, proposals, baseline_u, inner)
             # All samples use the same incumbent snapshot, before this batch's improvements.
-            for k, x in enumerate([] if o.paper_sa else proposals):
+            for k, x in enumerate(proposals):
                 if remaining() <= 0:
                     return
                 local = np.zeros(len(b.obj)); local[b.binary] = x
@@ -621,8 +500,6 @@ class BlockSearch:
             return
         phase = perf_counter()
         m, bound = master(b, cuts, remaining())
-        if o.paper_sa:
-            record_bound(self, m)
         whole.timings["relaxation"] += perf_counter() - phase
         if remaining() <= 0:
             return
@@ -636,21 +513,12 @@ class BlockSearch:
 
 # 主流程：初始化/恢复 → 固定价格轮询所有块 → 轮末建议/认证 → 协调更新价格 → 整理结果。
 # 累计历史执行时间计入预算；保留阶段名定位失败，并在最终返回前独立复核全天方案。
-def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=None, started_at=None):
-    if o.bound_mode == 'strengthened' and initial_state is not None:
-        raise ValueError('Strengthened runs require cold initialization or their own resume state')
-    if resume_state is not None and initial_state is not None:
-        raise ValueError("Common initialization and resume are mutually exclusive")
-    prior_state = resume_state if resume_state is not None else initial_state
-    # 把已有执行耗时折回 started，保证恢复或共用初始化不会重置累计时间预算。
-    prior = prior_state["charged_elapsed_seconds"] if prior_state is not None else 0.
-    if not np.isfinite(prior) or prior < 0 or (resume_state is not None and prior >= o.time_limit):
+def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None):
+    prior = resume_state["charged_elapsed_seconds"] if resume_state is not None else 0.
+    if not np.isfinite(prior) or prior < 0 or prior >= o.time_limit:
         raise ValueError("Invalid or exhausted cumulative resume budget")
-    if prior >= o.time_limit:
-        raise ValueError("Common initialization exhausts the run budget")
     started = (perf_counter() if started_at is None else started_at)-prior; deadline = started + o.time_limit
-    if o.rts24_improvements or o.paper_sa or o.bound_mode == 'strengthened':
-        deadline -= 5.
+    deadline -= 5.
     result, whole = Result(), None
     searches = []
     stage = "INITIALIZATION"
@@ -662,21 +530,10 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
     try:
         m = model(d, scenarios)
         full = partition(m, d.horizon)[0][0]
-        full.audit_cuts = o.paper_sa or bool(getattr(progress, 'audit_cuts', False))
+        full.audit_cuts = bool(getattr(progress, 'audit_cuts', False))
         whole = WholeDay(m, full, o, deadline, result, started, progress)
         phase = perf_counter()
-        if initial_state is None:
-            relaxation = optimize(m, remaining())
-        else:
-            if initial_state["model_fingerprint"] != whole.diagnostics["model_fingerprint"]:
-                raise ValueError("Common initialization model fingerprint mismatch")
-            prices = np.asarray(initial_state["relaxation_prices"], float)
-            if prices.shape != m.rhs.shape or not np.isfinite(prices).all():
-                raise ValueError("Invalid common relaxation prices")
-            relaxation = NS(status="OPTIMAL", lower=initial_state["lower_bound"],
-                            objval=initial_state["lower_bound"], prices=prices)
-            whole.diagnostics["common_initialization"] = dict(sha256=initial_state["sha256"],
-                charged_elapsed_seconds=prior)
+        relaxation = optimize(m, remaining())
         whole.timings["initialization"] += perf_counter() - phase
         if remaining() <= 0:
             raise TimeoutError
@@ -684,18 +541,13 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
             raise RuntimeError(f"Continuous relaxation failed: {relaxation.status}")
         if hasattr(progress, 'relaxation'):
             progress.relaxation(m, relaxation, perf_counter()-started)
-        result.lower_bound = relaxation.lower if whole.certifier is not None or o.paper_sa else relaxation.objval - 1e-5
+        result.lower_bound = relaxation.lower
         if not np.isfinite(result.lower_bound):
             raise RuntimeError("Continuous relaxation has no finite certified lower bound")
         prices = relaxation.prices
         if resume_state is not None:
             stage = "RESUME"
             whole.restore(resume_state)
-        elif initial_state is not None:
-            x = pack(d, np.asarray(initial_state["u"]))
-            whole.accept(x, "initial", {"proposal_id": "initial:common"})
-            if whole.best is None or abs(result.objective-initial_state["objective"]) > 1e-4:
-                raise ValueError("Common initial schedule failed independent reevaluation")
         else:
             # 连续解只负责界和初始化；取整方案与全开方案都要经修复、调度、独立校验后比较。
             for u in (np.floor(relaxation.x[m.ix.u] + .5), np.ones((d.n_units, d.horizon))):
@@ -704,15 +556,9 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                 whole.accept(x, "initial", record)
         if whole.best is None:
             raise RuntimeError("No validated initial schedule")
-        if initial_state is not None and initial_state.get('inherited_evidence') is not None:
-            if whole.certifier is None:
-                raise ValueError('Inherited evidence requires integer_benders')
-            whole.certifier.inherit(initial_state['inherited_evidence'])
         whole.emit("initialization")
-        if o.bound_mode == 'strengthened':
-            whole.certifier.start()
-        if (whole.certifier is not None and (initial_state is not None or not o.sa_enabled)
-                and whole.certifier.converged()):
+        whole.certifier.start()
+        if not o.sa_enabled and whole.certifier.converged():
             result.status = "CONVERGED"
         try:
             with whole.sa_work():
@@ -725,10 +571,8 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                 with whole.sa_work():
                     # 新乘子对应新的块费用与局部割环境，历史二进制种子必须重新调度。
                     blocks, _ = partition(m, o.block_hours, prices)
-                    if o.paper_sa:
-                        record_state(whole, prices, outer)
                     searches = [BlockSearch(b, o, outer, j + 1, whole, planes[j]) for j, b in enumerate(blocks)]
-                if whole.advice is not None and whole.advice.state["phase"] == "llm" and not o.rts24_improvements:
+                if whole.advice.state["phase"] == "llm":
                     stage = "ADVISOR_RESUME"
                     whole.advice.run_batch(searches)
                     if whole.certifier.converged():
@@ -737,7 +581,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                 # 每个 inner 是完整遍历轮；尚未闭合的块各最多采样一批，已闭合块跳过采样。
                 for inner in range(first_round if outer == first_outer else 1, o.max_inner + 1):
                     before = result.objective
-                    lower_before, sa_before = result.lower_bound, whole.diagnostics["sa_calls"]
+                    sa_before = whole.diagnostics["sa_calls"]
                     before_count, before_calls = len(whole.diagnostics["evaluations"]), result.llm_calls
                     before_opt = sum(c.optimality for search in searches for c in search.cuts)
                     before_feas = sum(not c.optimality for search in searches for c in search.cuts)
@@ -745,13 +589,10 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                                         skipped_closed_blocks=[], started_seconds=perf_counter()-started)
                     whole.diagnostics["rounds"].append(round_record)
                     for j, search in enumerate(searches):
-                        if o.bound_mode == 'strengthened':
-                            whole.certifier.step()
-                            if whole.certifier.converged():
-                                result.status = 'CONVERGED'
-                                break
-                        if o.rts24_improvements:
-                            whole.advice.service(searches)
+                        whole.certifier.step()
+                        if whole.certifier.converged():
+                            result.status = 'CONVERGED'
+                            break
                         if remaining() <= 0:
                             raise TimeoutError
                         if closed(search.lower, search.upper, o.tolerance):
@@ -763,9 +604,6 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                             seeds = [whole.best.point[b.cols[b.binary]], *(previous[j] if inner == 1 else []),
                                      *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
                             search.step(seeds, inner)
-                            # Every term belongs to the current multiplier vector, including unvisited blocks.
-                            if whole.certifier is None:
-                                result.lower_bound = max(result.lower_bound, float(sum(x.lower for x in searches)))
                             if remaining() <= 0:
                                 raise TimeoutError
                             round_record["visited_blocks"].append(j + 1)
@@ -774,18 +612,19 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                                 record = {"proposal_id": f"pool:{outer}:{inner}:{j+1}",
                                           "outer": outer, "round": inner, "block": j + 1}
                                 x = whole.prepare(raw, "pool", record)
-                                whole.accept(x, "sa_pool_repaired" if o.paper_sa else "pool", record)
+                                whole.accept(x, "pool", record)
                             if o.verbose:
-                                print(f"outer={outer} round={inner} block={j + 1}/{len(blocks)} "
-                                      f"local=[{search.lower:.6f}, {search.upper:.6f}] "
-                                      f"full={result.objective:.6f} LB={result.lower_bound:.6f}", flush=True)
+                                print(f"[分块进度] 外层={outer} 内层轮次={inner} 时间块={j + 1}/{len(blocks)} "
+                                      f"块内[下界, 上界]=[{search.lower:.6f}, {search.upper:.6f}] "
+                                      f"全天可行成本(UB)={result.objective:.6f} "
+                                      f"认证下界(LB)={result.lower_bound:.6f}", flush=True)
                             if remaining() <= 0:
                                 raise TimeoutError
                     if result.status == 'CONVERGED':
                         round_record.update(ended_seconds=perf_counter()-started, stop_reason='CONVERGED')
                         whole.emit('convergence')
                         break
-                    # 完整遍历才更新 SA 轮计数和轮末停滞窗口；改进模式的下界触发按认证周期另计。
+                    # 完整遍历才更新 SA 轮计数和轮末停滞窗口。
                     round_record.update(complete=True, sa_completed_seconds=perf_counter()-started,
                                         incumbent_before=before, incumbent_after_sa=result.objective)
                     whole.diagnostics["complete_rounds"] += 1
@@ -798,16 +637,12 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                     all_closed = all(closed(x.lower, x.upper, o.tolerance) for x in searches)
                     whole.resume_cursor = (dict(outer=outer+1, round=1) if all_closed or inner == o.max_inner
                                            else dict(outer=outer, round=inner+1))
-                    # 常规模式的整数认证/双通道建议或同步上界建议都位于完整 SA 轮之后。
-                    if whole.certifier is not None:
-                        stage = "CERTIFICATION"
-                        whole.certifier.step()
-                        stage = "ADVISOR"
-                        whole.advice.after_round(before, lower_before, sa_before, searches, outer, inner,
-                                                 not (outer == o.max_outer and inner == o.max_inner))
-                    else:
-                        stage = f"ADVISOR_{outer}_ROUND_{inner}"
-                        whole.after_round(before, searches, outer, inner, not all_closed)
+                    # 数值认证与上界建议都位于完整 SA 轮之后。
+                    stage = "CERTIFICATION"
+                    whole.certifier.step()
+                    stage = "ADVISOR"
+                    whole.advice.after_round(before, sa_before, searches, outer, inner,
+                                             not (outer == o.max_outer and inner == o.max_inner))
                     iteration.update(incumbent=result.objective,
                         optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
                         feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
@@ -820,8 +655,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                         search.summarize()
                     if remaining() <= 0:
                         raise TimeoutError
-                    if ((whole.certifier is not None and whole.certifier.converged())
-                            or (o.paper_sa and closed(result.lower_bound, result.objective, o.tolerance))):
+                    if whole.certifier.converged():
                         result.status = "CONVERGED"
                         break
                     if all_closed:
@@ -842,31 +676,18 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                                                  "unconverged_blocks": [x.index for x in searches
                                                      if not closed(x.lower, x.upper, o.tolerance)]})
                     whole.diagnostics["coordination_count"] += 1
-                    if o.paper_sa:
-                        whole.diagnostics.setdefault('paper_coordination', []).append(dict(
-                            **result.outer_history[-1], approximate=not all_closed,
-                            elapsed_seconds=perf_counter()-started))
                     whole.emit("coordination")
-                    if whole.certifier is not None:
-                        # 对偶协调闭合只记录诊断；整数认证模式仍需原问题 UB/LB 达标才能停止。
-                        dual_lower = max(relaxation.lower, float(sum(search.lower for search in searches)))
-                        result.outer_history[-1]["dual_lower"] = dual_lower
-                        result.outer_history[-1]["dual_converged"] = closed(dual_lower, upper, o.tolerance, dual_lower)
-                    elif not o.paper_sa and closed(result.lower_bound, upper, o.tolerance, result.lower_bound):
-                        result.status = "DUAL_CONVERGED"
-                        break
+                    dual_lower = max(relaxation.lower, float(sum(search.lower for search in searches)))
+                    result.outer_history[-1]["dual_lower"] = dual_lower
+                    result.outer_history[-1]["dual_converged"] = closed(dual_lower, upper, o.tolerance, dual_lower)
                     prices = np.zeros(len(m.rhs)); prices[cross] = values
-                    if o.rts24_improvements:
-                        whole.check_repricing(prices, outer)
         except SABudgetExhausted:
             whole.diagnostics['sa_budget_exhausted'] = True
             whole.emit('sa_budget_exhausted')
-        if whole.certifier is not None and result.status != "CONVERGED":
-            # SA 达到迭代或配额上限后，保留已有方案与割，继续使用剩余总预算进行整数认证。
+        if result.status != "CONVERGED":
+            # SA 达到迭代或配额上限后，保留已有方案与割，继续使用剩余总预算进行数值认证。
             stage = "CERTIFICATION"
             while remaining() > 0 and not whole.certifier.converged():
-                if o.rts24_improvements:
-                    whole.advice.service(searches)
                 whole.certifier.step()
             if remaining() <= 0:
                 raise TimeoutError
@@ -877,7 +698,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
         result.status = "TIME_LIMIT" if remaining() <= 0 or isinstance(error, TimeoutError) else f"{stage}_FAILED"
         result.message = f"{type(error).__name__}: {error}"
     finally:
-        if whole is not None and whole.certifier is not None:
+        if whole is not None:
             whole.advice.close()
             try:
                 whole.certifier.close()
@@ -889,12 +710,10 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
         search.summarize()
     if np.isfinite(result.objective):
         result.validation = validate(d, scenarios, result)
-        if o.bound_mode in ("integer_benders", "strengthened") and result.lower_bound > result.objective + 1e-5:
+        if result.lower_bound > result.objective + 1e-5:
             result.status, result.message = "CERTIFICATION_FAILED", "Lower bound exceeds validated cost"
             result.relative_gap = (result.objective - result.lower_bound) / max(1., abs(result.objective))
         else:
-            if result.lower_bound > result.objective + 1e-4:
-                raise RuntimeError("Lower bound exceeds validated cost")
             result.relative_gap = max(0., result.objective - result.lower_bound) / max(1., abs(result.objective))
     result.elapsed_seconds = perf_counter() - started
     if whole is not None:
@@ -904,26 +723,7 @@ def _solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=N
                                   resume_cursor=whole.resume_cursor)
         whole.emit("final")
     if o.verbose:
-        print(f"{result.status}: cost={result.objective:.6f}, lower={result.lower_bound:.6f}, "
-              f"gap={100 * result.relative_gap:.4f}%, elapsed={result.elapsed_seconds:.2f}s")
-    return result
-
-
-# 公共求解接口；常规模式执行主流程，paper_sa 模式额外安装连续 Gurobi 守卫和调用审计。
-# 论文式 SA 要求重新初始化，拒绝继承/恢复状态以保持实验协议清晰。
-def solve(d, scenarios, o, *, resume_state=None, initial_state=None, progress=None, started_at=None):
-    args = dict(resume_state=resume_state, initial_state=initial_state, progress=progress, started_at=started_at)
-    if not o.paper_sa:
-        return _solve(d, scenarios, o, **args)
-    if resume_state is not None or initial_state is not None:
-        raise ValueError('Paper SA requires fresh initialization')
-    calls = []
-    # 保存连续求解的开始/结束事件，并按需转发给外部审计回调。
-    def record(event):
-        calls.append(event)
-        if hasattr(progress, 'optimizer_event'):
-            progress.optimizer_event(event)
-    with continuous_only(record):
-        result = _solve(d, scenarios, o, **args)
-    result.diagnostics['optimizer_calls'] = calls
+        print(f"[主算法结束] 状态={result.status} 可行成本(UB)={result.objective:.6f}, "
+              f"认证下界(LB)={result.lower_bound:.6f}, "
+              f"认证间隙={100 * result.relative_gap:.4f}%, 耗时={result.elapsed_seconds:.2f}秒", flush=True)
     return result

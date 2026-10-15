@@ -1,39 +1,10 @@
-"""Temporal/capacity repair and independent physical/cost validation."""
-# 模块职责：转换 u/v/w 与模型向量、进行启停/容量修复，并独立校验全天物理方程与费用。
+"""Commitment repair, startup fees and independent physical/cost validation."""
+# 模块职责：转换 u/v/w 与模型向量、进行启停/容量修复，核算实际冷热启动费用，并独立校验全天物理方程与费用。
 # 修复只提供候选；通过连续调度及独立 validate 后，方案费用才可更新原问题上界。
 from types import SimpleNamespace as NS
 import hashlib
 
 import numpy as np
-
-from .startup import fixed_cost
-
-
-# 从全天 u 和初始状态重建启动 v、停机 w，并按每类变量的列主序拼成二进制向量。
-def pack(d, u):
-    previous = np.column_stack([d.initial_on, u[:, :-1]])
-    v, w = np.maximum(u - previous, 0), np.maximum(previous - u, 0)
-    return np.concatenate([z.ravel(order="F") for z in (u, v, w)])
-
-
-# 将 u/v/w 向量按变量类型分段，恢复为机组 × 小时矩阵并复制，避免修改原缓存。
-def commitment(d, x):
-    # Each variable type occupies a contiguous, column-major unit/hour matrix.
-    n = d.n_units * d.horizon
-    return NS(**{name: np.asarray(x)[j*n:(j+1)*n].reshape((d.n_units, d.horizon), order="F").copy()
-                 for j, name in enumerate(("u", "v", "w"))})
-
-
-# 对完整 u/v/w 的二进制字节生成 SHA256，作为全天方案去重与反馈关联身份。
-def commitment_hash(z):
-    return hashlib.sha256(np.r_[z.u.ravel(), z.v.ravel(), z.w.ravel()].astype(np.uint8).tobytes()).hexdigest()
-
-
-# 逐机组逐小时计算启动容量与下一小时停机容量的较小值，供备用检查及独立物理验证使用。
-def capacity(d, u, v, w):
-    startup = d.pmax[:, None] * u - (d.pmax - d.pstart)[:, None] * v
-    shutdown = d.pmax[:, None] * u - (d.pmax - d.pshut)[:, None] * np.column_stack([w[:, 1:], np.zeros(d.n_units)])
-    return np.minimum(startup, shutdown)
 
 
 # 将候选 u 取整后按初始历史修复最小开停机时间、标准末小时禁停与最坏场景容量。
@@ -42,9 +13,6 @@ def repair(d, scenarios, u):
     u = np.asarray(u)
     if u.shape != (d.n_units, d.horizon) or not np.isfinite(u).all():
         return None
-    if getattr(d, "model_profile", "") == "azema_sms":
-        from .azema import repair as sms_repair
-        return pack(d, sms_repair(d, u))
     u = np.clip(np.rint(u), 0, 1)
     for i in range(d.n_units):
         state, duration = d.initial_on[i], d.initial_duration[i]
@@ -86,32 +54,9 @@ def repair(d, scenarios, u):
     return None
 
 
-# 从完整模型点恢复 u/v/w 和分场景 p/r，返回原目标费用及未乘概率的场景燃料明细。
-# SMS 另保存 shed/curtail 与罚费用；场景 objective 字段仍只表示燃料。
-def unpack(m, point):
-    d = m.d
-    result = NS(objective=float(m.obj @ point + m.q @ (point ** 2)), scenarios=[])
-    for name in ("u", "v", "w"):
-        setattr(result, name, point[getattr(m.ix, name)].copy())
-    for k, s in enumerate(m.scenarios):
-        p = point[m.ix.p[:, :, k]]
-        r = np.zeros_like(p) if m.ix.r is None else point[m.ix.r[:, :, k]]
-        result.scenarios.append(NS(name=s.name, probability=s.probability, p=p.copy(), r=r.copy(),
-                                   objective=float(np.sum(d.cost_a[:, None] * p ** 2 + d.cost_b[:, None] * p))))
-        if hasattr(m.ix, "shed"):
-            z = result.scenarios[-1]
-            z.shed, z.curtail = point[m.ix.shed[:, k]].copy(), point[m.ix.curtail[:, k]].copy()
-            z.penalty_cost = float(d.shedding_cost*z.shed.sum()+d.curtailment_cost*z.curtail.sum())
-            z.recourse_cost = z.objective+z.penalty_cost
-    return result
-
-
 # 不用稀疏模型行标签，直接重算二进制时序、初始/终端规则、出力、备用、爬坡和费用。
-# 失败抛 ValueError；成功返回物理最大残差与总费用残差，SMS 使用独立分支口径。
+# 失败抛 ValueError；成功返回物理最大残差与总费用残差。
 def validate(d, scenarios, result):
-    if getattr(d, "model_profile", "") == "azema_sms":
-        from .azema import validate as sms_validate
-        return sms_validate(d, scenarios, result)
     if not np.isfinite(result.objective):
         raise ValueError("No finite objective")
     for name in ("u", "v", "w"):
@@ -158,3 +103,67 @@ def validate(d, scenarios, result):
     if maximum > 1e-5 or error > 1e-4:
         raise ValueError("Physical or total cost validation failed")
     return {"feasible": True, "max_residual_mw": maximum, "cost_residual": error}
+
+
+# 从全天 u 和初始状态重建启动 v、停机 w，并按每类变量的列主序拼成二进制向量。
+def pack(d, u):
+    previous = np.column_stack([d.initial_on, u[:, :-1]])
+    v, w = np.maximum(u - previous, 0), np.maximum(previous - u, 0)
+    return np.concatenate([z.ravel(order="F") for z in (u, v, w)])
+
+
+# 将 u/v/w 向量按变量类型分段，恢复为机组 × 小时矩阵并复制，避免修改原缓存。
+def commitment(d, x):
+    # Each variable type occupies a contiguous, column-major unit/hour matrix.
+    n = d.n_units * d.horizon
+    return NS(**{name: np.asarray(x)[j*n:(j+1)*n].reshape((d.n_units, d.horizon), order="F").copy()
+                 for j, name in enumerate(("u", "v", "w"))})
+
+
+# 对完整 u/v/w 的二进制字节生成 SHA256，作为全天方案去重与反馈关联身份。
+def commitment_hash(z):
+    return hashlib.sha256(np.r_[z.u.ravel(), z.v.ravel(), z.w.ravel()].astype(np.uint8).tobytes()).hexdigest()
+
+
+# 逐机组逐小时计算启动容量与下一小时停机容量的较小值，供备用检查及独立物理验证使用。
+def capacity(d, u, v, w):
+    startup = d.pmax[:, None] * u - (d.pmax - d.pstart)[:, None] * v
+    shutdown = d.pmax[:, None] * u - (d.pmax - d.pshut)[:, None] * np.column_stack([w[:, 1:], np.zeros(d.n_units)])
+    return np.minimum(startup, shutdown)
+
+
+# 从完整模型点恢复 u/v/w 和分场景 p/r，返回原目标费用及未乘概率的场景燃料明细。
+def unpack(m, point):
+    d = m.d
+    result = NS(objective=float(m.obj @ point + m.q @ (point ** 2)), scenarios=[])
+    for name in ("u", "v", "w"):
+        setattr(result, name, point[getattr(m.ix, name)].copy())
+    for k, s in enumerate(m.scenarios):
+        p = point[m.ix.p[:, :, k]]
+        r = point[m.ix.r[:, :, k]]
+        result.scenarios.append(NS(name=s.name, probability=s.probability, p=p.copy(), r=r.copy(),
+                                   objective=float(np.sum(d.cost_a[:, None] * p ** 2 + d.cost_b[:, None] * p))))
+    return result
+
+
+# 返回全天空载运行费用 + 实际启动费用 + 停机费用，不含任何场景燃料或不平衡罚费用。
+def fixed_cost(d, u, w):
+    return float(np.sum(d.cost_c[:, None]*u + startup_costs(d, u) + d.shutdown_cost[:, None]*w))
+
+
+# 从 u 和初始开机状态重建启动时刻，返回每台机组每小时的实际热/冷启动费用。
+# 只有启动前连续停机小时数严格大于 min_down+cold_start_hours 才使用冷启动费。
+def startup_costs(d, u):
+    previous = np.column_stack([d.initial_on, u[:, :-1]])
+    starts = np.maximum(u-previous, 0)
+    costs = d.startup_cost[:, None]*starts
+    if not hasattr(d, "cold_startup_cost"):
+        return costs
+    offline = np.where(d.initial_on, 0, d.initial_duration).copy()
+    threshold = d.min_down+d.cold_start_hours
+    for t in range(d.horizon):
+        # 先按启动前的停机时长定价，再用本小时开停机状态更新计数，避免差一小时。
+        cold = (starts[:, t] > 0) & (offline > threshold)
+        costs[cold, t] = d.cold_startup_cost[cold]
+        offline = np.where(u[:, t] > 0, 0, offline+1)
+    return costs

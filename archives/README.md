@@ -1,3 +1,29 @@
+# v0.30.0 核心清理发布与恢复
+
+[v0.30.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.30.0) 保存当前 17 模块核心、手动实验入口、发布验证及两份清理前源码。完整测试 191 项通过，包含 3 项真实 Kaiwu 检查；本版没有重跑正式长实验，不改写 v0.29.0 及更早成绩。
+
+| 发布附件 | 用途 |
+|---|---|
+| `core-source-v0.30.0.zip` | 标签对应的当前源码、输入、测试、文档及便携 VS Code 设置 |
+| `source-before-mainline-cleanup-v0.30.0.zip` 及同名 `-manifest.json` | 80 文件的主线清理前快照及逐文件 SHA256 |
+| `source-before-module-merge-v0.30.0.zip` 及同名 `-manifest.json` | 72 文件的模块合并前快照及逐文件 SHA256 |
+| `release-validation-v0.30.0.json` | 本版测试、数值一致性、导入和私密文件排除检查 |
+| `release-manifest.json`、`SHA256SUMS.txt` | 附件名称、大小、SHA256 和发布源码提交 |
+
+先核对整包 SHA256，再解压到空的独立目录。两份历史源码包按各自 manifest 逐文件核对，不覆盖当前源码；当前核心 ZIP 使用 `LLM-benders-SUC-v0.30.0/` 顶层目录。所有附件均排除真实授权配置和许可证，须自行准备运行授权。清理时记录的 `published=false` 保留其当时状态，本次远端转存以 [v0.30.0.json](v0.30.0.json) 和 Release 清单为准。
+
+# 2026-10-15 模块合并与恢复
+
+模块合并前的 21 文件版本保存在 `C:/Users/12433/Desktop/LLM-benders-SUC-archive/module-merge-20261015-173242`。`source-before-merge.zip` 包含 72 个当前源码、测试、数据及文档文件，已按 `manifest.json` 逐文件回读核验；`working-tree.patch` 和 `status-before.txt` 保存合并前已有修改。授权配置、许可证和 `.vscode` 未打入源码包，单独记录哈希并核对原文件。
+
+[模块合并记录](module-merge-20261015.json) 保存归档哈希、四组模型一致性和回归结果。需要恢复合并前导入路径时，将 ZIP 解压到独立空目录，核对清单后再使用；对应源码包和 manifest 已纳入 v0.30.0 发布附件。工作区期间的其他并行改动单独记录并保留，既有主线清理与历史实验归档继续有效。
+
+# 2026-10-15 主线清理与恢复
+
+本次清理前的源码、测试、数据及未提交改动保存在外部目录 `C:/Users/12433/Desktop/LLM-benders-SUC-archive/mainline-cleanup-20261015-165807`。`source-before-cleanup.zip` 包含 80 个文件，`manifest.json` 保存逐文件大小及 SHA256，归档已逐文件回读核验；`working-tree.patch` 和 `status-before.txt` 记录原有修改。授权配置和许可证排除在外。
+
+[本次记录](mainline-cleanup-20261015.json) 保存整包哈希、模型一致性和测试结果。需要恢复旧模式时，将 ZIP 解压到空的独立目录，先核对整包及逐文件哈希，再按该快照准备运行环境；不覆盖当前主线。对应源码包和 manifest 已纳入 v0.30.0 发布附件，既有 v0.29.0 及更早实验的发布附件与恢复清单继续保留。
+
 # v0.29.0 冷启动实验归档与恢复
 
 [v0.29.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.29.0) 保存本轮全部现有结果、预检与失败批次，以及此前仅在本地的 v0.28.0 快筛证据。仓库为私有仓库，下载需要有权限的账户。各包 SHA256、文件数和范围见 [v0.29.0.json](v0.29.0.json)；完整发布附件及远端校验记录见 Release 的 `release-manifest.json`、`release-transfer.json` 和 `SHA256SUMS.txt`。
@@ -56,7 +82,7 @@
 
 [GitHub Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.25.0) 保存非核心文件。仓库是私有仓库，下载需要使用有权限的 GitHub 账户。源码由 `v0.25.0` 标签固定；本目录的 `v0.25.0.json` 记录附件名称、字节数、SHA256 和原始文件数。
 
-v0.25.1 已移除旧 SMS100、短测及整数认证 C/D 入口。当前 C 只使用 Python 环境，按根目录 README 安装；以下 Julia 和旧入口恢复说明适用于 v0.25.0 源码或历史冻结源码。
+v0.25.1 已移除旧 SMS100、短测及整数认证 C/D 入口。当时的 C 组只使用 Python 环境，按根目录 README 安装；以下 Julia 和旧入口恢复说明适用于 v0.25.0 源码或历史冻结源码。
 
 | 附件 | 内容 | 何时需要 |
 |---|---|---|
@@ -79,7 +105,7 @@ v0.25.1 已移除旧 SMS100、短测及整数认证 C/D 入口。当前 C 只使
 
 ## 重建依赖
 
-经典 10 机组和当前 C 组使用根目录 README 的安装步骤。需要复现 v0.25.0 的 RTS-24/SMS100 框架时，先把该标签源码或实验冻结源码解压到独立目录，准备 Python 3.10、Kaiwu SDK 和有效许可证，再从该历史源码根目录运行：
+经典 10 机组使用根目录 README 的安装步骤。需要复现 v0.25.0 的 RTS-24/SMS100 框架时，先把该标签源码或实验冻结源码解压到独立目录，准备 Python 3.10、Kaiwu SDK 和有效许可证，再从该历史源码根目录运行：
 
 ```powershell
 py -3.10 -B -m benchmarks.azema.setup

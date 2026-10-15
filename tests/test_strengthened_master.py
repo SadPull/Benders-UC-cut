@@ -7,7 +7,7 @@ import pytest
 from suc_benders import strengthened_master as strong
 from suc_benders.benders import dispatch, master
 from suc_benders.model import model, partition
-from suc_benders.optimization import continuous_only, optimize
+from suc_benders.optimization import optimize
 from suc_benders.validation import pack
 
 
@@ -70,8 +70,6 @@ def test_invalid_cut_identity_start_and_mode_rejected(tiny):
         strong.certify(lifted, 5, warm_start=np.full(len(lifted.obj), np.nan))
     with pytest.raises(ValueError, match="integer"):
         optimize(lifted, 5, mip_focus=3)
-    with continuous_only(lambda event: None), pytest.raises(ValueError, match="forbidden"):
-        strong.certify(lifted, 5)
 
 
 def test_mip_start_and_bound_target(tiny):

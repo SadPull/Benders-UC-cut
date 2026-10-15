@@ -9,7 +9,7 @@ from suc_benders.config import ROOT
 from suc_benders.data import load_data
 from suc_benders.model import model, partition
 from suc_benders.optimization import optimize
-from suc_benders.startup import startup_costs
+from suc_benders.validation import startup_costs
 from suc_benders.validation import pack, unpack, validate
 
 
@@ -109,3 +109,17 @@ def test_fixed_startup_compatibility(tiny, equal_cost):
     r = dispatch(partition(m, 3)[0][0], pack(d, u), 5)
     assert r.feasible and r.cost == pytest.approx(225.)
     assert validate(d, scenarios, unpack(m, r.point))["feasible"]
+
+
+@pytest.mark.parametrize('profile', ['azema_sms', 'unknown'])
+def test_removed_model_profile_is_rejected(tmp_path, profile):
+    raw = json.loads((ROOT/'data/units.json').read_text())
+    raw['model_profile'] = profile
+    path = tmp_path/'units.json'
+    path.write_text(json.dumps(raw))
+    with pytest.raises(ValueError, match='model_profile'):
+        load_data(path, ROOT/'data/stochastic.json')
+    d, scenarios = load_data(ROOT/'data/units.json', ROOT/'data/stochastic.json')
+    d.model_profile = profile
+    with pytest.raises(ValueError, match='model_profile'):
+        model(d, scenarios)

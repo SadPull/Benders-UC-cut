@@ -67,18 +67,16 @@ def test_real_small_qubo(authorized, options):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("scenario", ["deterministic", "stochastic"])
-@pytest.mark.parametrize("mode", ["relaxation", "integer_benders"])
-def test_real_classic10_short_run(authorized, scenario, mode, monkeypatch):
+def test_real_classic10_short_run(authorized, scenario, monkeypatch):
     from run_suc import run_suc
-    from suc_benders import bound_advisor, llm
+    from suc_benders import advisor_request
     from suc_benders.data import load_data
-    from suc_benders.startup import fixed_cost
+    from suc_benders.validation import fixed_cost
     from suc_benders.validation import validate
 
-    monkeypatch.setattr(llm, "request", lambda *a, **k: pytest.fail("Real LLM requests are disabled"))
-    monkeypatch.setattr(bound_advisor, "BoundAdvisor", lambda *a, **k: pytest.fail("Real LLM requests are disabled"))
+    monkeypatch.setattr(advisor_request, "AdvisorRequest", lambda *a, **k: pytest.fail("Real LLM requests are disabled"))
     o = {"scenario_file": str(ROOT / f"data/{scenario}.json"), "max_outer": 2, "max_inner": 2,
-         "time_limit": 60, "bound_mode": mode, "bound_slice_seconds": 1,
+         "time_limit": 20,
          "sa_reads": 4, "sa_sweeps": 2, "sa_cooling": .8, "sa_temperature": 10,
          "verbose": False, "llm_enabled": False}
     before = np.random.get_state()
@@ -104,9 +102,8 @@ def test_real_classic10_short_run(authorized, scenario, mode, monkeypatch):
     assert a.diagnostics["complete_rounds"] >= 1
     assert all(row["seed"] == 7 for row in a.diagnostics["sampling"])
     assert a.diagnostics["timings"]["qubo"] > 0
-    if mode == "integer_benders":
-        assert a.certification_history and a.diagnostics["hourly_certificate_cuts"]
-        assert all(row["lower"] <= row["upper"]+1e-5 for row in a.certification_history)
-        if a.status == "CONVERGED":
-            assert a.relative_gap <= 1e-4+1e-7
-    print(f"\n{scenario}/{mode}: status={a.status} cost={a.objective:.9f} LB={a.lower_bound:.9f} gap={a.relative_gap:.6%} residual={a.validation['max_residual_mw']:.3g} seconds={a.elapsed_seconds:.3f}")
+    assert a.certification_history
+    assert all(row["lower"] <= row["upper"]+1e-5 for row in a.certification_history)
+    if a.status == "CONVERGED":
+        assert a.relative_gap <= 1e-4+1e-7
+    print(f"\n{scenario}/strengthened: status={a.status} cost={a.objective:.9f} LB={a.lower_bound:.9f} gap={a.relative_gap:.6%} residual={a.validation['max_residual_mw']:.3g} seconds={a.elapsed_seconds:.3f}")

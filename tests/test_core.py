@@ -188,16 +188,14 @@ def test_free_equality_price():
 
 
 @pytest.mark.parametrize("hours", [1, 2, 3, 5])
-def test_tiny_lp_gap_and_validation(tiny, options, hours, monkeypatch):
+def test_tiny_certified_gap_and_validation(tiny, options, hours, monkeypatch):
     from suc_benders import solver
     monkeypatch.setattr(solver, "anneal", lambda *args: ([], {"bits": 1}))
     d, s = tiny(1)
     options.block_hours = hours
     r = solve(d, s, options)
-    # Without integer certification this instance retains an LP integrality gap.
-    assert r.status == "MAX_ITERATIONS", r
-    assert len(r.outer_history) == options.max_outer
-    assert all(row["unconverged_blocks"] for row in r.outer_history)
+    assert r.status == "CONVERGED", r.message
+    assert r.relative_gap <= options.tolerance+1e-7
     assert abs(r.objective - 225) < 1e-5
     assert r.lower_bound <= r.objective + 1e-5
     assert validate(d, s, r)["feasible"]
@@ -221,3 +219,17 @@ def test_option_validation(change, tmp_path):
 
 def test_unlimited_llm_calls_option(tmp_path):
     assert load_options({"llm_max_calls": None}, tmp_path / "missing.json").llm_max_calls is None
+
+
+def test_bounded_farkas_cut_separates_infeasible_recourse():
+    from scipy import sparse
+    from audit_helpers import verify_cut
+    b = NS(binary=np.array([0]), continuous=np.array([1]), A=sparse.csr_matrix([[2., -1.]]),
+           rhs=np.array([0.]), eq=np.array([False]), obj=np.array([0., 1.]), q=np.zeros(2),
+           lb=np.zeros(2), ub=np.ones(2), constant=0., audit_cuts=True)
+    good = dispatch(b, np.array([0]), 10, certified=True)
+    bad = dispatch(b, np.array([1]), 10, certified=True)
+    assert good.feasible and not bad.feasible and not bad.cut.optimality
+    verify_cut(b, vars(bad.cut))
+    assert bad.cut.alpha+bad.cut.beta @ np.array([0]) <= 1e-5
+    assert bad.cut.alpha+bad.cut.beta @ np.array([1]) > 1e-5
