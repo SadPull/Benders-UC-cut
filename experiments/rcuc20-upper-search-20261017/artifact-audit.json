@@ -1,0 +1,52 @@
+{
+  "status": "VERIFIED_TARGET_NOT_MET",
+  "inputs_unchanged": true,
+  "source_matches_both_runs": true,
+  "source_archive_verified": true,
+  "proof_model_unchanged": true,
+  "proof_model_hash": "5020f9b2fa377e21c6c17e46498513caad5a5bd19971023a0104c860a495963a",
+  "files": {
+    "results/rcuc20-upper-search-20261017-202912-907244d7/300/options.json": {
+      "sha256": "57c62eb2845faab00fc175af57916eca4979c1424430155a686d931140c73ca3",
+      "bytes": 464
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/300/summary.json": {
+      "sha256": "9fc96d36ab77020920e9f3339034a49633fd153a665ccec69e8392d88d317dc0",
+      "bytes": 23971
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/300/result.json": {
+      "sha256": "02e8db2b962bdf69ec30d6886463f857c4de0f14764a6dd742ac835804c4c73e",
+      "bytes": 128617070
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/300/curve.jsonl": {
+      "sha256": "cd86a879d2610bedac8cf1aaa72b8a90b5f8a7dc226411915315b11ee5527a86",
+      "bytes": 4007
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/300/proof/preparation.json": {
+      "sha256": "0f8da451c4b286023f1cdd9b5193f10f818a7586d956cf14663c70128de12d5f",
+      "bytes": 45012
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/1800/options.json": {
+      "sha256": "9b0a096e271211a2b0e2b83a28894eae477fe8e236facb3868032c96de422acf",
+      "bytes": 465
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/1800/summary.json": {
+      "sha256": "7b3e963222dc1808bd60622aa8daeed7ec3c86fbab428225f8fd68dc59c1d4bd",
+      "bytes": 24031
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/1800/result.json": {
+      "sha256": "ee67dccf274de091ff2f5d616981d77048b88cd3414b0614d761eced51503f0b",
+      "bytes": 754113508
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/1800/curve.jsonl": {
+      "sha256": "42cb299c6dd96adcb390690de171d12640fa9229f753e14232f0b9be542384d1",
+      "bytes": 11233
+    },
+    "results/rcuc20-upper-search-20261017-202912-907244d7/1800/proof/preparation.json": {
+      "sha256": "f767da931e38b1e00ed15b482dbe33bfce9d30dd19fc9cafe6d776c5c6b892d1",
+      "bytes": 45012
+    }
+  },
+  "source_zip_sha256": "b1bb054356106b2ccbcacee8fa6f7cafc8625d39d7468ac0c29fc4ae5df34e1c",
+  "offline_tests": "310 passed, 3 deselected"
+}

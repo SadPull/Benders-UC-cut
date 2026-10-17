@@ -68,7 +68,8 @@ def test_two_failed_calls_pause_and_never_request_lower(tiny, options, monkeypat
     monkeypatch.setattr(whole.certifier, 'converged', lambda:False)
     whole.advice.begin()
     with pytest.raises(LLMCallFailures):
-        whole.advice.run_batch([])
+        for _ in range(3):
+            whole.advice.advance([])
     assert len(requests) == 2
     assert all(row['channel'] == 'upper' for row in whole.result.llm_history)
     assert not hasattr(whole.certifier, 'probe_advice')

@@ -15,6 +15,34 @@ def transition_allowed(d):
     return start, stop
 
 
+def transition_violations(d, u):
+    """Explain known raw timeline violations; unit/hour identifiers are one-based."""
+    start, stop = transition_allowed(d)
+    rows = []
+    for i in range(d.n_units):
+        state, duration = d.initial_on[i], d.initial_duration[i]
+        for t, target in enumerate(u[i]):
+            if target != state:
+                minimum = d.min_up[i] if state else d.min_down[i]
+                reasons = []
+                if duration < minimum:
+                    reasons.append(('minimum_up' if state else 'minimum_down',
+                                    dict(duration=float(duration), required=float(minimum))))
+                if not state and not start[i]:
+                    reasons.append(('startup_unreachable', dict(pmin=float(d.pmin[i]),
+                        startup_limit=float(min(d.pstart[i], d.ramp_up[i])))))
+                if state and not stop[i, t]:
+                    reasons.append(('shutdown_unreachable', dict(
+                        minimum_previous_output=float(d.initial_output[i] if t == 0 else d.pmin[i]),
+                        shutdown_limit=float(d.ramp_down[i] if t == 0 else min(d.pshut[i], d.ramp_down[i])))))
+                if state and t == d.horizon-1:
+                    reasons.append(('terminal_shutdown', {}))
+                rows.extend(dict(unit=i+1, hour=t+1, rule=rule, **detail) for rule, detail in reasons)
+            duration = duration+1 if target == state else 1
+            state = target
+    return rows
+
+
 # 按初始历史修复启停时序、必要的启停爬坡条件和场景容量；连续可行性仍由调度判断。
 # 返回重建 u/v/w 或 None；容量修复可把机组从允许最早开机时刻一直打开，因此会修改其他小时。
 def repair(d, scenarios, u):

@@ -37,6 +37,53 @@ def test_whole_day_prompt_and_http_fields(whole):
     assert "unit_hour_decommit_gradient" in body["instructions"]
 
 
+def test_prompt_filters_impossible_decommitment_without_mutating_context(whole):
+    from copy import deepcopy
+    context, bases, _ = whole.upper_context()
+    context['reachability']['fixed_u'][0] = [1]*5
+    context['unit_hour_decommit_gradient'] = [dict(unit=0, period=2, estimated_total_change=-999.),
+                                             dict(unit=1, period=2, estimated_total_change=-1.)]
+    context['top_decommit_opportunities'] = deepcopy(context['unit_hour_decommit_gradient'])
+    original = deepcopy(context)
+    body = llm.request_body(whole.d, whole.scenarios, whole.result, whole.o, context, bases, 1)
+    prompt = json.loads(body['input'])
+    assert prompt['context']['unit_hour_decommit_gradient'] == [original['unit_hour_decommit_gradient'][1]]
+    assert prompt['context']['decommit_filter']['removed']['top_decommit_opportunities'] == 1
+    assert prompt['indexing']['context_unit_period'] == 0
+    assert prompt['indexing']['reachability_and_feedback'] == 1
+    assert 'including startup and shutdown' in prompt['physical_rules']['ramping']
+    assert 'w[:, -1] = 0' in prompt['physical_rules']['terminal']
+    assert context == original
+
+
+def test_prompt_feedback_explains_unreachable_transition(whole):
+    from suc_benders.validation import transition_violations
+    d = whole.d
+    d.ramp_up[0] = d.pmin[0]-1
+    raw = whole.result.u.copy()
+    reasons = transition_violations(d, raw)
+    assert any(r['unit'] == 1 and r['hour'] == 1 and r['rule'] == 'startup_unreachable' for r in reasons)
+    d.initial_on[0] = 1; d.initial_output[0] = 0.; d.ramp_down[0] = d.pmin[0]-1
+    raw[0] = 0
+    assert not any(r['unit'] == 1 and r['rule'] == 'shutdown_unreachable'
+                   for r in transition_violations(d, raw))
+    raw[0, :2] = 1
+    assert any(r['unit'] == 1 and r['hour'] == 3 and r['rule'] == 'shutdown_unreachable'
+               for r in transition_violations(d, raw))
+
+
+def test_timeline_reason_survives_repair_and_feedback(whole):
+    raw = whole.result.u.copy(); raw[0, -1] = 0
+    baseline = whole.upper_context()[2]
+    record = dict(proposal_id='terminal-trial')
+    info = dict(status='OK', proposals=[record])
+    whole.consume_upper([(raw, record)], info, [], baseline)
+    feedback = info['feedback']['proposals'][0]
+    assert feedback['repair_bits'] == 1 and feedback['outcome'] == 'duplicate'
+    assert any(r['rule'] == 'terminal_shutdown' and r['unit'] == 1 and r['hour'] == 5
+               for r in feedback['repair_reason']['known_raw_violations'])
+
+
 def test_parser_accepts_four_whole_day_u_proposals(whole):
     raw = whole.result.u.tolist()
     rows, info = llm.parse_response(response([{"u": raw}]*4), whole.d)

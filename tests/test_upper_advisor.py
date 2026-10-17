@@ -4,6 +4,7 @@ from time import perf_counter
 from types import SimpleNamespace as NS
 
 import pytest
+import numpy as np
 
 from conftest import whole_day
 from suc_benders import solver, upper_advisor
@@ -35,6 +36,8 @@ def test_three_complete_sampled_rounds_trigger_only_upper(scheduled):
     for i in (1, 2): complete(whole, i)
     assert not requests
     complete(whole, 3)
+    assert len(requests) == 1 and whole.advice.worker is not None
+    for _ in range(3): whole.advice.advance([])
     assert len(requests) == 3
     assert all(json.loads(body['input'])['advice_routing']['channel'] == 'upper' for body in requests)
     assert whole.advice.state['phase'] == 'sa'
@@ -46,6 +49,7 @@ def test_zero_finite_and_unlimited_caps(scheduled, cap, expected):
     whole, requests = scheduled
     whole.o.llm_max_calls = cap
     for i in range(1, 4): complete(whole, i)
+    for _ in range(3): whole.advice.advance([])
     assert len(requests) == whole.result.llm_calls == expected
 
 
@@ -57,7 +61,7 @@ def test_unsampled_rounds_and_disabled_tail_do_not_request(scheduled):
     assert not requests and whole.advice.state['sa_rounds'] == 3
 
 
-def test_waiting_keeps_certifying_without_a_second_request(scheduled, monkeypatch):
+def test_waiting_returns_control_without_a_second_request(scheduled, monkeypatch):
     whole, requests = scheduled
     whole.o.llm_max_calls = 1
     replies = [None, ([], dict(status='OK', proposals=[], seconds=0.))]
@@ -68,8 +72,14 @@ def test_waiting_keeps_certifying_without_a_second_request(scheduled, monkeypatc
     monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', launch)
     monkeypatch.setattr(whole.certifier, 'step', lambda:steps.append(True))
     whole.advice.begin()
-    whole.advice.run_batch([])
-    assert len(requests) == 1 and len(steps) == 2
+    whole.advice.advance([])
+    assert len(requests) == 1 and not steps
+    whole.advice.advance([])
+    assert whole.advice.worker is not None and len(requests) == 1
+    whole.certifier.step()
+    whole.diagnostics['sa_calls'] += 1
+    whole.advice.advance([])
+    assert whole.advice.worker is None and len(requests) == 1 and len(steps) == 1
 
 
 def test_upper_feedback_refreshes_incumbent_and_all_block_projections(scheduled, monkeypatch):
@@ -88,6 +98,7 @@ def test_upper_feedback_refreshes_incumbent_and_all_block_projections(scheduled,
         before = whole.diagnostics['sa_calls']; whole.diagnostics['sa_calls'] += 1
         whole.advice.after_round(whole.result.objective, before, searches, 1, i)
         assert whole.result.llm_calls == i
+        whole.advice.advance(searches)
     assert requests[0]['incumbent_u'][0] == [1, 1, 1]
     assert requests[1]['incumbent_u'][0] == [0, 0, 0]
     assert requests[1]['context']['previous_call_feedback']['proposals'][0]['cost_change']['total'] < 0
@@ -122,7 +133,7 @@ def test_v029_partial_upper_batch_preserves_spent_calls(scheduled, monkeypatch):
     saved = deepcopy(whole.diagnostics)
     whole.advice.restore(saved)
     assert whole.result.llm_history[0]['status'] == 'CANCELLED'
-    whole.advice.run_batch([])
+    whole.advice.advance([])
     assert whole.result.llm_calls == 3 and len(requests) == 1
 
 
@@ -156,7 +167,7 @@ def test_request_honors_long_timeout_and_preserves_validation_budget(scheduled, 
     whole.deadline = perf_counter()+59.
     whole.advice.start_request()
     assert len(budgets) == 2 and whole.result.llm_calls == 2
-    whole.advice.run_batch([])
+    whole.advice.advance([])
     assert whole.diagnostics['llm_batches'][-1]['status'] == 'VALIDATION_RESERVE'
 
 
@@ -169,7 +180,7 @@ def test_two_failed_calls_finalize_paused_batch(scheduled, monkeypatch):
     monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', launch)
     whole.advice.begin()
     with pytest.raises(upper_advisor.LLMCallFailures):
-        whole.advice.run_batch([])
+        for _ in range(3): whole.advice.advance([])
     batch = whole.diagnostics['llm_batches'][-1]
     assert batch['status'] == 'PAUSED_LLM_FAILURE'
     assert batch['ended_seconds'] >= batch['started_seconds']
@@ -179,7 +190,8 @@ def test_two_failed_calls_finalize_paused_batch(scheduled, monkeypatch):
     whole.advice.restore(saved)
     monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', lambda *a:
         NS(poll=lambda: ([], dict(status='OK', proposals=[], seconds=0.))))
-    whole.advice.run_batch([])
+    whole.advice.advance([])
+    whole.advice.advance([])
     assert whole.result.llm_calls == 3 and whole.advice.state['consecutive_failures'] == 0
     assert whole.advice.state['phase'] == 'sa' and whole.advice.state['batch'] is None
 
@@ -225,3 +237,65 @@ def test_zero_sa_quota_still_runs_numerical_proof(tiny, options, monkeypatch):
     assert result.status == 'CONVERGED', result.message
     assert result.diagnostics['sa_budget_exhausted'] and result.diagnostics['sa_calls'] == 0
     assert result.certification_history and result.validation['feasible']
+
+
+def test_delayed_reply_overlaps_actual_search_loop(tiny, options, monkeypatch):
+    options.llm_enabled = True; options.llm_patience = 1; options.llm_max_calls = 1
+    options.enhanced_search = True
+    holder, launched = {}, []
+    def progress(whole, event):
+        holder['whole'] = whole
+    def launch(*args):
+        whole = holder['whole']
+        initial_calls = whole.diagnostics['sa_calls']
+        launched.append(initial_calls)
+        def poll():
+            if whole.diagnostics['sa_calls'] < initial_calls+3:
+                return None
+            return [], dict(status='OK', proposals=[], seconds=1.)
+        return NS(poll=poll)
+    monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', launch)
+    monkeypatch.setattr(solver.StrengthenedCertification, 'start', lambda self: None)
+    monkeypatch.setattr(solver.StrengthenedCertification, 'step', lambda self: None)
+    monkeypatch.setattr(solver.StrengthenedCertification, 'converged', lambda self:
+        bool(self.whole.result.llm_history and self.whole.result.llm_history[-1]['status'] == 'OK'))
+    monkeypatch.setattr(solver, 'closed', lambda *a, **k: False)
+    d, scenarios = tiny(2, 6)
+    monkeypatch.setattr(solver, 'anneal', lambda *args: ([], {'bits': 1}))
+    result = solver.solve(d, scenarios, options, progress=progress)
+    assert result.status == 'CONVERGED', result.message
+    assert len(launched) == result.llm_calls == 1
+    assert result.diagnostics['sa_calls'] >= launched[0]+3
+    assert not any(row['llm_failed'] for row in result.diagnostics['iterations'])
+    assert result.diagnostics['advisor_state']['consecutive_failures'] == 0
+
+
+def test_reply_is_compared_with_current_incumbent(scheduled, monkeypatch):
+    whole, _ = scheduled
+    whole.o.llm_max_calls = 1
+    raw = whole.result.u.copy(); raw[0] = 0
+    record = dict(proposal_id='old-snapshot')
+    monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', lambda *a:
+        NS(poll=lambda: ([(raw, record)], dict(status='OK', proposals=[record]))))
+    whole.advice.begin(); whole.advice.advance([])
+    snapshot = whole.advice.baseline[0].copy()
+    current = raw.copy(); current[1] = 0
+    assert whole.accept(solver.pack(whole.d, current), 'sa')
+    before = whole.result.objective
+    whole.advice.advance([])
+    assert whole.result.objective == before
+    assert whole.result.llm_history[-1]['direct_incumbent_decrease'] == 0
+    np.testing.assert_array_equal(whole.advice.baseline[0], snapshot)
+
+
+def test_convergence_cancels_inflight_request(scheduled, monkeypatch):
+    whole, _ = scheduled
+    cancelled = []
+    monkeypatch.setattr(upper_advisor.advisor_request, 'AdvisorRequest', lambda *a:
+        NS(poll=lambda: None, started=perf_counter(), receipt={}, close=lambda: cancelled.append(True)))
+    whole.advice.begin(); whole.advice.advance([])
+    monkeypatch.setattr(whole.certifier, 'converged', lambda: True)
+    whole.advice.advance([])
+    assert cancelled == [True] and whole.advice.worker is None
+    assert whole.result.llm_history[-1]['status'] == 'CANCELLED'
+    assert whole.diagnostics['llm_batches'][-1]['status'] == 'CONVERGED'

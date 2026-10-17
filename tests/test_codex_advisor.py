@@ -240,6 +240,11 @@ def test_codex_backend_reaches_numeric_validation_after_stagnation(tiny, options
         whole.diagnostics['sa_calls'] += 1
         whole.advice.after_round(whole.result.objective, before, [], 1, number)
     assert whole.result.llm_calls == 1
+    for _ in range(800):
+        whole.advice.advance([])
+        if whole.advice.worker is None: break
+        sleep(.01)
+    assert whole.advice.worker is None
     assert whole.result.objective == pytest.approx(225.)
     assert whole.result.validation['feasible']
     receipt, = (tmp_path/'llm_requests').glob('*/receipt.json')

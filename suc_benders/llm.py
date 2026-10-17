@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any, Sequence
 from urllib.request import Request, urlopen
 
@@ -85,7 +86,14 @@ def _prompt(
         "trimming their ends, accounting for startup/shutdown costs, minimum up/down "
         "times, initial conditions, ramping and all scenarios. Turning units ON or "
         "substituting units is allowed when beneficial. No measured decommitment ladder "
-        "is required. Minimize total expected cost, not the number of ON hours."
+        "is required. Minimize total expected cost, not the number of ON hours. "
+        "Physical rules and fixed states override every cost gradient. Plan coordinated continuous "
+        "ON/OFF intervals across a small set of movable units, including replacement capacity before "
+        "a shutdown. Check each complete unit timeline against initial history, forbidden transitions "
+        "and terminal rules before returning it. Do not rely on downstream repair to make your "
+        "proposal feasible: repair may undo the entire intended saving. Return fewer than four "
+        "candidates if necessary; never claim measured feasibility or savings without evaluation. "
+        "Use 1-based unit/hour numbers in name/reason, and preserve the original matrix shape."
     )
     body = {
         "task": "Suggest diverse feasible-looking first-stage commitment schedules.",
@@ -93,6 +101,35 @@ def _prompt(
         "horizon": data.horizon,
         "units": data.n_units,
         "reserve_fraction": data.reserve_fraction,
+        "indexing": {
+            "matrix": "u[0][0] is unit 1, hour 1; rows=units, columns=hours",
+            "context_unit_period": 0,
+            "reachability_and_feedback": 1,
+            "explanation": "Context unit, period and unit_ids are zero-based. Reachability unit lists "
+                           "and previous_call_feedback unit/start_hour/end_hour are one-based. "
+                           "All matrices retain their ordinary row/column order; do not shift them.",
+        },
+        "physical_rules": {
+            "ramping": "For EVERY hour, including startup and shutdown: p_t-p_previous <= ramp_up "
+                       "and p_previous-p_t <= ramp_down. First-hour p_previous=initial_output; "
+                       "there is NO startup/shutdown exception and no state between OFF and pmin.",
+            "output": "pmin*u <= p; p+r <= pmax*u; p,r >= 0. At a startup p+r <= pstart. "
+                      "Before a next-hour shutdown p+r <= pshut. pstart/pshut are additional capacity "
+                      "limits, NOT overrides of ramp_up/ramp_down.",
+            "reachability": "Startup from OFF requires pmin <= min(pstart,ramp_up). A shutdown "
+                            "after the first hour requires pmin <= min(pshut,ramp_down). First-hour "
+                            "shutdown instead requires initial_output <= ramp_down. These are only "
+                            "necessary conditions; a movable unit is not freely switchable at every hour.",
+            "timing": "v=max(u-u_previous,0), w=max(u_previous-u,0), with u_previous=initial_on "
+                      "at hour 1. Before changing state, its consecutive duration (including "
+                      "initial_duration) must satisfy min_up or min_down. Do not reset at block boundaries. "
+                      "Minimum-time windows after a transition are clipped at the horizon end.",
+            "terminal": "Final-hour shutdown is forbidden: w[:, -1] = 0.",
+            "scenarios": "The same u applies to all scenarios. In each scenario/hour, sum(p)=load "
+                         "and sum(r)>=reserve_fraction*load. Check sum(pmin*u)<=minimum scenario load "
+                         "and startup/shutdown-adjusted available capacity >= maximum load plus reserve. "
+                         "Passing these aggregate checks does not prove ramp-feasible dispatch.",
+        },
         "scenarios": [
             {
                 "name": scenario.name,
@@ -129,6 +166,10 @@ def _prompt(
             ]
         },
         "rules": [
+            "Obey context.reachability when present: fixed_u entries other than -1 cannot change; "
+            "startup_allowed and shutdown_allowed forbid the indicated transitions. Its explicit unit lists "
+            "are 1-based; other field conventions are specified in indexing. These necessary "
+            "conditions do not replace full physical feasibility checks.",
             "Do not repeat base schedules",
             "Use only 0/1 values",
             "Consider turning OFF redundant unit-hours or substituting cheaper units",
@@ -148,5 +189,18 @@ def _prompt(
                                  "offline hours > min_down + cold_start_hours. Include initial offline history; "
                                  "do not reset it at block boundaries. Charge startup fees once across scenarios.")
     if context is not None:
+        context = deepcopy(context)
+        reachability = context.get('reachability')
+        if reachability is not None:
+            fixed = np.asarray(reachability['fixed_u'])
+            reachability['fixed_on_units'] = (np.flatnonzero((fixed == 1).all(axis=1))+1).tolist()
+            reachability['fixed_off_units'] = (np.flatnonzero((fixed == 0).all(axis=1))+1).tolist()
+            removed = {}
+            for key in ('unit_hour_decommit_gradient', 'top_decommit_opportunities'):
+                rows = context.get(key, [])
+                context[key] = [r for r in rows if fixed[r['unit'], r['period']] != 1]
+                removed[key] = len(rows)-len(context[key])
+            context['decommit_filter'] = dict(removed=removed,
+                rule='Exclude known fixed-ON unit-hours. Remaining gradients are NOT feasibility certificates.')
         body["context"] = context
     return system, json.dumps(body, separators=(",", ":"), allow_nan=False)

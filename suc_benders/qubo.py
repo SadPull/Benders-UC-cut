@@ -37,14 +37,14 @@ def quantize(coefficients, constant, budget, exact=None):
     return values, c, step
 
 
-# 反复穷举至多三个变量的 hard 行，只固定所有满足该行的组合中取值一致的二进制变量。
+# 反复穷举至多四个变量的 hard 行，包含跨小时状态转移；只固定所有合法组合共有的值。
 # 未确定值使用 NaN 标记；无满足组合说明硬约束不一致。
 def fixed_binary(m):
     fixed = np.full(len(m.binary), np.nan)
     rows = []
     for k, label in enumerate(m.kind):
         row = m.A[k, :len(fixed)].tocsr()
-        if label == "hard" and row.nnz <= 3:
+        if label == "hard" and row.nnz <= 4:
             rows.append((k, row.indices, row.data))
     changed = True
     while changed:

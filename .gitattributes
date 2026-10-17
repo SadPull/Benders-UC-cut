@@ -6,5 +6,6 @@ data/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
 data/classic10/** -text whitespace=trailing-space,space-before-tab,cr-at-eol
 data/classic10/sources/GA10.uc -text -whitespace
 data/sources/20_0_1_w.mod -text -whitespace
-experiments/rcuc20-20261017/**/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
+experiments/rcuc20-*/**/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
+experiments/rcuc20-*/llm-prompt.txt -text
 releases/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol

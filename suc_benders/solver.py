@@ -12,14 +12,14 @@ import numpy as np
 
 from .anneal import anneal
 from .benders import coordinate, discrete_feasible, dispatch, master
-from .context import CandidateEvaluation, LLMContextInput, build_llm_context, _decommit_gradient_rows
+from .context import CandidateEvaluation, LLMContextInput, build_llm_context
 from .upper_advisor import UpperAdvisor, LLMCallFailures, summarize
 from .strengthened_certification import StrengthenedCertification
 from .model import fingerprint, model, partition
 from .optimization import optimize
 from .qubo import qubo, fixed_binary
 from .neighborhood import joint_master, fix_units, select_units
-from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate
+from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, transition_violations
 
 
 def context_id(b, outer, block):
@@ -94,8 +94,19 @@ class WholeDay:
         self.sa_started = None
         self.diagnostics['sa_budget_seconds_used'] = 0.
         self.diagnostics.update(block_sa_calls=0, joint_sa_calls=0, joint_batches=[],
-            joint_search=dict(stalled_rounds=0, width_index=0, attempts=0,
+            joint_search=dict(version=2, stalled_rounds=0, attempts=0,
                               incumbent_cut=None, recent_cuts=[]))
+        phase = perf_counter()
+        self.fixed = fixed_binary(joint_master(full, []))[:len(full.binary)]
+        start, stop = transition_allowed(self.d)
+        fixed_u = self.fixed[full.u]
+        self.diagnostics['reachability'] = dict(index_base=1,
+            movable_units=(np.flatnonzero(np.isnan(fixed_u).any(axis=1))+1).tolist(),
+            frozen_units=(np.flatnonzero(np.isfinite(fixed_u).all(axis=1))+1).tolist(),
+            fixed_u=np.where(np.isfinite(fixed_u), fixed_u, -1).astype(int).tolist(),
+            fixed_u_unknown=-1, startup_allowed=start.tolist(), shutdown_allowed=stop.tolist())
+        self.timings['qubo'] += perf_counter()-phase
+        self.diagnostics.update(joint_cuts_added=0, joint_cuts_reused=0)
 
     def sampling_seed(self, kind):
         if not self.o.enhanced_search:
@@ -134,7 +145,7 @@ class WholeDay:
                         row['commitment_hash'], row['objective'])
         return self.result.u.copy(), commitment_hash(self.result), self.result.objective
 
-    def remember_cut(self, r, identity, improved):
+    def remember_cut(self, r, identity, improved, reused=False):
         if not self.o.enhanced_search or r.cut is None:
             return
         c = r.cut
@@ -142,15 +153,19 @@ class WholeDay:
         cut = dict(alpha=float(c.alpha), beta=c.beta.tolist(), optimality=bool(c.optimality),
                    cut_id=digest, commitment_id=identity)
         state = self.diagnostics['joint_search']
+        existing = any(row['cut_id'] == digest for row in state['recent_cuts'])
         if improved:
             state['incumbent_cut'] = cut
         recent = [row for row in state['recent_cuts'] if row['cut_id'] != digest]
         state['recent_cuts'] = [*recent, cut][-15:]
+        if reused or not existing:
+            self.diagnostics['joint_cuts_reused' if reused else 'joint_cuts_added'] += 1
+        return cut
 
     def joint_step(self, searches, outer, inner):
         """One full-horizon restricted SA batch; never contributes a global bound."""
         state = self.diagnostics['joint_search']
-        if not self.o.enhanced_search or state['stalled_rounds'] < 3:
+        if not self.o.enhanced_search:
             return
         started = perf_counter()
         info = dict(outer=outer, round=inner, attempt=state['attempts'], status='RUNNING',
@@ -160,7 +175,8 @@ class WholeDay:
             if self.remaining() < 5:
                 info['status'] = 'INSUFFICIENT_BUDGET'
                 return
-            anchor, identity, upper = self.search_anchor()
+            anchor = self.result.u.copy()
+            identity, upper = commitment_hash(self.result), self.result.objective
             info.update(anchor=identity, anchor_cost=upper, baseline_u=anchor.tolist())
             saved = state['recent_cuts']
             if state['incumbent_cut'] is not None:
@@ -168,16 +184,12 @@ class WholeDay:
             cuts = [NS(alpha=c['alpha'], beta=np.asarray(c['beta']), optimality=c['optimality']) for c in saved]
             phase = perf_counter()
             guide = joint_master(self.full, cuts)
-            fixed = fixed_binary(guide)
-            movable = np.flatnonzero(np.isnan(fixed[self.full.u]).any(axis=1))
+            movable = np.flatnonzero(np.isnan(self.fixed[self.full.u]).any(axis=1))
             if not len(movable):
                 info['status'] = 'NO_MOVABLE_UNITS'
                 return
-            size = min((2, 3, 5)[state['width_index']], len(movable))
-            gradient = _decommit_gradient_rows(self.d, self.scenarios, self.result, self.dispatches)
-            units = select_units(self.d, anchor, movable, gradient, state['attempts'], size, self.o.seed)
+            units = select_units(movable, state['attempts'], self.o.seed)
             state['attempts'] += 1
-            state['width_index'] = min(2, state['width_index']+1)
             info.update(units=units, hours=list(range(1, self.d.horizon+1)))
             fix_units(guide, self.full, anchor, units)
             self.timings['qubo'] += perf_counter()-phase
@@ -241,13 +253,30 @@ class WholeDay:
                 record = dict(proposal_id=f"joint_sa:{self.diagnostics['sa_calls']}:{k}",
                               outer=outer, round=inner, anchor=identity, units=units)
                 records.append(record)
-                x = self.prepare(commitment(self.d, candidate).u, 'joint_sa', record)
-                if x is None:
-                    continue
-                if np.any(commitment(self.d, x).u[outside] != anchor[outside]):
-                    record['outcome'] = 'repair_left_neighborhood'
-                    continue
-                if self.accept(x, 'joint_sa', record):
+                raw_u = commitment(self.d, candidate).u
+                x = pack(self.d, raw_u)
+                raw_valid = (discrete_feasible(self.full, x)
+                    and not np.any(raw_u[outside] != anchor[outside])
+                    and np.array_equal(x[np.isfinite(self.fixed)], self.fixed[np.isfinite(self.fixed)]))
+                record.update(origin='joint_sa', raw_u=raw_u.tolist(), raw_binary=True,
+                              raw_discrete_feasible=bool(raw_valid), outcome='discrete_infeasible')
+                self.diagnostics['proposals'].append(record)
+                feasible = raw_valid and self.accept(x, 'joint_sa', record)
+                if feasible:
+                    record.update(commitment_id=commitment_hash(commitment(self.d, x)),
+                        repaired_u=raw_u.tolist(), hamming_u=0, repaired_discrete_feasible=True)
+                elif self.remaining() > 0:
+                    record['raw_outcome'] = record.get('outcome', 'discrete_infeasible')
+                    # prepare owns its diagnostic row; keep one row per raw proposal.
+                    self.diagnostics['proposals'].pop()
+                    x = self.prepare(raw_u, 'joint_sa', record)
+                    if x is None:
+                        continue
+                    if np.any(commitment(self.d, x).u[outside] != anchor[outside]):
+                        record['outcome'] = 'repair_left_neighborhood'
+                        continue
+                    feasible = self.accept(x, 'joint_sa', record)
+                if feasible:
                     projections = []
                     for search in searches:
                         if self.remaining() <= 0:
@@ -388,6 +417,8 @@ class WholeDay:
         if raw.shape != (self.d.n_units, self.d.horizon) or not np.isfinite(raw).all():
             record["outcome"] = "invalid_matrix"
             return None
+        if source == 'llm' and np.isin(raw, [0, 1]).all():
+            record['raw_constraint_violations'] = transition_violations(self.d, raw)
         raw_key = raw.astype('<f8').tobytes()
         if self.o.enhanced_search and raw_key in self.repair_cache:
             x, metadata = self.repair_cache[raw_key]
@@ -400,6 +431,7 @@ class WholeDay:
         z = commitment(self.d, raw_x)
         required = (1 + self.d.reserve_fraction) * np.max([s.load for s in self.scenarios], axis=0)
         record["raw_discrete_feasible"] = bool(discrete_feasible(self.full, raw_x)
+            and np.array_equal(raw_x[np.isfinite(self.fixed)], self.fixed[np.isfinite(self.fixed)])
             and (capacity(self.d, z.u, z.v, z.w).sum(axis=0) >= required - 1e-6).all())
         phase = perf_counter()
         x = repair(self.d, self.scenarios, raw)
@@ -436,6 +468,8 @@ class WholeDay:
     def search_statistics(self):
         """Count whole-day proposals and first validations, never block feasibility."""
         statistics = {}
+        fixed_u = self.fixed[self.full.u]
+        known = np.isfinite(fixed_u)
         for source in ('sa', 'pool', 'joint_sa'):
             proposals = [r for r in self.diagnostics['proposals'] if r['origin'] == source]
             evaluations = [r for r in self.diagnostics['evaluations'] if r['source'] == source]
@@ -445,12 +479,21 @@ class WholeDay:
             for r in proposals:
                 outcome = r['outcome']; outcomes[outcome] = outcomes.get(outcome, 0)+1
             statistics[source] = dict(proposals=len(proposals), raw_unique=len(raw), repaired_unique=len(repaired),
+                raw_duplicate_rate=1-len(raw)/len(proposals) if proposals else 0.,
+                repaired_duplicate_rate=1-len(repaired)/sum(bool(r.get('repaired_discrete_feasible')) for r in proposals)
+                    if repaired else 0.,
+                raw_discrete_violations=sum(r.get('raw_discrete_feasible') is False for r in proposals),
+                raw_fixed_bit_violations=sum(int(np.count_nonzero(np.asarray(r['raw_u'])[known] != fixed_u[known]))
+                                            for r in proposals),
+                repair_bits=sum(r.get('hamming_u', 0) for r in proposals),
                 duplicate_rate=outcomes.get('duplicate', 0)/len(proposals) if proposals else 0.,
                 repair_cache_hits=sum(r.get('repair_cache_hit', False) for r in proposals), outcomes=outcomes,
                 new_feasible=sum(r['feasible'] for r in evaluations),
                 incumbent_decrease=sum(r['incumbent_before']-r['incumbent'] for r in evaluations
                                        if r['improved'] and np.isfinite(r['incumbent_before'])))
         statistics['new_feasible'] = sum(row['new_feasible'] for row in statistics.values())
+        groups = {tuple(sorted(row['units'])) for row in self.diagnostics['joint_batches'] if 'units' in row}
+        statistics['joint_coverage'] = {str(size): sum(len(g) == size for g in groups) for size in (1, 2, 3)}
         return statistics
 
     # 对全天二进制方案去重、做连续调度和独立物理/费用校验，记录实测结果及可用认证割。
@@ -466,6 +509,11 @@ class WholeDay:
             return False
         key = x.astype(np.uint8).tobytes()
         if key in self.cache:
+            entry = self.cache[key]
+            if entry.get('cut') is not None:
+                c = entry['cut']
+                self.remember_cut(NS(cut=NS(alpha=c['alpha'], beta=np.asarray(c['beta']),
+                    optimality=c['optimality'])), entry['commitment_hash'], False, reused=True)
             if record is not None:
                 record.update(outcome="duplicate", duplicate=True, cache_hit=True, incumbent_decrease=0.)
             return self.cache[key]["feasible"]
@@ -493,7 +541,8 @@ class WholeDay:
                 record["outcome"] = "validation_deadline"
             return False
         improved = r.feasible and z.objective < before
-        entry = dict(source=source, feasible=r.feasible, objective=z.objective if r.feasible else None,
+        entry = dict(source=source, feasible=r.feasible, dispatch_status=r.status,
+                     objective=z.objective if r.feasible else None,
                      fixed_cost=fixed, expected_fuel_cost=z.objective-fixed if r.feasible else None,
                      scenario_costs=scenario_costs, commitment_hash=commitment_hash(z),
                      incumbent_before=before, incumbent=min(before, r.cost), improved=improved,
@@ -510,13 +559,13 @@ class WholeDay:
                 for indices in [self.full.continuous[self.full.time[self.full.continuous] == hour]]]
         entry["u"] = z.u.tolist()
         self.diagnostics["evaluations"].append(entry)
-        self.remember_cut(r, entry['commitment_hash'], improved)
+        entry['cut'] = self.remember_cut(r, entry['commitment_hash'], improved)
         if record is not None:
             record.update(outcome="accepted" if r.feasible else "infeasible", feasible=r.feasible,
                           continuous_dispatch_completed=True, validation_completed=r.feasible)
         if improved:
             if not np.isfinite(before) or before-z.objective > 1e-4:
-                self.diagnostics['joint_search'].update(stalled_rounds=0, width_index=0)
+                self.diagnostics['joint_search'].update(stalled_rounds=0)
             if not np.isfinite(before):
                 self.diagnostics["initial_upper"] = z.objective
             self.best = r
@@ -565,6 +614,9 @@ class WholeDay:
         self.diagnostics['joint_batches'] = diagnostic.get('joint_batches', [])
         if 'joint_search' in diagnostic:
             self.diagnostics['joint_search'] = diagnostic['joint_search']
+            if self.diagnostics['joint_search'].get('version') != 2:
+                self.diagnostics['joint_search'].pop('width_index', None)
+                self.diagnostics['joint_search'].update(version=2, attempts=0, migrated_legacy_checkpoint=True)
             cuts = [*self.diagnostics['joint_search']['recent_cuts']]
             if self.diagnostics['joint_search']['incumbent_cut'] is not None:
                 cuts.append(self.diagnostics['joint_search']['incumbent_cut'])
@@ -625,6 +677,7 @@ class WholeDay:
             self.result, self.dispatches, evaluations[-16:], evaluations,
             [NS(**row) for row in self.diagnostics["iterations"]]))
         context["previous_call_feedback"] = self.feedback
+        context['reachability'] = deepcopy(self.diagnostics['reachability'])
         baseline_u = self.result.u.copy()
         baseline = next(r for r in reversed(measurements) if r["commitment_hash"] == commitment_hash(self.result))
         costs = dict(total=baseline["objective"], fixed=baseline["fixed_cost"], expected_fuel=baseline["expected_fuel_cost"])
@@ -676,6 +729,7 @@ class BlockSearch:
     # 绑定块与价格上下文，初始化连续费用基础下界、空割池和局部诊断。
     def __init__(self, b, o, outer, index, whole, planes=None):
         self.b, self.o, self.outer, self.index, self.whole = b, o, outer, index, whole
+        b.search_fixed = whole.fixed[b.cols[b.binary]].copy()
         self.context = context_id(b, outer, index)
         self.lower = float(np.minimum(b.obj * b.lb, b.obj * b.ub).sum() + b.constant)
         self.upper, self.best = np.inf, None
@@ -798,10 +852,13 @@ class BlockSearch:
             for k, x in enumerate(proposals):
                 if remaining() <= 0:
                     return
+                raw_evaluation = evaluate(x, 'sa_raw')
                 local = np.zeros(len(b.obj)); local[b.binary] = x
                 raw = baseline_u.copy(); raw[:, b.times] = local[b.u]
                 record = {"proposal_id": f"sa:{whole.diagnostics['sa_calls']}:{k}", "outer": outer, "block": index, "round": inner}
                 record['anchor'] = anchor_id
+                record['raw_local_dispatch_completed'] = raw_evaluation is not None
+                record['raw_local_feasible'] = raw_evaluation.feasible if raw_evaluation is not None else None
                 repaired = whole.prepare(raw, "sa", record)
                 if repaired is not None and remaining() > 0:
                     local = evaluate(repaired[b.cols[b.binary]], "sa")
@@ -882,7 +939,7 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                     searches = [BlockSearch(b, o, outer, j + 1, whole, planes[j]) for j, b in enumerate(blocks)]
                 if whole.advice.state["phase"] == "llm":
                     stage = "ADVISOR_RESUME"
-                    whole.advice.run_batch(searches)
+                    whole.advice.advance(searches)
                     if whole.certifier.converged():
                         result.status = "CONVERGED"
                         break
@@ -897,6 +954,7 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                                         skipped_closed_blocks=[], started_seconds=perf_counter()-started)
                     whole.diagnostics["rounds"].append(round_record)
                     for j, search in enumerate(searches):
+                        whole.advice.advance(searches)
                         whole.certifier.step()
                         if whole.certifier.converged():
                             result.status = 'CONVERGED'
@@ -905,29 +963,42 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                             raise TimeoutError
                         if closed(search.lower, search.upper, o.tolerance):
                             round_record["skipped_closed_blocks"].append(j + 1)
-                            continue
-                        with whole.sa_work():
-                            b = search.b
-                            stage = f"BLOCK_{outer}_{j + 1}_ROUND_{inner}"
-                            seeds = [whole.best.point[b.cols[b.binary]], *(previous[j] if inner == 1 else []),
-                                     *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
-                            search.step(seeds, inner)
-                            if remaining() <= 0:
-                                raise TimeoutError
-                            round_record["visited_blocks"].append(j + 1)
-                            if search.best is not None:
-                                raw = result.u.copy(); raw[:, b.times] = search.best.point[b.u]
-                                record = {"proposal_id": f"pool:{outer}:{inner}:{j+1}",
-                                          "outer": outer, "round": inner, "block": j + 1}
-                                x = whole.prepare(raw, "pool", record)
-                                whole.accept(x, "pool", record)
-                            if o.verbose:
-                                print(f"[分块进度] 外层={outer} 内层轮次={inner} 时间块={j + 1}/{len(blocks)} "
-                                      f"块内[下界, 上界]=[{search.lower:.6f}, {search.upper:.6f}] "
-                                      f"全天可行成本(UB)={result.objective:.6f} "
-                                      f"认证下界(LB)={result.lower_bound:.6f}", flush=True)
-                            if remaining() <= 0:
-                                raise TimeoutError
+                        else:
+                            with whole.sa_work():
+                                b = search.b
+                                stage = f"BLOCK_{outer}_{j + 1}_ROUND_{inner}"
+                                seeds = [whole.best.point[b.cols[b.binary]], *(previous[j] if inner == 1 else []),
+                                         *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
+                                search.step(seeds, inner)
+                                if remaining() <= 0:
+                                    raise TimeoutError
+                                round_record["visited_blocks"].append(j + 1)
+                                if search.best is not None:
+                                    raw = result.u.copy(); raw[:, b.times] = search.best.point[b.u]
+                                    record = {"proposal_id": f"pool:{outer}:{inner}:{j+1}",
+                                              "outer": outer, "round": inner, "block": j + 1}
+                                    x = whole.prepare(raw, "pool", record)
+                                    whole.accept(x, "pool", record)
+                                if o.verbose:
+                                    print(f"[分块进度] 外层={outer} 内层轮次={inner} 时间块={j + 1}/{len(blocks)} "
+                                          f"块内[下界, 上界]=[{search.lower:.6f}, {search.upper:.6f}] "
+                                          f"全天可行成本(UB)={result.objective:.6f} "
+                                          f"认证下界(LB)={result.lower_bound:.6f}", flush=True)
+                                if remaining() <= 0:
+                                    raise TimeoutError
+                        whole.advice.advance(searches)
+                        if o.enhanced_search:
+                            for _ in range(2):
+                                whole.certifier.step()
+                                if whole.certifier.converged():
+                                    result.status = 'CONVERGED'
+                                    break
+                                with whole.sa_work():
+                                    stage = 'JOINT_SEARCH'
+                                    whole.joint_step(searches, outer, inner)
+                                whole.advice.advance(searches)
+                            if result.status == 'CONVERGED':
+                                break
                     if result.status == 'CONVERGED':
                         round_record.update(ended_seconds=perf_counter()-started, stop_reason='CONVERGED')
                         whole.emit('convergence')
@@ -936,15 +1007,8 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                     round_record.update(complete=True, sa_completed_seconds=perf_counter()-started,
                                         incumbent_before=before, incumbent_after_sa=result.objective)
                     whole.diagnostics["complete_rounds"] += 1
-                    if o.enhanced_search:
-                        state = whole.diagnostics['joint_search']
-                        if before-result.objective > 1e-4:
-                            state.update(stalled_rounds=0, width_index=0)
-                        else:
-                            state['stalled_rounds'] += 1
-                        with whole.sa_work():
-                            stage = 'JOINT_SEARCH'
-                            whole.joint_step(searches, outer, inner)
+                    state = whole.diagnostics['joint_search']
+                    state['stalled_rounds'] = 0 if before-result.objective > 1e-4 else state['stalled_rounds']+1
                     iteration = dict(iteration=len(whole.diagnostics["iterations"])+1, outer=outer, round=inner,
                         incumbent=result.objective,
                         optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
@@ -964,7 +1028,8 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                         optimality_cuts_added=sum(c.optimality for x in searches for c in x.cuts)-before_opt,
                         feasibility_cuts_added=sum(not c.optimality for x in searches for c in x.cuts)-before_feas,
                         new_candidates=len(whole.diagnostics["evaluations"])-before_count,
-                        llm_failed=any(row["status"] != "OK" for row in result.llm_history[before_calls:]))
+                        llm_failed=any(row["status"] not in ("OK", "RUNNING", "CANCELLED")
+                                       for row in result.llm_history[before_calls:]))
                     round_record.update(ended_seconds=perf_counter()-started, incumbent=result.objective,
                                         llm_calls=result.llm_calls-before_calls)
                     whole.emit("round")
@@ -979,6 +1044,7 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                         break
                 if result.status == "CONVERGED":
                     break
+                whole.advice.advance(searches)
                 with whole.sa_work():
                     previous = [search.seeds for search in searches]
                     stage = "COORDINATION"
@@ -1006,6 +1072,7 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
             stage = "CERTIFICATION"
             while remaining() > 0 and not whole.certifier.converged():
                 whole.certifier.step()
+                whole.advice.advance(searches)
             if remaining() <= 0:
                 raise TimeoutError
             result.status = "CONVERGED"

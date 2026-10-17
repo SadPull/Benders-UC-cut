@@ -1,23 +1,19 @@
 """Restricted whole-day SA masters; their bounds are search guidance only."""
 from fractions import Fraction
+from itertools import combinations, zip_longest
 
 import numpy as np
 from scipy import sparse
 
 from .benders import master
-from .validation import pack, transition_allowed
+from .validation import pack
 
 
 def joint_master(full, cuts):
     """Keep the native master and add necessary full-horizon physical rows."""
-    m, _ = master(full, cuts)
+    m, _ = master(full, cuts, search_reachability=True)
     d = full.d
-    start, stop = transition_allowed(d)
-    forbidden = np.r_[full.v[~start].ravel(), full.w[~stop]]
     rows, cols, values, rhs, eq, kind = [], [], [], [], [], []
-    for column in forbidden:
-        rows.append(len(rhs)); cols.append(int(column)); values.append(1.)
-        rhs.append(0.); eq.append(True); kind.append('hard')
     minimum = np.min([s.load for s in full.scenarios], axis=0)
     for t in range(d.horizon):
         row = len(rhs)
@@ -45,20 +41,12 @@ def fix_units(m, full, u, units):
     m.kind.extend(['hard']*len(outside))
 
 
-def select_units(d, u, movable, gradient, attempt, size, seed):
-    """One coverage slot, then alternating economic donor/replacement slots."""
-    order = np.random.default_rng(np.random.SeedSequence([seed, 7103])).permutation(movable).tolist()
-    selected = [order[attempt % len(order)]]
-    saving = np.zeros(d.n_units)
-    for row in gradient:
-        saving[row['unit']] += max(0., -row['estimated_total_change'])
-    donors = sorted((i for i in movable if u[i].any()), key=lambda i: (-saving[i], int(i)))
-    replacements = sorted((i for i in movable if d.pmax[i] > 0 and (u[i] == 0).any()),
-        key=lambda i: (d.cost_a[i]*d.pmax[i]+d.cost_b[i]+d.cost_c[i]/d.pmax[i], int(i)))
-    for slot in range(1, size):
-        priority = donors if (slot+attempt) % 2 else replacements
-        choice = next((i for i in [*priority, *order] if i not in selected), None)
-        if choice is None:
-            break
-        selected.append(int(choice))
-    return selected
+def select_units(movable, attempt, seed):
+    """Seeded pair/triple coverage; improvements never reset the cursor."""
+    if len(movable) < 3:
+        return [int(i) for i in movable]
+    rng = np.random.default_rng(np.random.SeedSequence([seed, 7103]))
+    pairs, triples = [list(combinations(map(int, movable), size)) for size in (2, 3)]
+    rng.shuffle(pairs); rng.shuffle(triples)
+    order = [group for pair in zip_longest(pairs, triples) for group in pair if group is not None]
+    return list(order[attempt % len(order)])

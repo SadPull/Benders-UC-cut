@@ -428,7 +428,7 @@ def test_joint_exchange_crosses_blocks_without_mip_or_bound_feedback(tiny, optio
     assert whole.diagnostics['joint_batches'][0]['hours'] == list(range(1, 7))
 
 
-def test_joint_can_improve_from_a_worse_feasible_anchor(tiny, options, monkeypatch):
+def test_joint_uses_incumbent_instead_of_worse_anchor(tiny, options, monkeypatch):
     d, scenarios = tiny(3, 6)
     d.pmax[:] = d.pstart[:] = d.pshut[:] = [60., 20., 20.]
     d.cost_a[:] = 0.; d.cost_b[:] = [10., 1., 1.]; d.cost_c[:] = [0., 200., 0.]
@@ -445,12 +445,13 @@ def test_joint_can_improve_from_a_worse_feasible_anchor(tiny, options, monkeypat
     base, base_id, cost = whole.search_anchor()
     np.testing.assert_array_equal(base, b)
     assert cost > before
-    monkeypatch.setattr(solver, 'select_units', lambda *args: [0, 2])
+    monkeypatch.setattr(solver, 'select_units', lambda *args: [0, 1, 2])
     monkeypatch.setattr(solver, 'anneal', lambda *args: ([pack(d, c)], {'bits': 1}))
     whole.diagnostics['joint_search']['stalled_rounds'] = 3
     whole.joint_step([], 1, 3)
     assert whole.result.objective < before
-    assert whole.diagnostics['joint_batches'][0]['anchor'] == base_id
+    assert whole.diagnostics['joint_batches'][0]['anchor'] != base_id
+    np.testing.assert_array_equal(whole.diagnostics['joint_batches'][0]['baseline_u'], a)
     np.testing.assert_array_equal(whole.result.u, c)
 
 
@@ -459,9 +460,9 @@ def test_joint_rejects_repair_outside_selected_units(tiny, options, monkeypatch)
     whole = make_whole(d, scenarios, options)
     whole.diagnostics['joint_search']['stalled_rounds'] = 3
     monkeypatch.setattr(solver, 'select_units', lambda *args: [0, 1])
-    raw = np.ones((3, 4)); raw[0] = 0.
+    raw = np.ones((3, 4)); raw[0, -1] = 0.
     monkeypatch.setattr(solver, 'anneal', lambda *args: ([pack(d, raw)], {'bits': 1}))
-    repaired = raw.copy(); repaired[2] = 0.
+    repaired = raw.copy(); repaired[0] = 0.; repaired[2] = 0.
     monkeypatch.setattr(solver, 'repair', lambda *args: pack(d, repaired))
     before, count = whole.result.objective, len(whole.cache)
     whole.joint_step([], 1, 3)
@@ -503,34 +504,33 @@ def test_repair_memo_copies_and_reprices_each_block(tiny, options, monkeypatch):
     assert first.context != second.context and len(whole.diagnostics['local_evaluations']) == 2
 
 
-def test_joint_widths_rotate_after_stagnation(tiny, options, monkeypatch):
+def test_joint_pairs_and_triples_start_without_stagnation(tiny, options, monkeypatch):
     d, scenarios = tiny(6, 4); d.pmin[:] = 0.; options.enhanced_search = True
     whole = make_whole(d, scenarios, options)
     monkeypatch.setattr(solver, 'anneal', lambda *args: ([], {'bits': 1}))
     whole.joint_step([], 1, 1)
-    assert not whole.diagnostics['joint_batches']
+    assert len(whole.diagnostics['joint_batches']) == 1
     whole.diagnostics['joint_search']['stalled_rounds'] = 3
     for inner in range(3, 7):
         whole.joint_step([], 1, inner)
-    assert [len(b['units']) for b in whole.diagnostics['joint_batches']] == [2, 3, 5, 5]
-    assert len({b['seed'] for b in whole.diagnostics['joint_batches']}) == 4
-    assert whole.diagnostics['joint_search']['attempts'] == 4
+    assert [len(b['units']) for b in whole.diagnostics['joint_batches']] == [2, 3, 2, 3, 2]
+    assert len({b['seed'] for b in whole.diagnostics['joint_batches']}) == 5
+    assert whole.diagnostics['joint_search']['attempts'] == 5
 
 
-def test_joint_trigger_precedes_advice_and_requires_complete_round(tiny, options, monkeypatch):
+def test_two_joint_batches_per_block_precede_round_advice(tiny, options, monkeypatch):
     options.enhanced_search = True; options.max_inner = 4; options.max_outer = 1
     force_open_master(monkeypatch)
     monkeypatch.setattr(solver, 'anneal', lambda *a: ([], {'bits': 1}))
     events = []
     def joint(whole, searches, outer, inner):
-        if whole.diagnostics['joint_search']['stalled_rounds'] >= 3:
-            events.append(('joint', inner))
+        events.append(('joint', inner))
     monkeypatch.setattr(solver.WholeDay, 'joint_step', joint)
     monkeypatch.setattr(solver.UpperAdvisor, 'after_round',
                         lambda self, before, sa_before, searches, outer, inner, allow: events.append(('advice', inner)))
     result = solver.solve(*tiny(2, 6), options)
     assert result.status == 'CONVERGED', result.message
-    assert events[-4:] == [('joint', 3), ('advice', 3), ('joint', 4), ('advice', 4)]
+    assert events == [event for i in range(1, 5) for event in [*[('joint', i)]*4, ('advice', i)]]
 
 
 @pytest.mark.parametrize('case', ['budget', 'memory', 'late_lp', 'late_sa', 'INFEASIBLE', 'NUMERIC', 'bound'])
@@ -627,11 +627,11 @@ def test_joint_master_physical_rows_and_fixed_complement(tiny):
 def test_joint_unit_coverage_and_no_movable_units(tiny, options, monkeypatch):
     from suc_benders.neighborhood import select_units
     d, scenarios = tiny(5, 4)
-    groups = [select_units(d, np.ones((5, 4)), np.arange(5), [], i, 3, 17) for i in range(5)]
-    assert len({group[0] for group in groups}) == 5
-    assert groups == [select_units(d, np.ones((5, 4)), np.arange(5), [], i, 3, 17) for i in range(5)]
+    groups = [select_units(np.arange(5), i, 17) for i in range(20)]
+    assert len({tuple(group) for group in groups}) == 20
+    assert groups == [select_units(np.arange(5), i, 17) for i in range(20)]
     whole = exchange_whole(tiny, options)
-    monkeypatch.setattr(solver, 'fixed_binary', lambda m: np.zeros(len(m.binary)))
+    whole.fixed[:] = 0.
     monkeypatch.setattr(solver, 'anneal', lambda *a: pytest.fail('No movable units'))
     whole.diagnostics['joint_search']['stalled_rounds'] = 3
     whole.joint_step([], 1, 3)
@@ -666,7 +666,7 @@ def test_enhanced_resume_preserves_search_state_and_stream(tiny, options, monkey
     from dataclasses import asdict
     whole = exchange_whole(tiny, options)
     whole.diagnostics.update(sa_calls=11, block_sa_calls=9, joint_sa_calls=2)
-    whole.diagnostics['joint_search'].update(stalled_rounds=4, attempts=7, width_index=2)
+    whole.diagnostics['joint_search'].update(stalled_rounds=4, attempts=7)
     state = asdict(whole.result)
     state.update(charged_elapsed_seconds=2., resume_cursor=dict(outer=2, round=3), resume=dict(reason='test'))
     if legacy:

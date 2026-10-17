@@ -16,7 +16,7 @@ class UpperAdvisor:
     def __init__(self, whole):
         self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
         self.worker, self.pending, self.baseline = None, None, None
-        self.state = dict(version=1, phase="sa", stalled=dict(upper=0), sa_rounds=0,
+        self.state = dict(version=2, phase="sa", stalled=dict(upper=0), sa_rounds=0,
                           batch_id=0, batch=None, consecutive_failures=0)
         whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[])
 
@@ -36,10 +36,10 @@ class UpperAdvisor:
             outer=outer, round=inner, sa_round=self.state["sa_rounds"], upper_before=upper,
             upper=self.result.objective, lower=self.result.lower_bound,
             stalled=self.state["stalled"].copy()))
-        if (allow and self.available() and not self.cert.converged()
+        if (allow and self.state['batch'] is None and self.available() and not self.cert.converged()
                 and self.state["stalled"]["upper"] >= self.o.llm_patience):
             self.begin(outer=outer, inner=inner)
-            self.run_batch(searches)
+        self.advance(searches)
 
     def begin(self, *, outer=None, inner=None):
         if self.state["phase"] != "sa" or self.worker is not None:
@@ -63,6 +63,7 @@ class UpperAdvisor:
             return
         iteration = self.result.llm_calls+1
         context, bases, self.baseline = self.whole.upper_context()
+        self.baseline = deepcopy(self.baseline)
         body = llm.request_body(self.whole.d, self.whole.scenarios, self.result,
                                 self.o, context, bases, iteration)
         if self.whole.remaining() <= self.o.llm_reserve_seconds:
@@ -135,33 +136,32 @@ class UpperAdvisor:
                     ended_seconds=perf_counter()-self.whole.started)
             raise LLMCallFailures('Two consecutive upper subagent calls failed')
 
-    def run_batch(self, searches):
+    def advance(self, searches):
+        """Consume at most one reply and launch at most one request; never wait."""
         batch = self.state["batch"]
         if batch is None:
             return
         batch['status'] = 'RUNNING'
-        reason = "RETURN_TO_SA"
-        while self.whole.remaining() > 0:
-            if self.cert.converged():
-                reason = "CONVERGED"
-                break
-            if self.worker is not None:
-                self.poll(searches)
-                if self.whole.remaining() <= 0:
-                    break
-                self.cert.step()
-                continue
-            if not self.available():
+        if self.cert.converged():
+            reason = 'CONVERGED'
+        elif self.whole.remaining() <= 0:
+            reason = "TIME_LIMIT"
+        else:
+            if self.worker is not None and not self.poll(searches):
+                return
+            if self.whole.remaining() <= 0:
+                reason = 'TIME_LIMIT'
+            elif not self.available():
                 reason = ('VALIDATION_RESERVE' if self.whole.remaining() <= self.o.llm_reserve_seconds
                           else 'CALL_LIMIT')
-                break
-            if self.improved(batch["upper_before"]):
-                batch["done"]["upper"] = True
-            if batch["done"]["upper"] or batch["counts"]["upper"] >= 3:
-                break
-            self.start_request()
-        if self.whole.remaining() <= 0:
-            reason = "TIME_LIMIT"
+            elif self.improved(batch['upper_before']):
+                batch['done']['upper'] = True
+                reason = 'RETURN_TO_SA'
+            elif batch['counts']['upper'] >= 3:
+                reason = 'BATCH_LIMIT'
+            else:
+                self.start_request()
+                return
         self.close()
         batch.update(status=reason, upper_after=self.result.objective, lower_after=self.result.lower_bound,
                      sa_calls_at_end=self.whole.diagnostics["sa_calls"],
@@ -170,10 +170,11 @@ class UpperAdvisor:
 
     def restore(self, diagnostic):
         saved = diagnostic["advisor_state"]
-        if saved["version"] != 1:
+        if saved["version"] not in (1, 2):
             raise ValueError("Unknown advice scheduling state version")
         self.state.clear()
         self.state.update(deepcopy(saved))
+        self.state['version'] = 2
         self.state['stalled'] = dict(upper=saved['stalled']['upper'])
         for name in ("advisor_rounds", "llm_batches"):
             self.whole.diagnostics[name] = deepcopy(diagnostic.get(name, []))
@@ -196,6 +197,11 @@ class UpperAdvisor:
                 seconds=elapsed, background_seconds=elapsed, **self.worker.receipt)
             self.worker.close()
             self.worker = None
+        batch = self.state['batch']
+        if batch is not None and batch['status'] == 'RUNNING':
+            batch.update(status='CANCELLED', upper_after=self.result.objective,
+                lower_after=self.result.lower_bound, sa_calls_at_end=self.whole.diagnostics['sa_calls'],
+                ended_seconds=perf_counter()-self.whole.started)
         self.whole.diagnostics["upper_advice_feedback"] = self.whole.feedback
 
 
@@ -216,7 +222,11 @@ def summarize(advice, baseline_u, baseline, evaluations, previous_ids):
                    continuous_dispatch_completed=bool(r or p.get("local_dispatch_completed")),
                    local_feasible=p.get("local_feasible"),
                    validation_completed=r is not None, feasible=r["feasible"] if r else None,
-                   repair_reason=None, infeasibility_reason=None,
+                   repair_reason=(dict(known_raw_violations=p.get('raw_constraint_violations', []),
+                       note='Known violations of the original proposal; not a full explanation of every repair edit.')
+                       if p.get('hamming_u') or p.get('raw_constraint_violations') else None),
+                   infeasibility_reason=(r.get('dispatch_status', 'INFEASIBLE_REASON_UNAVAILABLE')
+                                         if r and not r['feasible'] else None),
                    baseline_cost=baseline, costs=None, cost_change=None,
                    refreshed_incumbent=bool(r and r["improved"] and not cached))
         if r and r["feasible"]:

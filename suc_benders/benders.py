@@ -9,6 +9,7 @@ import numpy as np
 from scipy import sparse
 
 from .optimization import optimize
+from .validation import transition_allowed
 
 
 # 检查只含二进制变量的约束和严格 0/1 输入；连续调度行留给子问题判断。
@@ -99,7 +100,7 @@ def dispatch(b, x, seconds, *, certified=False):
 
 # 把离散约束、容量/AND 关系与已有 Benders 割组装成线性主问题，并可选求其连续松弛下界。
 # 末列 theta 表示不含 b.constant 的块总费用下估计；返回的松弛解不用于替代 SA 候选。
-def master(b, cuts, seconds=0):
+def master(b, cuts, seconds=0, *, search_reachability=False):
     X, Y = b.binary, b.continuous
     nx = len(X)
     hard = b.A[:, Y].getnnz(axis=1) == 0
@@ -114,6 +115,15 @@ def master(b, cuts, seconds=0):
     def add(indices, values, bound, equality=False, label="hard"):
         rows.append({int(j): float(v) for j, v in zip(indices, values) if v != 0})
         rhs.append(bound); eq.append(equality); kind.append(label)
+
+    if search_reachability or hasattr(b, 'search_fixed'):
+        start, stop = transition_allowed(b.d)
+        forbidden = np.r_[b.v[~start].ravel(), b.w[~stop[:, b.times]]]
+        for j in forbidden:
+            add([mapping[j]], [1.], 0., True)
+    # Whole-horizon implications survive decomposition at a block boundary.
+    for j in np.flatnonzero(np.isfinite(getattr(b, 'search_fixed', []))):
+        add([j], [1.], float(b.search_fixed[j]), True)
 
     # 用精确容量系数保留启停限制；min_up=1 时 AND 辅助位修正同小时启停容量的重叠。
     for t, hour in enumerate(b.times):

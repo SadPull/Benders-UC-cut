@@ -1,0 +1,120 @@
+[
+  {
+    "candidate": 1,
+    "name": "U1_bridge_U7_restart9_U18_stop23",
+    "cost": 3078300.5830613347,
+    "decrease": 11056.661750149913,
+    "repair_bits": 0,
+    "changes": [
+      {
+        "unit": 1,
+        "start_hour": 4,
+        "end_hour": 7,
+        "from": 0.0,
+        "to": 1.0
+      },
+      {
+        "unit": 7,
+        "start_hour": 7,
+        "end_hour": 8,
+        "from": 1.0,
+        "to": 0.0
+      },
+      {
+        "unit": 18,
+        "start_hour": 23,
+        "end_hour": 24,
+        "from": 1.0,
+        "to": 0.0
+      },
+      {
+        "unit": 19,
+        "start_hour": 23,
+        "end_hour": 24,
+        "from": 0.0,
+        "to": 1.0
+      }
+    ]
+  },
+  {
+    "candidate": 2,
+    "name": "U7_restart8_U7_U18_stop23",
+    "cost": 3078449.5023217066,
+    "decrease": 10907.742489777971,
+    "repair_bits": 0,
+    "changes": [
+      {
+        "unit": 1,
+        "start_hour": 4,
+        "end_hour": 7,
+        "from": 0.0,
+        "to": 1.0
+      },
+      {
+        "unit": 7,
+        "start_hour": 7,
+        "end_hour": 7,
+        "from": 1.0,
+        "to": 0.0
+      },
+      {
+        "unit": 7,
+        "start_hour": 23,
+        "end_hour": 24,
+        "from": 1.0,
+        "to": 0.0
+      },
+      {
+        "unit": 18,
+        "start_hour": 23,
+        "end_hour": 24,
+        "from": 1.0,
+        "to": 0.0
+      },
+      {
+        "unit": 19,
+        "start_hour": 23,
+        "end_hour": 24,
+        "from": 0.0,
+        "to": 1.0
+      }
+    ]
+  },
+  {
+    "candidate": 3,
+    "name": "U7_restart9_stop16_U19_tail_cover",
+    "cost": 3079712.8454147493,
+    "decrease": 9644.399396735243,
+    "repair_bits": 0,
+    "changes": [
+      {
+        "unit": 1,
+        "start_hour": 4,
+        "end_hour": 7,
+        "from": 0.0,
+        "to": 1.0
+      },
+      {
+        "unit": 7,
+        "start_hour": 7,
+        "end_hour": 8,
+        "from": 1.0,
+        "to": 0.0
+      },
+      {
+        "unit": 7,
+        "start_hour": 16,
+        "end_hour": 24,
+        "from": 1.0,
+        "to": 0.0
+      },
+      {
+        "unit": 19,
+        "start_hour": 23,
+        "end_hour": 24,
+        "from": 0.0,
+        "to": 1.0
+      }
+    ]
+  }
+]
