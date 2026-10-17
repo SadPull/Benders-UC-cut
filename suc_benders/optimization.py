@@ -11,13 +11,17 @@ from scipy import sparse
 # 输入稀疏模型与秒预算，返回状态、原始点/目标、对偶价格、下界和可选 Farkas 证据。
 # 整数模式取 ObjBound；连续最优时按有界拉格朗日重新计算下界，不把候选 ObjVal 当作整数证明。
 def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=False,
-             warm_start=None, mip_focus=None, target_lower=None, callback=None, model_file=None):
+             warm_start=None, mip_focus=None, target_lower=None, callback=None, model_file=None,
+             solution_limit=None):
     if seconds <= 0:
         raise TimeoutError("No time remaining for optimization")
     if farkas and (integral or np.any(m.q)):
         raise ValueError('Farkas extraction requires a continuous LP')
-    if not integral and any(value is not None for value in (warm_start, mip_focus, target_lower)):
+    if not integral and any(value is not None for value in (warm_start, mip_focus, target_lower, solution_limit)):
         raise ValueError('MIP guidance requires integer optimization')
+    if solution_limit is not None and (isinstance(solution_limit, bool)
+            or not isinstance(solution_limit, (int, np.integer)) or solution_limit <= 0):
+        raise ValueError('solution_limit must be a positive integer')
     if warm_start is not None:
         warm_start = np.asarray(warm_start, float)
         if warm_start.shape != m.obj.shape or not np.isfinite(warm_start).all():
@@ -44,6 +48,8 @@ def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=F
                 g.setParam('IntFeasTol', 1e-9)
             if target_lower is not None:
                 g.setParam('BestBdStop', target_lower-getattr(m, 'constant', 0.)+1e-5)
+            if solution_limit is not None:
+                g.setParam('SolutionLimit', int(solution_limit))
             if farkas:
                 g.setParam('InfUnbdInfo', 1)
                 g.setParam('DualReductions', 0)
@@ -67,7 +73,7 @@ def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=F
             else:
                 g.optimize(callback)
             statuses = {2: "OPTIMAL", 3: "INFEASIBLE", 4: "INF_OR_UNBD", 5: "UNBOUNDED",
-                        9: "TIME_LIMIT", 11: "INTERRUPTED", 12: "NUMERIC", 13: "SUBOPTIMAL", 15: "USER_OBJ_LIMIT"}
+                        9: "TIME_LIMIT", 10: "SOLUTION_LIMIT", 11: "INTERRUPTED", 12: "NUMERIC", 13: "SUBOPTIMAL", 15: "USER_OBJ_LIMIT"}
             result = NS(status=statuses.get(g.Status, f"STATUS_{g.Status}"), lower=-np.inf,
                         x=None, objval=np.inf, prices=None, farkas=None)
             if farkas and g.Status == gp.GRB.INFEASIBLE:

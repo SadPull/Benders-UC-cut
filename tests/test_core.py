@@ -210,8 +210,68 @@ def test_deadline(tiny, options):
     assert r.status == "TIME_LIMIT" and not np.isfinite(r.objective)
 
 
+@pytest.mark.parametrize("limit,starting", [
+    ("ramp_up", True), ("pstart", True), ("ramp_down", False), ("pshut", False),
+])
+@pytest.mark.parametrize("value", [9., 10.])
+def test_repair_checks_switch_capacity_and_ramps(tiny, limit, starting, value):
+    d, scenarios = tiny(2)
+    d.pmin[1] = 0.
+    scenarios[0].load[:] = 10.
+    d.initial_on[0] = 0. if starting else 1.
+    d.initial_duration[0] = 10.
+    d.initial_output[0] = 0. if starting else 10.
+    getattr(d, limit)[0] = value
+    raw = np.ones((2, 3))
+    if not starting:
+        raw[0, 1:] = 0.
+    x = repair(d, scenarios, raw)
+    assert x is not None
+    u = x[:6].reshape((2, 3), order="F")
+    expected = ([0, 0, 0] if starting else [1, 1, 1]) if value < 10 else raw[0]
+    np.testing.assert_array_equal(u[0], expected)
+
+
+def test_repair_first_shutdown_uses_actual_initial_power(tiny):
+    d, scenarios = tiny(2)
+    d.pmin[1] = 0.; scenarios[0].load[:] = 10.
+    d.initial_on[0] = 1.; d.initial_duration[0] = 10.; d.initial_output[0] = 30.
+    d.ramp_down[0] = 20.
+    raw = np.ones((2, 3)); raw[0] = 0.
+    x = repair(d, scenarios, raw)
+    assert x is not None
+    np.testing.assert_array_equal(x[:6].reshape((2, 3), order="F")[0], [1, 0, 0])
+
+
+def test_capacity_refill_cannot_reintroduce_impossible_start(tiny):
+    d, scenarios = tiny(2)
+    d.ramp_up[0] = 5.
+    d.pmax[1] = d.pstart[1] = d.pshut[1] = 15.
+    assert repair(d, scenarios, np.zeros((2, 3))) is None
+
+
+def test_repair_checks_lowest_scenario_minimum_generation(tiny):
+    from types import SimpleNamespace as NS
+    d, scenarios = tiny(2)
+    scenarios = [NS(name="low", probability=.5, load=np.full(3, 10.)),
+                 NS(name="high", probability=.5, load=np.full(3, 30.))]
+    assert repair(d, scenarios, np.ones((2, 3))) is None
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5])
+def test_solution_limit_requires_positive_integer(tiny, value):
+    with pytest.raises(ValueError, match="solution_limit"):
+        optimize(model(*tiny()), 5, integral=True, solution_limit=value)
+
+
+def test_solution_limit_is_mip_only(tiny):
+    with pytest.raises(ValueError, match="MIP"):
+        optimize(model(*tiny()), 5, solution_limit=1)
+
+
 @pytest.mark.parametrize("change", [{"unknown": 1}, {"max_inner": 0}, {"time_limit": -1},
-                                      {"llm_enabled": True, "llm_model": ""}, {"seed": True}])
+                                      {"llm_enabled": True, "llm_model": ""}, {"seed": True},
+                                      {"enhanced_search": 1}, {"enhanced_search": "yes"}])
 def test_option_validation(change, tmp_path):
     with pytest.raises(ValueError):
         load_options(change, tmp_path / "missing.json")

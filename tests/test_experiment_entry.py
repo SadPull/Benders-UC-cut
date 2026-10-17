@@ -37,18 +37,19 @@ def test_file_settings_run_from_another_directory_without_overwriting(tmp_path, 
                             TARGET_GAP_PERCENT=.1, RESULTS=tmp_path / "results",
                             solve_reference=reference)
     monkeypatch.chdir(tmp_path)
-    for source in (entry.parent / "data", entry.parent / "tests/fixtures/rts24"):
+    for source in (entry.parent / "data", entry.parent / "data/classic10", entry.parent / "tests/fixtures/rts24"):
         for name in ("units.json", "stochastic.json"):
             (folder / name).write_text((source / name).read_text(encoding="utf-8"), encoding="utf-8")
         assert main() == 0
-    assert len(seen) == 2
-    assert [(n, s, seconds) for n, s, seconds, _ in references] == [(10, 3, 120), (32, 3, 120)]
+    assert len(seen) == 3
+    assert all(o['enhanced_search'] is module['ENHANCED_SEARCH'] for o in seen)
+    assert [(n, s, seconds) for n, s, seconds, _ in references] == [(20, 1, 120), (10, 3, 120), (32, 3, 120)]
     assert all(o["seed"] == 29 and o["time_limit"] == 60 and o["tolerance"] == .001
                and o["llm_enabled"] is True and o["llm_model"] == "gpt-6-astra"
                and o["llm_codex_command"] == "codex" and o["llm_timeout"] == 1200
                and o["llm_reserve_seconds"] == 60 for o in seen)
     outputs = list((tmp_path / "results").iterdir())
-    assert len(outputs) == 2
+    assert len(outputs) == 3
     dimensions = set()
     for output in outputs:
         assert output.name.startswith("manual-seed29-")
@@ -67,10 +68,11 @@ def test_file_settings_run_from_another_directory_without_overwriting(tmp_path, 
         assert reference_result["u"] == [[1]]
         result = json.loads((output / "result.json").read_text(encoding="utf-8"))
         assert result["coordination_upper"] is None
-    assert dimensions == {(10, 24, 3), (32, 24, 3)}
+    assert dimensions == {(20, 24, 1), (10, 24, 3), (32, 24, 3)}
     console = capsys.readouterr().out
     assert f"机组输入：{folder / 'units.json'}" in console
     assert f"场景输入：{folder / 'stochastic.json'}" in console
+    assert "输入规模：20机组；24小时；1场景" in console
     assert "输入规模：10机组；24小时；3场景" in console
     assert "输入规模：32机组；24小时；3场景" in console
     assert "主算法可行成本（UB）：110.000000" in console

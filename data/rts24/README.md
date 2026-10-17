@@ -4,4 +4,4 @@
 
 历史独立 Gurobi 参考的 manifest 和 result 已移至 [v0.26.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.26.0) 清理前源码包，原路径为 `data/rts24/reference/`。参考方案成本 885066.704430；2026-10-13 轮次重新核验其开机矩阵后用于 UB，未导入参考整数下界。更早日志和源码仍在 v0.25.0 的实验包中。
 
-默认经典 10 机组输入位于上级 `data/`，独立历史回归夹具保存在 `tests/fixtures/rts24/`。
+当前默认 RCUC 20 机组输入位于上级 `data/`，经典 10 机组输入保存在 `data/classic10/`，独立 RTS-24 历史回归夹具保存在 `tests/fixtures/rts24/`。

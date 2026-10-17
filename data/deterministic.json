@@ -1,5 +1,5 @@
 {
-  "reserve_fraction": 0.1,
+  "reserve_fraction": 0.0,
   "scenarios": [
     {
       "name": "base",

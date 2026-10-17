@@ -1,2 +1,10 @@
 # Preserve byte-level hashes used by the RTS-24 input identity.
 data/rts24/**/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
+
+# Preserve source bytes and experiment input hashes across Git checkouts.
+data/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
+data/classic10/** -text whitespace=trailing-space,space-before-tab,cr-at-eol
+data/classic10/sources/GA10.uc -text -whitespace
+data/sources/20_0_1_w.mod -text -whitespace
+experiments/rcuc20-20261017/**/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
+releases/*.json -text whitespace=trailing-space,space-before-tab,cr-at-eol

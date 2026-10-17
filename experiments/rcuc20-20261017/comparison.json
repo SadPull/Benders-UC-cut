@@ -1,0 +1,228 @@
+{
+  "scope": "ONE_SEED_SHORT_COLD_PAIR_NOT_A_GENERALITY_PROOF",
+  "baseline": {
+    "summary": {
+      "scope": "EXPLORATORY_NO_INDEPENDENT_AUDIT",
+      "units": 20,
+      "hours": 24,
+      "scenarios": 1,
+      "seed": 17,
+      "status": "TIME_LIMIT",
+      "message": "TimeoutError: ",
+      "upper": 3107925.1076242616,
+      "lower": 3068326.7015495673,
+      "gap_percent": 1.274110691327562,
+      "reference_gap_percent": 1.2754141661849827,
+      "validation": {
+        "feasible": true,
+        "max_residual_mw": 6.821210263296962e-13,
+        "cost_residual": 0.0
+      },
+      "solver_elapsed_seconds": 295.47144000000117,
+      "wall_to_result_saved_seconds": 345.87707070000033,
+      "sa_calls": 796,
+      "llm_calls": 0,
+      "block_sa_calls": 796,
+      "joint_sa_calls": 0,
+      "enhanced_search": false,
+      "search_statistics": {
+        "sa": {
+          "proposals": 12720,
+          "raw_unique": 201,
+          "repaired_unique": 165,
+          "duplicate_rate": 0.9871069182389937,
+          "repair_cache_hits": 0,
+          "outcomes": {
+            "infeasible": 108,
+            "duplicate": 12556,
+            "accepted": 56
+          },
+          "new_feasible": 56,
+          "incumbent_decrease": 93239.37747248076
+        },
+        "pool": {
+          "proposals": 795,
+          "raw_unique": 37,
+          "repaired_unique": 35,
+          "duplicate_rate": 0.9786163522012579,
+          "repair_cache_hits": 0,
+          "outcomes": {
+            "duplicate": 778,
+            "infeasible": 10,
+            "accepted": 7
+          },
+          "new_feasible": 7,
+          "incumbent_decrease": 14701.531356255058
+        },
+        "joint_sa": {
+          "proposals": 0,
+          "raw_unique": 0,
+          "repaired_unique": 0,
+          "duplicate_rate": 0.0,
+          "repair_cache_hits": 0,
+          "outcomes": {},
+          "new_feasible": 0,
+          "incumbent_decrease": 0
+        },
+        "new_feasible": 63,
+        "new_feasible_per_second": 0.21321857706450326
+      },
+      "note": "入门实验：无增量检查点和独立审计；保存与完整问题参考求解在主算法预算之外。",
+      "reference": {
+        "status": "OPTIMAL",
+        "objective": 3068785.384105565,
+        "lower": 3068785.384105565,
+        "gap_percent": 0.0,
+        "validation": {
+          "feasible": true,
+          "max_residual_mw": 6.934897101018578e-12,
+          "cost_residual": 4.656612873077393e-10
+        },
+        "elapsed_seconds": 0.752944200001366,
+        "time_limit_seconds": 120
+      }
+    },
+    "run_directory": "results/enhanced-search-validation-20261017-145322-1e48ebf8/baseline/runs/manual-seed17-20261017-150217-3bf5613b",
+    "fingerprint": "6ae9e6b71d66bb40946721b4ae97c9e6207ad731598604b1c8ddc378f812a34a",
+    "first_feasible_count": 63,
+    "raw_unique": 238,
+    "repaired_unique": 182,
+    "proposals": 13515,
+    "distinct_sampling_seeds": 1,
+    "sampling_by_kind": {
+      "block": 796
+    },
+    "qubo_bits_min": 178,
+    "qubo_bits_max": 876,
+    "joint_statuses": {},
+    "joint_group_sizes": {},
+    "joint_seconds": 0,
+    "joint_worse_anchor_batches": 0,
+    "proof_model_hash": "5020f9b2fa377e21c6c17e46498513caad5a5bd19971023a0104c860a495963a",
+    "proof_upper_feedback": false
+  },
+  "enhanced": {
+    "summary": {
+      "scope": "EXPLORATORY_NO_INDEPENDENT_AUDIT",
+      "units": 20,
+      "hours": 24,
+      "scenarios": 1,
+      "seed": 17,
+      "status": "TIME_LIMIT",
+      "message": "TimeoutError: ",
+      "upper": 3092537.0034633265,
+      "lower": 3068326.7015495673,
+      "gap_percent": 0.7828621577250694,
+      "reference_gap_percent": 0.7739745985750698,
+      "validation": {
+        "feasible": true,
+        "max_residual_mw": 4.547473508864641e-13,
+        "cost_residual": 4.656612873077393e-10
+      },
+      "solver_elapsed_seconds": 295.241492000001,
+      "wall_to_result_saved_seconds": 328.6052237999975,
+      "sa_calls": 535,
+      "llm_calls": 0,
+      "block_sa_calls": 497,
+      "joint_sa_calls": 38,
+      "enhanced_search": true,
+      "search_statistics": {
+        "sa": {
+          "proposals": 7936,
+          "raw_unique": 497,
+          "repaired_unique": 434,
+          "duplicate_rate": 0.9464465725806451,
+          "repair_cache_hits": 7439,
+          "outcomes": {
+            "infeasible": 237,
+            "duplicate": 7511,
+            "accepted": 188
+          },
+          "new_feasible": 188,
+          "incumbent_decrease": 108522.31049262406
+        },
+        "pool": {
+          "proposals": 496,
+          "raw_unique": 72,
+          "repaired_unique": 63,
+          "duplicate_rate": 0.9092741935483871,
+          "repair_cache_hits": 424,
+          "outcomes": {
+            "duplicate": 451,
+            "accepted": 19,
+            "infeasible": 26
+          },
+          "new_feasible": 19,
+          "incumbent_decrease": 10850.169416979421
+        },
+        "joint_sa": {
+          "proposals": 608,
+          "raw_unique": 52,
+          "repaired_unique": 31,
+          "duplicate_rate": 0.8536184210526315,
+          "repair_cache_hits": 556,
+          "outcomes": {
+            "duplicate": 519,
+            "infeasible": 14,
+            "accepted": 11,
+            "repair_left_neighborhood": 64
+          },
+          "new_feasible": 11,
+          "incumbent_decrease": 3956.5330800730735
+        },
+        "new_feasible": 218,
+        "new_feasible_per_second": 0.7383786016092861
+      },
+      "note": "入门实验：无增量检查点和独立审计；保存与完整问题参考求解在主算法预算之外。",
+      "reference": {
+        "status": "OPTIMAL",
+        "objective": 3068785.384105565,
+        "lower": 3068785.384105565,
+        "gap_percent": 0.0,
+        "validation": {
+          "feasible": true,
+          "max_residual_mw": 6.934897101018578e-12,
+          "cost_residual": 4.656612873077393e-10
+        },
+        "elapsed_seconds": 0.6731030000009923,
+        "time_limit_seconds": 120
+      }
+    },
+    "run_directory": "results/enhanced-search-validation-20261017-145322-1e48ebf8/enhanced/runs/manual-seed17-20261017-150820-9bcda36a",
+    "fingerprint": "6ae9e6b71d66bb40946721b4ae97c9e6207ad731598604b1c8ddc378f812a34a",
+    "first_feasible_count": 218,
+    "raw_unique": 621,
+    "repaired_unique": 500,
+    "proposals": 9040,
+    "distinct_sampling_seeds": 535,
+    "sampling_by_kind": {
+      "block": 497,
+      "joint": 38
+    },
+    "qubo_bits_min": 101,
+    "qubo_bits_max": 1137,
+    "joint_statuses": {
+      "COMPLETE": 38,
+      "INSUFFICIENT_BUDGET": 1
+    },
+    "joint_group_sizes": {
+      "2": 5,
+      "3": 4,
+      "5": 29
+    },
+    "joint_seconds": 96.38033690000157,
+    "joint_worse_anchor_batches": 9,
+    "proof_model_hash": "5020f9b2fa377e21c6c17e46498513caad5a5bd19971023a0104c860a495963a",
+    "proof_upper_feedback": false
+  },
+  "gate": {
+    "regression_passed": true,
+    "implementation_unchanged": true,
+    "valid_runs": true,
+    "upper_noninferior": true,
+    "feasible_rate_improved": true
+  },
+  "promote_default": true,
+  "upper_decrease": 15388.104160935152,
+  "upper_decrease_percent": 0.4951246773349059
+}

@@ -23,6 +23,7 @@ REFERENCE_TIME_LIMIT_SECONDS = 120  # 完整问题参考求解的独立预算，
 TARGET_GAP_PERCENT = 0.1  # 认证间隙目标，单位：%；0.1 就是 0.1%
 CHECK_ONLY = False       # True：只检查输入；False：实际求解
 LLM_ENABLED = True       # True：停滞时自动启动 Codex 独立任务；False：关闭 LLM
+ENHANCED_SEARCH = True   # 已通过种子 17 短时配对门槛；False 保留原搜索行为
 LLM_MODEL = "gpt-6-astra"  # 使用 Codex 已登录账号，推理档位为 max
 LLM_TIMEOUT_SECONDS = 1200  # 单次调用上限，仍受主算法剩余预算约束
 LLM_RESERVE_SECONDS = 60  # 不用于等待 LLM，留给后续调度、校验和数值搜索
@@ -64,6 +65,7 @@ def main():
     options = dict(data_file=str(folder / "units.json"), scenario_file=str(folder / "stochastic.json"),
                    seed=SEED, time_limit=TIME_LIMIT_SECONDS,
                    tolerance=TARGET_GAP_PERCENT / 100, block_hours=3, max_outer=1000000,
+                   enhanced_search=ENHANCED_SEARCH,
                    max_inner=20, llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL,
                    llm_timeout=LLM_TIMEOUT_SECONDS, llm_reserve_seconds=LLM_RESERVE_SECONDS,
                    llm_codex_command="codex" if LLM_ENABLED else "",
@@ -105,6 +107,10 @@ def main():
                    solver_elapsed_seconds=result.elapsed_seconds,
                    wall_to_result_saved_seconds=perf_counter() - started,
                    sa_calls=result.diagnostics.get("sa_calls", 0), llm_calls=result.llm_calls,
+                   block_sa_calls=result.diagnostics.get('block_sa_calls', 0),
+                   joint_sa_calls=result.diagnostics.get('joint_sa_calls', 0),
+                   enhanced_search=ENHANCED_SEARCH,
+                   search_statistics=result.diagnostics.get('search_statistics', {}),
                    note="入门实验：无增量检查点和独立审计；保存与完整问题参考求解在主算法预算之外。")
     save(output / "summary.json", summary)
     status_text = {"CONVERGED": "已达到认证间隙目标", "TIME_LIMIT": "达到时间上限",

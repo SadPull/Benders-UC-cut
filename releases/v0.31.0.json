@@ -1,0 +1,69 @@
+{
+  "version": "0.31.0",
+  "tag": "v0.31.0",
+  "date": "2026-10-17",
+  "status": "REGRESSION_VALIDATED_SHORT_PAIR_IMPROVED_NOT_CONVERGED",
+  "release_url": "https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.31.0",
+  "report": "docs/rcuc20-20261017.md",
+  "summary": "experiments/rcuc20-20261017/summary.json",
+  "comparison": "experiments/rcuc20-20261017/comparison.json",
+  "input": {
+    "case": "Pisa RCUC 20_0_1_w",
+    "scope": "Original RCUC parameters under the project physical model",
+    "units": 20,
+    "hours": 24,
+    "scenarios": 1,
+    "reserve_fraction": 0,
+    "provenance": "data/provenance.json",
+    "classic10_preserved": "data/classic10"
+  },
+  "paired_protocol": {
+    "seed": 17,
+    "main_budget_per_arm_seconds": 300,
+    "llm_enabled": false,
+    "sequential_cold_start": true,
+    "reference_budget_per_arm_seconds": 120,
+    "reference_feedback": false,
+    "numerical_upper_feedback": false,
+    "independent_audit": false,
+    "additional_master_seeds": 0
+  },
+  "result": {
+    "baseline_upper": 3107925.1076242616,
+    "enhanced_upper": 3092537.0034633265,
+    "certified_lower": 3068326.7015495673,
+    "baseline_gap_percent": 1.274110691327562,
+    "enhanced_gap_percent": 0.7828621577250694,
+    "reference_cost": 3068785.384105565,
+    "reference_status": "OPTIMAL",
+    "reference_gap_percent": 0,
+    "baseline_new_feasible": 63,
+    "enhanced_new_feasible": 218,
+    "baseline_new_feasible_per_second": 0.21321857706450326,
+    "enhanced_new_feasible_per_second": 0.7383786016092861,
+    "enhanced_joint_sa_calls": 38,
+    "enhanced_joint_direct_decrease": 3956.5330800730735,
+    "default_enhanced_search": true
+  },
+  "assets": [
+    "core-source-v0.31.0.zip",
+    "rcuc20-experiments-v0.31.0.zip",
+    "rcuc20-report-v0.31.0.md",
+    "rcuc20-summary-v0.31.0.json",
+    "rcuc20-comparison-v0.31.0.json",
+    "release-validation-v0.31.0.json",
+    "release-manifest.json",
+    "SHA256SUMS.txt"
+  ],
+  "regression": {
+    "experimental_working_tree_passed": 300,
+    "experimental_working_tree_integration_deselected": 3,
+    "published_tree_results": "release-validation-v0.31.0.json"
+  },
+  "limits": [
+    "Latest paired arms both returned TIME_LIMIT and did not reach 0.1 percent",
+    "The earlier 1800-second LLM-on run is not a matched performance comparator",
+    "One master seed and the combined intervention do not prove generality or independent component attribution",
+    "Raw experiment snapshots and the tagged release source are preserved separately"
+  ]
+}

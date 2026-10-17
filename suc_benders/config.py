@@ -31,6 +31,7 @@ class Options:
     reserve_scale: float = 100
     sa_reads: int = 16
     sa_enabled: bool = True
+    enhanced_search: bool = True
     # 辅助工作配额独立于总 time_limit；耗尽后可继续整数认证，None 表示不另设此配额。
     sa_budget_seconds: float | None = None
     sa_sweeps: int = 5
@@ -87,6 +88,8 @@ def load_options(overrides=None, config_path=None):
         raise ValueError("llm_enabled and verbose must be boolean")
     if not isinstance(o.sa_enabled, bool):
         raise ValueError("sa_enabled must be boolean")
+    if not isinstance(o.enhanced_search, bool):
+        raise ValueError("enhanced_search must be boolean")
     if o.sa_budget_seconds is not None:
         v = o.sa_budget_seconds
         if (isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v)

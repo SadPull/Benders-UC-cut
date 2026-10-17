@@ -1,0 +1,39 @@
+{
+  "commit": "e2e1d89af0970441ba3e82b60ae659cb6739777b",
+  "seed": 17,
+  "time_limit": 300,
+  "llm_enabled": false,
+  "reference_time_limit": 120,
+  "cold_start": true,
+  "arms": [
+    "baseline",
+    "enhanced"
+  ],
+  "forbidden_imports": [
+    "historical_commitments",
+    "cuts",
+    "bounds",
+    "reference_solution"
+  ],
+  "promotion_gate": {
+    "offline_regressions_pass": true,
+    "upper_absolute_tolerance": 0.0001,
+    "new_feasible_rate": "strictly greater than baseline",
+    "numerator": "distinct first-time validated feasible schedules from sa/pool/joint_sa, excluding initialization",
+    "denominator": "result.elapsed_seconds",
+    "extra_runs_allowed": false
+  },
+  "settings": {
+    "block_hours": 3,
+    "max_outer": 1000000,
+    "max_inner": 20,
+    "target_gap_percent": 0.1,
+    "sa_reads": 16,
+    "sa_sweeps": 5,
+    "sa_temperature": 100.0,
+    "sa_cooling": 0.98,
+    "sa_cutoff": 0.01,
+    "sa_budget_seconds": null
+  },
+  "case_label": "RCUC original parameters / project physical model"
+}

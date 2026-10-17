@@ -75,10 +75,12 @@ def test_real_classic10_short_run(authorized, scenario, monkeypatch):
     from suc_benders.validation import validate
 
     monkeypatch.setattr(advisor_request, "AdvisorRequest", lambda *a, **k: pytest.fail("Real LLM requests are disabled"))
-    o = {"scenario_file": str(ROOT / f"data/{scenario}.json"), "max_outer": 2, "max_inner": 2,
+    folder = ROOT / "data/classic10"
+    o = {"data_file": str(folder / "units.json"), "scenario_file": str(folder / f"{scenario}.json"),
+         "max_outer": 2, "max_inner": 2,
          "time_limit": 20,
          "sa_reads": 4, "sa_sweeps": 2, "sa_cooling": .8, "sa_temperature": 10,
-         "verbose": False, "llm_enabled": False}
+         "verbose": False, "llm_enabled": False, "enhanced_search": False}
     before = np.random.get_state()
     a = run_suc(o)
     after = np.random.get_state()
@@ -88,7 +90,7 @@ def test_real_classic10_short_run(authorized, scenario, monkeypatch):
     assert a.u.shape == a.v.shape == a.w.shape == (10, 24)
     assert all(s.p.shape == s.r.shape == (10, 24) for s in a.scenarios)
     assert a.lower_bound <= a.objective + 1e-5
-    d, scenarios = load_data(ROOT / "data/units.json", o["scenario_file"])
+    d, scenarios = load_data(o["data_file"], o["scenario_file"])
     assert validate(d, scenarios, a)["feasible"]
     expected_fuel = sum(s.probability*np.sum(d.cost_a[:, None]*r.p**2+d.cost_b[:, None]*r.p)
                         for s, r in zip(scenarios, a.scenarios))

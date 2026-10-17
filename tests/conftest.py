@@ -27,7 +27,7 @@ def tiny():
 
 @pytest.fixture
 def options():
-    return Options(max_outer=10, max_inner=5, time_limit=30, verbose=False,
+    return Options(max_outer=10, max_inner=5, time_limit=30, verbose=False, enhanced_search=False,
                    sa_reads=4, sa_sweeps=2, sa_temperature=10, sa_cooling=.8, sa_cutoff=.01)
 
 

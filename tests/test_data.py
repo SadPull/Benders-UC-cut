@@ -13,8 +13,52 @@ from suc_benders.validation import startup_costs
 from suc_benders.validation import pack, unpack, validate
 
 
-def test_default_data_matches_pinned_source_and_hashes():
+CLASSIC = ROOT / "data/classic10"
+
+
+def test_rcuc20_data_matches_original_parameters_and_hashes():
     folder = ROOT / "data"
+    provenance = json.loads((folder / "provenance.json").read_text(encoding="utf-8"))
+    source = provenance["sources"]["20_0_1_w.mod"]
+    raw = (folder / source["local_file"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == source["sha256"] == source["local_sha256"]
+    assert source["sha256"] == "412a5377dbfce0211acd550560246b7cc56ecb68f836a1abe7c69c1677131ec1"
+    for name, digest in provenance["input_sha256"].items():
+        assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == digest
+    for name, digest in provenance["preserved_classic10"]["sha256"].items():
+        assert hashlib.sha256((CLASSIC / name).read_bytes()).hexdigest() == digest
+    text = raw.decode("utf-8")
+    lines = text.split("ThermalSection")[1].split("HydroSection")[0].strip().splitlines()
+    units = np.array([[float(value) for value in line.split()] for line in lines[::2]])
+    ramps = np.array([[float(value) for value in line.split()[1:]] for line in lines[1::2]])
+    assert units.shape == (20, 16) and ramps.shape == (20, 2)
+    np.testing.assert_array_equal(units[:, 0], np.arange(20))
+    d, scenarios = load_data(folder / "units.json", folder / "stochastic.json")
+    for key, column in {"cost_a": 1, "cost_b": 2, "cost_c": 3, "pmin": 4, "pmax": 5,
+                        "min_up": 7, "min_down": 8, "startup_cost": 13, "initial_output": 15}.items():
+        np.testing.assert_array_equal(getattr(d, key), units[:, column])
+    np.testing.assert_array_equal((2*d.initial_on-1)*d.initial_duration, units[:, 6])
+    np.testing.assert_array_equal(d.ramp_up, ramps[:, 0])
+    np.testing.assert_array_equal(d.ramp_down, ramps[:, 1])
+    np.testing.assert_array_equal(d.pstart, d.pmax)
+    np.testing.assert_array_equal(d.pshut, d.pmax)
+    assert not units[:, 9:11].any() and not d.shutdown_cost.any()
+    assert not hasattr(d, "cold_startup_cost")
+    assert d.n_units == 20 and d.horizon == 24 and d.pmax.sum() == 3414
+    assert d.base_load.max() == 2389.360312
+    assert np.count_nonzero(d.initial_output) == 11
+    assert not np.array_equal(d.initial_output, d.initial_on*d.pmin)
+    load = [float(value) for value in text.split("Loads\t1\t24")[1].split("SpinningReserve")[0].split()]
+    np.testing.assert_array_equal(d.base_load, load)
+    for name in ("deterministic", "stochastic"):
+        d, scenarios = load_data(folder / "units.json", folder / f"{name}.json")
+        assert d.reserve_fraction == 0 and len(scenarios) == 1
+        assert scenarios[0].name == "base" and scenarios[0].probability == 1
+        np.testing.assert_array_equal(scenarios[0].load, d.base_load)
+
+
+def test_classic_data_matches_pinned_source_and_hashes():
+    folder = CLASSIC
     provenance = json.loads((folder / "provenance.json").read_text(encoding="utf-8"))
     source = provenance["sources"]["GA10.uc"]
     text = (folder / source["local_file"]).read_text(encoding="utf-8")
@@ -50,7 +94,7 @@ def test_default_data_matches_pinned_source_and_hashes():
 
 @pytest.mark.parametrize("name,reserve,count", [("deterministic", .1, 1), ("stochastic", .05, 3)])
 def test_classic_case_dispatch_and_relaxation(name, reserve, count):
-    d, scenarios = load_data(ROOT / "data/units.json", ROOT / f"data/{name}.json")
+    d, scenarios = load_data(CLASSIC / "units.json", CLASSIC / f"{name}.json")
     assert d.reserve_fraction == reserve and len(scenarios) == count
     m = model(d, scenarios)
     full = partition(m, d.horizon)[0][0]
@@ -76,22 +120,22 @@ def test_classic_case_dispatch_and_relaxation(name, reserve, count):
     ("cold_start_hours", [True]*10),
 ])
 def test_invalid_cold_start_vectors(tmp_path, key, value):
-    raw = json.loads((ROOT / "data/units.json").read_text(encoding="utf-8"))
+    raw = json.loads((CLASSIC / "units.json").read_text(encoding="utf-8"))
     raw[key] = value
     units = tmp_path / "units.json"
     units.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError):
-        load_data(units, ROOT / "data/deterministic.json")
+        load_data(units, CLASSIC / "deterministic.json")
 
 
 @pytest.mark.parametrize("missing", ["cold_startup_cost", "cold_start_hours"])
 def test_cold_start_vectors_must_be_paired(tmp_path, missing):
-    raw = json.loads((ROOT / "data/units.json").read_text(encoding="utf-8"))
+    raw = json.loads((CLASSIC / "units.json").read_text(encoding="utf-8"))
     del raw[missing]
     units = tmp_path / "units.json"
     units.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="both"):
-        load_data(units, ROOT / "data/deterministic.json")
+        load_data(units, CLASSIC / "deterministic.json")
 
 
 @pytest.mark.parametrize("equal_cost", [False, True])

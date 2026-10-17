@@ -1,0 +1,16 @@
+{
+  "data_file": "data/units.json",
+  "scenario_file": "data/stochastic.json",
+  "seed": 17,
+  "time_limit": 1800,
+  "tolerance": 0.001,
+  "block_hours": 3,
+  "max_outer": 1000000,
+  "max_inner": 20,
+  "llm_enabled": true,
+  "llm_model": "gpt-6-astra",
+  "llm_timeout": 1200,
+  "llm_reserve_seconds": 60,
+  "llm_codex_command": "codex",
+  "llm_agent_directory": "results/manual-seed17-20261017-131535-dbef3176/llm_requests"
+}

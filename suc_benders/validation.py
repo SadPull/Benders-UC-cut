@@ -7,23 +7,47 @@ import hashlib
 import numpy as np
 
 
-# 将候选 u 取整后按初始历史修复最小开停机时间、标准末小时禁停与最坏场景容量。
+def transition_allowed(d):
+    """Necessary startup/shutdown reachability under the unchanged ramp model."""
+    start = d.pmin <= np.minimum(d.pstart, d.ramp_up) + 1e-7
+    stop = np.repeat((d.pmin <= np.minimum(d.pshut, d.ramp_down) + 1e-7)[:, None], d.horizon, axis=1)
+    stop[:, 0] = d.initial_output <= d.ramp_down + 1e-7
+    return start, stop
+
+
+# 按初始历史修复启停时序、必要的启停爬坡条件和场景容量；连续可行性仍由调度判断。
 # 返回重建 u/v/w 或 None；容量修复可把机组从允许最早开机时刻一直打开，因此会修改其他小时。
 def repair(d, scenarios, u):
     u = np.asarray(u)
     if u.shape != (d.n_units, d.horizon) or not np.isfinite(u).all():
         return None
     u = np.clip(np.rint(u), 0, 1)
-    for i in range(d.n_units):
+    start_allowed, stop_allowed = transition_allowed(d)
+    def timeline(i, row):
+        row = row.copy()
         state, duration = d.initial_on[i], d.initial_duration[i]
         for t in range(d.horizon):
             minimum = d.min_up[i] if state else d.min_down[i]
-            target = u[i, t]
-            if target != state and (duration < minimum or (t == d.horizon - 1 and state == 1)):
-                target = state
+            target = row[t]
+            if target != state:
+                blocked = duration < minimum or (t == d.horizon - 1 and state == 1)
+                if state == 0:
+                    blocked |= not start_allowed[i]
+                else:
+                    blocked |= not stop_allowed[i, t]
+                if blocked:
+                    target = state
             duration = duration + 1 if target == state else 1
-            state = target; u[i, t] = state
-    required = (1 + d.reserve_fraction) * np.max([s.load for s in scenarios], axis=0)
+            state = target; row[t] = state
+        return row
+
+    for i in range(d.n_units):
+        u[i] = timeline(i, u[i])
+    loads = np.asarray([s.load for s in scenarios])
+    required = (1 + d.reserve_fraction) * loads.max(axis=0)
+    minimum_load = loads.min(axis=0)
+    if (np.sum(d.pmin[:, None] * u, axis=0) > minimum_load + 1e-6).any():
+        return None
 
     # 重建当前试探方案的 v/w，返回打包向量及每小时最坏场景负荷加备用的容量缺口。
     def evaluate(on):
@@ -44,6 +68,9 @@ def repair(d, scenarios, u):
             if start >= d.horizon:
                 continue
             trial = u.copy(); trial[i, start:] = 1
+            trial[i] = timeline(i, trial[i])
+            if (np.sum(d.pmin[:, None] * trial, axis=0) > minimum_load + 1e-6).any():
+                continue
             x, remaining = evaluate(trial)
             gain, cost = deficit[t] - remaining[t], fixed_cost(d, trial, commitment(d, x).w)
             if (remaining <= deficit + 1e-6).all() and gain > 1e-6:
