@@ -7,10 +7,9 @@ config.local.json
 .env
 results/
 tmp/
-*.mat
-*.asv
-slprj/
-.benchmark/
 .local/
 *.lic
 tests/
+experiments/
+docs/
+releases/

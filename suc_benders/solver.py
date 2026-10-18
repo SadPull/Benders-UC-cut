@@ -169,7 +169,8 @@ class WholeDay:
             return
         started = perf_counter()
         info = dict(outer=outer, round=inner, attempt=state['attempts'], status='RUNNING',
-                    incumbent_before=self.result.objective)
+                    incumbent_before=self.result.objective, guide_build_seconds=0., lp_seconds=0.,
+                    qubo_encode_seconds=0., anneal_seconds=0.)
         self.diagnostics['joint_batches'].append(info)
         try:
             if self.remaining() < 5:
@@ -192,13 +193,15 @@ class WholeDay:
             state['attempts'] += 1
             info.update(units=units, hours=list(range(1, self.d.horizon+1)))
             fix_units(guide, self.full, anchor, units)
-            self.timings['qubo'] += perf_counter()-phase
+            info['guide_build_seconds'] = perf_counter()-phase
+            self.timings['qubo'] += info['guide_build_seconds']
             if self.remaining() <= 0:
                 info['status'] = 'DEADLINE'
                 return
             phase = perf_counter()
             raw = optimize(guide, self.remaining())
-            self.timings['relaxation'] += perf_counter()-phase
+            info['lp_seconds'] = perf_counter()-phase
+            self.timings['relaxation'] += info['lp_seconds']
             info['master_status'] = raw.status
             if self.remaining() <= 0:
                 info['status'] = 'DEADLINE'
@@ -221,7 +224,8 @@ class WholeDay:
             guide.lb[-1] = max(guide.lb[-1], lower)
             phase = perf_counter()
             q = qubo(guide, self.o, upper)
-            self.timings['qubo'] += perf_counter()-phase
+            info['qubo_encode_seconds'] = perf_counter()-phase
+            self.timings['qubo'] += info['qubo_encode_seconds']
             info.update(bits=q.Q.shape[0], dense_working_bytes=32*(q.Q.shape[0]+1)**2)
             if info['dense_working_bytes'] > 256*2**20:
                 info['status'] = 'MEMORY_LIMIT'
@@ -234,7 +238,8 @@ class WholeDay:
             self.diagnostics['joint_sa_calls'] += 1
             phase = perf_counter()
             proposals, sampling = anneal(q, self.o, self.remaining(), seed)
-            self.timings['annealing'] += perf_counter()-phase
+            info['anneal_seconds'] = perf_counter()-phase
+            self.timings['annealing'] += info['anneal_seconds']
             sampling.update(kind='joint', outer=outer, inner=inner, round=inner, seed=seed,
                 anchor=identity, baseline_u=anchor.tolist(), units=units, raw_candidates=len(proposals),
                 unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}),
@@ -794,7 +799,7 @@ class BlockSearch:
 
     # 完成本块的一次访问：重调度种子、求 LP 下界，未闭合时最多采样一批 SA，再评估并刷新下界。
     # 整批候选共享采样前的全天方案快照。
-    def step(self, seeds, inner):
+    def step(self, seeds, inner, *, sample_sa=True):
         b, o, whole, result = self.b, self.o, self.whole, self
         outer, index, cuts = self.outer, self.index, self.cuts
         remaining, evaluate = whole.remaining, self.evaluate
@@ -814,7 +819,9 @@ class BlockSearch:
             return
         result.lower = max(result.lower, bound)
         sampling = {"bits": 0, "candidates": 0, "best_energy": None, "seconds": 0.}
-        if not closed(result.lower, result.upper, o.tolerance):
+        if not sample_sa:
+            sampling['skipped_reason'] = 'cadence'
+        if sample_sa and not closed(result.lower, result.upper, o.tolerance):
             if result.best is None:
                 raise RuntimeError("No feasible block seed")
             baseline_u, anchor_id, anchor_cost = whole.search_anchor()
@@ -950,7 +957,10 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                     before_count, before_calls = len(whole.diagnostics["evaluations"]), result.llm_calls
                     before_opt = sum(c.optimality for search in searches for c in search.cuts)
                     before_feas = sum(not c.optimality for search in searches for c in search.cuts)
-                    round_record = dict(outer=outer, round=inner, complete=False, visited_blocks=[],
+                    global_round = whole.diagnostics['complete_rounds']+1
+                    block_sa_scheduled = not o.enhanced_search or (global_round-1) % o.block_sa_period == 0
+                    round_record = dict(outer=outer, round=inner, global_round=global_round,
+                                        block_sa_scheduled=block_sa_scheduled, complete=False, visited_blocks=[],
                                         skipped_closed_blocks=[], started_seconds=perf_counter()-started)
                     whole.diagnostics["rounds"].append(round_record)
                     for j, search in enumerate(searches):
@@ -969,7 +979,7 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                                 stage = f"BLOCK_{outer}_{j + 1}_ROUND_{inner}"
                                 seeds = [whole.best.point[b.cols[b.binary]], *(previous[j] if inner == 1 else []),
                                          *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
-                                search.step(seeds, inner)
+                                search.step(seeds, inner, sample_sa=block_sa_scheduled)
                                 if remaining() <= 0:
                                     raise TimeoutError
                                 round_record["visited_blocks"].append(j + 1)

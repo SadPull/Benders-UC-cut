@@ -1,6 +1,6 @@
 """输入固定读取 data 中的 JSON；在 VS Code 中点击“运行 Python 文件”。"""
-from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+import gzip
 import json
 from pathlib import Path
 from time import perf_counter
@@ -24,6 +24,8 @@ TARGET_GAP_PERCENT = 0.1  # 认证间隙目标，单位：%；0.1 就是 0.1%
 CHECK_ONLY = False       # True：只检查输入；False：实际求解
 LLM_ENABLED = True       # True：停滞时自动启动 Codex 独立任务；False：关闭 LLM
 ENHANCED_SEARCH = True   # 全天可动机组的二元/三元联合 SA；False 仅运行分块搜索
+BLOCK_SA_PERIOD = 3      # 联合搜索开启时，第 1、4、7…轮执行块 SA；调度与回填每轮保留
+LLM_PATIENCE = 1         # 连续一个完整 SA 轮次改善不足 0.05% 时触发
 LLM_MODEL = "gpt-6-astra"  # 使用 Codex 已登录账号，推理档位为 max
 LLM_TIMEOUT_SECONDS = 1200  # 单次调用上限，仍受主算法剩余预算约束
 LLM_RESERVE_SECONDS = 60  # 不用于等待 LLM，留给后续调度、校验和数值搜索
@@ -34,8 +36,10 @@ RESULTS = PROJECT / "results"
 
 
 def save(path, value):
-    with path.open("w", encoding="utf-8") as stream:
-        json.dump(_serializable(value), stream, ensure_ascii=False, indent=2, allow_nan=False)
+    compressed = path.suffix == ".gz"
+    with (gzip.open(path, "wt", encoding="utf-8") if compressed else path.open("w", encoding="utf-8")) as stream:
+        json.dump(_serializable(value), stream, ensure_ascii=False,
+                  indent=None if compressed else 2, allow_nan=False)
         stream.write("\n")
 
 
@@ -65,8 +69,8 @@ def main():
     options = dict(data_file=str(folder / "units.json"), scenario_file=str(folder / "stochastic.json"),
                    seed=SEED, time_limit=TIME_LIMIT_SECONDS,
                    tolerance=TARGET_GAP_PERCENT / 100, block_hours=3, max_outer=1000000,
-                   enhanced_search=ENHANCED_SEARCH,
-                   max_inner=20, llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL,
+                   enhanced_search=ENHANCED_SEARCH, block_sa_period=BLOCK_SA_PERIOD,
+                   max_inner=20, llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL, llm_patience=LLM_PATIENCE,
                    llm_timeout=LLM_TIMEOUT_SECONDS, llm_reserve_seconds=LLM_RESERVE_SECONDS,
                    llm_codex_command="codex" if LLM_ENABLED else "",
                    llm_agent_directory=str(output / "llm_requests") if LLM_ENABLED else "")
@@ -98,7 +102,7 @@ def main():
     print("[1/2] 开始主算法：连续松弛初始化、分块 SA 搜索和独立强化下界认证。", flush=True)
     started = perf_counter()
     result = run_suc(options)
-    save(output / "result.json", asdict(result))
+    save(output / "result.json.gz", result)
     summary = dict(scope="EXPLORATORY_NO_INDEPENDENT_AUDIT", **dimensions,
                    seed=SEED, status=result.status, message=result.message,
                    upper=result.objective, lower=result.lower_bound,
@@ -110,6 +114,7 @@ def main():
                    block_sa_calls=result.diagnostics.get('block_sa_calls', 0),
                    joint_sa_calls=result.diagnostics.get('joint_sa_calls', 0),
                    enhanced_search=ENHANCED_SEARCH,
+                   block_sa_period=BLOCK_SA_PERIOD, llm_patience=LLM_PATIENCE,
                    search_statistics=result.diagnostics.get('search_statistics', {}),
                    note="入门实验：无增量检查点和独立审计；保存与完整问题参考求解在主算法预算之外。")
     save(output / "summary.json", summary)
@@ -147,7 +152,7 @@ def main():
         summary["reference_gap_percent"] = (100 * (result.objective - reference["objective"])
                                             / reference["objective"])
     save(output / "summary.json", summary)
-    print(f"结果已保存：{output}；完整参考方案见 reference.json。", flush=True)
+    print(f"结果已保存：{output}；完整主结果见 result.json.gz，参考方案见 reference.json。", flush=True)
     print(f"参考求解状态：{reference['status']}；耗时：{reference['elapsed_seconds']:.2f} 秒", flush=True)
     if reference["validation"] is not None:
         quality = "在求解器容差内最优" if reference["status"] == "OPTIMAL" else "可行参考方案，尚未证明最优"

@@ -2,6 +2,7 @@
 # 模块职责：将离散 Benders 主问题编码为稀疏 QUBO，处理固定变量、theta、罚函数和松弛辅助位。
 # 主问题末列是费用 theta；容量用有理数格点，Benders 割使用整条误差预算向下量化。
 from fractions import Fraction
+from collections import deque
 from itertools import product
 import math
 from types import SimpleNamespace as NS
@@ -40,29 +41,47 @@ def quantize(coefficients, constant, budget, exact=None):
 # 反复穷举至多四个变量的 hard 行，包含跨小时状态转移；只固定所有合法组合共有的值。
 # 未确定值使用 NaN 标记；无满足组合说明硬约束不一致。
 def fixed_binary(m):
+    return _fixed_binary(m, m.A[:, :len(m.binary)].tocsr())
+
+
+def _fixed_binary(m, binary):
     fixed = np.full(len(m.binary), np.nan)
     rows = []
+    adjacent = [[] for _ in fixed]
     for k, label in enumerate(m.kind):
-        row = m.A[k, :len(fixed)].tocsr()
-        if label == "hard" and row.nnz <= 4:
-            rows.append((k, row.indices, row.data))
-    changed = True
-    while changed:
-        changed = False
-        for k, js, values in rows:
-            known = ~np.isnan(fixed[js])
-            c = -m.rhs[k] + values[known] @ fixed[js[known]]
-            free, a = js[~known], values[~known]
-            valid = []
-            for bits in product((0, 1), repeat=len(free)):
-                residual = c + a @ bits
-                if (abs(residual) <= 1e-9 if m.eq[k] else residual <= 1e-9):
-                    valid.append(bits)
-            if not valid:
+        start, end = binary.indptr[k:k+2]
+        if label == "hard" and end-start <= 4:
+            js, values = binary.indices[start:end], binary.data[start:end]
+            for index in js:
+                adjacent[index].append(len(rows))
+            rows.append((k, js, values))
+    pending = np.ones(len(rows), bool)
+    queue = deque(range(len(rows)))
+    while queue:
+        row = queue.popleft()
+        pending[row] = False
+        k, js, values = rows[row]
+        known = ~np.isnan(fixed[js])
+        c = -m.rhs[k] + values[known] @ fixed[js[known]]
+        free, a = js[~known], values[~known]
+        if not len(free):
+            if not (abs(c) <= 1e-9 if m.eq[k] else c <= 1e-9):
                 raise ValueError("Inconsistent hard constraints")
-            for j, index in enumerate(free):
-                if all(v[j] == valid[0][j] for v in valid):
-                    fixed[index] = valid[0][j]; changed = True
+            continue
+        valid = []
+        for bits in product((0, 1), repeat=len(free)):
+            residual = c + a @ bits
+            if (abs(residual) <= 1e-9 if m.eq[k] else residual <= 1e-9):
+                valid.append(bits)
+        if not valid:
+            raise ValueError("Inconsistent hard constraints")
+        for j, index in enumerate(free):
+            if all(v[j] == valid[0][j] for v in valid):
+                fixed[index] = valid[0][j]
+                for neighbor in adjacent[index]:
+                    if not pending[neighbor]:
+                        queue.append(neighbor)
+                        pending[neighbor] = True
     return fixed
 
 
@@ -70,13 +89,17 @@ def fixed_binary(m):
 # 不等式用非负松弛位转成平方罚项；AND 使用原 Rosenberg 罚函数，输出能量只供搜索。
 def qubo(m, o, upper):
     nb = len(m.binary)
-    fixed = fixed_binary(m)
+    binary = m.A[:, :nb].tocsr()
+    fixed = _fixed_binary(m, binary)
     free, known = np.flatnonzero(np.isnan(fixed)), np.flatnonzero(~np.isnan(fixed))
     mapping = dict(zip(free, range(len(free))))
     lower = math.floor(m.lb[-1] / o.theta_step) * o.theta_step
     upper = math.ceil(min(upper, m.ub[-1]) / o.theta_step) * o.theta_step
     if not np.isfinite(upper) or upper < lower:
         raise ValueError("Invalid epigraph range")
+    theta = m.A[:, nb].toarray().ravel()
+    row_constants = binary[:, known] @ fixed[known] - m.rhs + theta * lower
+    active = binary[:, free].tocsr()
     integer_weights = bit_weights(round((upper - lower) / o.theta_step))
     weights = o.theta_step * integer_weights
     theta_ids = np.arange(len(free), len(free) + len(weights))
@@ -110,9 +133,9 @@ def qubo(m, o, upper):
     for k, label in enumerate(m.kind):
         if label == "and":
             continue
-        row = m.A[k, :nb].tocsr()
-        a = {mapping[j]: float(v) for j, v in zip(row.indices, row.data) if j in mapping and v}
-        c = float((m.A[k, known] @ fixed[known]).item() - m.rhs[k] + m.A[k, nb] * lower)
+        start, end = active.indptr[k:k+2]
+        a = {int(j): float(v) for j, v in zip(active.indices[start:end], active.data[start:end]) if v}
+        c = float(row_constants[k])
         if label == "hard" and not m.eq[k] and len(a) <= 2:
             ids = list(a); values = list(a.values())
             e00 = max(0, c) ** 2; offset += o.penalty * e00
@@ -130,8 +153,14 @@ def qubo(m, o, upper):
             scale = 1.
         elif label == "capacity":
             # 分母最小公倍数和系数最大公约数确定精确容量格点，不使用浮点四舍五入替代。
-            original, constant = getattr(m, "capacity_rows", {}).get(k, (
-                {j: Fraction(str(v)) for j, v in zip(row.indices, row.data)}, Fraction(str(-m.rhs[k]))))
+            capacity_rows = getattr(m, "capacity_rows", {})
+            if k in capacity_rows:
+                original, constant = capacity_rows[k]
+            else:
+                start, end = binary.indptr[k:k+2]
+                original = {j: Fraction(str(v)) for j, v in
+                            zip(binary.indices[start:end], binary.data[start:end])}
+                constant = Fraction(str(-m.rhs[k]))
             constant += sum(v * int(fixed[j]) for j, v in original.items() if not np.isnan(fixed[j]))
             exact = {mapping[j]: v for j, v in original.items() if j in mapping and v}
             denominator = math.lcm(*(v.denominator for v in exact.values()))
@@ -142,7 +171,7 @@ def qubo(m, o, upper):
             scale = float(step / Fraction(str(o.reserve_scale)))
         else:
             budget, norm = (o.theta_step, m.scale) if label == "optimality" else (1e-3, o.reserve_scale)
-            exact = {j: Fraction(str(float(m.A[k, nb]))) * Fraction(str(o.theta_step)) * int(w)
+            exact = {j: Fraction(str(float(theta[k]))) * Fraction(str(o.theta_step)) * int(w)
                      for j, w in zip(theta_ids, integer_weights)} if label == "optimality" else None
             a, c, step = quantize(a, c, budget, exact)
             scale = float(step / Fraction(str(norm)))

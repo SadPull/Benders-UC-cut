@@ -169,6 +169,37 @@ def _codex_event_info(directory):
     return info
 
 
+def _prepare_codex(command, body, shape, directory):
+    """Prepare the same isolated CLI request for production and timing experiments."""
+    prompt = (body['instructions']+'\n\n'+body['input']
+                  +'\n\nReturn only the requested JSON. Do not invoke tools, edit files, or spawn agents.\n')
+    (directory/'prompt.txt').write_bytes(prompt.encode('utf-8'))
+    prompt_sha256 = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
+    matrix = dict(type='array', minItems=shape.n_units, maxItems=shape.n_units,
+            items=dict(type='array', minItems=shape.horizon, maxItems=shape.horizon,
+                       items=dict(type='integer', enum=[0, 1])))
+    save_json(directory/'schema.json', dict(type='object', additionalProperties=False,
+            required=['candidates'], properties=dict(candidates=dict(type='array', maxItems=4,
+                items=dict(type='object', additionalProperties=False, required=['name', 'reason', 'u'],
+                    properties=dict(name=dict(type='string'), reason=dict(type='string'), u=matrix))))))
+    executable = shutil.which(command)
+    if executable is None:
+        raise FileNotFoundError('Codex CLI not found; install it or set llm_codex_command')
+    args = [executable, 'exec', '--model', body['model'],
+                '-c', 'model_reasoning_effort="'+body['reasoning']['effort']+'"',
+                '-c', 'approval_policy="never"', '-c', 'agents.enabled=false',
+                '--sandbox', 'read-only', '--skip-git-repo-check', '--cd', str(directory),
+                '--json', '--output-schema', str(directory/'schema.json'),
+                '--output-last-message', str(directory/'reply.json'), '-']
+    config_path = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))/'config.toml'
+    args[2:2] = _codex_https_args(config_path)
+    save_json(directory/'command.json', dict(argv=args))
+    environment = os.environ.copy()
+    # codex exec 会优先使用此覆盖值；复用 CLI 已有登录时不能继承父代理的临时密钥。
+    environment.pop('CODEX_API_KEY', None)
+    return args, environment, prompt_sha256
+
+
 def _request_codex(connection, command, body, shape, iteration, deadline, directory):
     # Ctrl+C 由主进程统一回收整棵进程树，工作进程不能先于 CLI 退出。
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -178,32 +209,7 @@ def _request_codex(connection, command, body, shape, iteration, deadline, direct
     candidates, process = [], None
     info = dict(status='FAILED', message='', accepted=0, format_valid=0, proposals=[], exit_code=None)
     try:
-        prompt = (body['instructions']+'\n\n'+body['input']
-                  +'\n\nReturn only the requested JSON. Do not invoke tools, edit files, or spawn agents.\n')
-        (directory/'prompt.txt').write_bytes(prompt.encode('utf-8'))
-        info['prompt_sha256'] = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
-        matrix = dict(type='array', minItems=shape.n_units, maxItems=shape.n_units,
-            items=dict(type='array', minItems=shape.horizon, maxItems=shape.horizon,
-                       items=dict(type='integer', enum=[0, 1])))
-        save_json(directory/'schema.json', dict(type='object', additionalProperties=False,
-            required=['candidates'], properties=dict(candidates=dict(type='array', maxItems=4,
-                items=dict(type='object', additionalProperties=False, required=['name', 'reason', 'u'],
-                    properties=dict(name=dict(type='string'), reason=dict(type='string'), u=matrix))))))
-        executable = shutil.which(command)
-        if executable is None:
-            raise FileNotFoundError('Codex CLI not found; install it or set llm_codex_command')
-        args = [executable, 'exec', '--model', body['model'],
-                '-c', 'model_reasoning_effort="'+body['reasoning']['effort']+'"',
-                '-c', 'approval_policy="never"', '-c', 'agents.enabled=false',
-                '--sandbox', 'read-only', '--skip-git-repo-check', '--cd', str(directory),
-                '--json', '--output-schema', str(directory/'schema.json'),
-                '--output-last-message', str(directory/'reply.json'), '-']
-        config_path = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))/'config.toml'
-        args[2:2] = _codex_https_args(config_path)
-        save_json(directory/'command.json', dict(argv=args))
-        environment = os.environ.copy()
-        # codex exec 会优先使用此覆盖值；复用 CLI 已有登录时不能继承父代理的临时密钥。
-        environment.pop('CODEX_API_KEY', None)
+        args, environment, info['prompt_sha256'] = _prepare_codex(command, body, shape, directory)
         with (directory/'prompt.txt').open('rb') as source, (directory/'events.jsonl').open('wb') as events, \
                 (directory/'stderr.log').open('wb') as errors:
             if perf_counter() >= deadline:

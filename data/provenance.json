@@ -1,16 +1,15 @@
 {
-  "name": "Pisa RCUC 20_0_1_w: original deterministic parameters under the project UC model",
-  "scope": "RCUC 原始参数／项目模型；非原论文最优值复现",
+  "name": "Pisa IEEE118-derived 54-unit 24-hour UC: fixedCost mapping",
+  "scope": "原始参数按项目模型及所选费用映射得到的派生测试；零启动费；非论文最优值复现",
   "sources": {
-    "20_0_1_w.mod": {
-      "url": "https://commalab.di.unipi.it/files/Data/UC/RCUC.tgz",
+    "24_U_SUC.mod": {
+      "url": "https://commalab.di.unipi.it/files/Data/UC/118_UC.tgz",
       "documentation_url": "https://commalab.di.unipi.it/datasets/uc/",
-      "archive_member": "RCUC/T-Ramp/20_0_1_w.mod",
-      "archive_sha256": "b9870dd19532d6d38187dbc338a6ad97fb5adca9136d744922826a3ffa8cee1c",
-      "sha256": "412a5377dbfce0211acd550560246b7cc56ecb68f836a1abe7c69c1677131ec1",
-      "local_file": "sources/20_0_1_w.mod",
-      "local_sha256": "412a5377dbfce0211acd550560246b7cc56ecb68f836a1abe7c69c1677131ec1",
-      "local_format": "Unmodified archive member bytes, including original line endings"
+      "archive_member": "118_UC/118bus24/24_U_SUC.mod",
+      "archive_sha256": "37f8a32056431ee19c2a28541c992d52ff4e617e96b184bf49df45b9a95326cb",
+      "sha256": "37bb2eea6e35f307e3e911a1418d64d96bec6eb4ac5c4e2136a77994317232a3",
+      "local_sha256": "37bb2eea6e35f307e3e911a1418d64d96bec6eb4ac5c4e2136a77994317232a3",
+      "local_file": "sources/24_U_SUC.mod"
     }
   },
   "generator_mapping": [
@@ -93,6 +92,142 @@
     {
       "index": 19,
       "source_generator_id": 19
+    },
+    {
+      "index": 20,
+      "source_generator_id": 20
+    },
+    {
+      "index": 21,
+      "source_generator_id": 21
+    },
+    {
+      "index": 22,
+      "source_generator_id": 22
+    },
+    {
+      "index": 23,
+      "source_generator_id": 23
+    },
+    {
+      "index": 24,
+      "source_generator_id": 24
+    },
+    {
+      "index": 25,
+      "source_generator_id": 25
+    },
+    {
+      "index": 26,
+      "source_generator_id": 26
+    },
+    {
+      "index": 27,
+      "source_generator_id": 27
+    },
+    {
+      "index": 28,
+      "source_generator_id": 28
+    },
+    {
+      "index": 29,
+      "source_generator_id": 29
+    },
+    {
+      "index": 30,
+      "source_generator_id": 30
+    },
+    {
+      "index": 31,
+      "source_generator_id": 31
+    },
+    {
+      "index": 32,
+      "source_generator_id": 32
+    },
+    {
+      "index": 33,
+      "source_generator_id": 33
+    },
+    {
+      "index": 34,
+      "source_generator_id": 34
+    },
+    {
+      "index": 35,
+      "source_generator_id": 35
+    },
+    {
+      "index": 36,
+      "source_generator_id": 36
+    },
+    {
+      "index": 37,
+      "source_generator_id": 37
+    },
+    {
+      "index": 38,
+      "source_generator_id": 38
+    },
+    {
+      "index": 39,
+      "source_generator_id": 39
+    },
+    {
+      "index": 40,
+      "source_generator_id": 40
+    },
+    {
+      "index": 41,
+      "source_generator_id": 41
+    },
+    {
+      "index": 42,
+      "source_generator_id": 42
+    },
+    {
+      "index": 43,
+      "source_generator_id": 43
+    },
+    {
+      "index": 44,
+      "source_generator_id": 44
+    },
+    {
+      "index": 45,
+      "source_generator_id": 45
+    },
+    {
+      "index": 46,
+      "source_generator_id": 46
+    },
+    {
+      "index": 47,
+      "source_generator_id": 47
+    },
+    {
+      "index": 48,
+      "source_generator_id": 48
+    },
+    {
+      "index": 49,
+      "source_generator_id": 49
+    },
+    {
+      "index": 50,
+      "source_generator_id": 50
+    },
+    {
+      "index": 51,
+      "source_generator_id": 51
+    },
+    {
+      "index": 52,
+      "source_generator_id": 52
+    },
+    {
+      "index": 53,
+      "source_generator_id": 53
     }
   ],
   "thermal_field_order": [
@@ -110,7 +245,7 @@
     "tau",
     "tauMax",
     "fixedCost",
-    "SUCC_unused",
+    "SUCC_excluded_by_selected_mapping",
     "initial_output"
   ],
   "field_sources": {
@@ -122,7 +257,7 @@
     "initial_duration": "ThermalSection column 7; unchanged",
     "min_up": "ThermalSection column 8; unchanged",
     "min_down": "ThermalSection column 9; unchanged",
-    "startup_cost": "fixedCost, column 14. coolAndFuelCost and hotAndFuelCost are zero, so startup cost is constant",
+    "startup_cost": "fixedCost, column 14, zero for all 54 units; explicit selected mapping; SUCC column 15 excluded",
     "initial_output": "ThermalSection column 16; unchanged",
     "ramp_up,ramp_down": "The following RampConstraints row; unchanged",
     "base_load": "Loads: original 24 hourly values; unchanged",
@@ -137,23 +272,37 @@
     "SUCC is an unused compatibility column; use fixedCost for startup and P0 for initial output.",
     "No hot/cold startup extension: both time-dependent startup coefficients are zero.",
     "Use the existing project aggregate UC model, unconditional ramp limits, initial residual durations, last-hour shutdown prohibition and horizon-truncated minimum up/down rules.",
-    "This imports original parameters; it does not reproduce the original RCUC paper formulation or adopt its published optimum as an acceptance target."
+    "Source header capacity totals are stale: compute installed capacity from the 54 Pmax values (7220 MW).",
+    "Use fixedCost (column 14, zero for all units) for startup. Retain SUCC (column 15) in the raw source only. This is an explicitly selected mapping, not a reproduction of the published IEEE118 cost experiment."
   ],
+  "startup_mapping": {
+    "selected": "fixedCost_column_14",
+    "all_zero": true,
+    "succ_column_15": "excluded",
+    "source_conflict": "Format.pdf and the author converter use fixedCost; the dataset description says SUC/SUH differ only in startup costs, but the actual files differ only in SUCC. User selected the prechecked fixedCost mapping.",
+    "converter_url": "https://gitlab.com/smspp/ucblock/-/raw/master/tools/nc4generator.cpp"
+  },
+  "header_capacity_totals": {
+    "MinSystemCapacity": 548.0,
+    "MaxSystemCapacity": 1771.0,
+    "MaxThermalCapacity": 1771.0
+  },
+  "calculated_capacity_mw": 7220.0,
+  "peak_load_mw": 6715.92243767313,
   "input_hash_format": "SHA256 of exact file bytes",
   "input_sha256": {
-    "units.json": "500b0758d4e13fbac49e3a9e6d600f4dcfd6205955eb4da122cf4bd21b00b7a9",
-    "deterministic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f",
-    "stochastic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f"
+    "units.json": "ee6c7eb7c7a8b45e1c8d348eefc94ad106965286003e2f08f6bfeeafc1bf10ea",
+    "stochastic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f",
+    "deterministic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f"
   },
-  "preserved_classic10": {
-    "directory": "classic10",
-    "hash_format": "SHA256 of exact copied file bytes",
+  "preserved_rcuc20": {
+    "directory": "rcuc20",
     "sha256": {
-      "units.json": "def19f3e0eb3ad5abcb2fc49df9a0189a2420d75d5ce1b7413b8350321b2a96a",
-      "deterministic.json": "be59f9cc929dd0cc1dd8e726a5c7e109d8a6c359db5858fc628b6b5913618080",
-      "stochastic.json": "ef1449667234504c3ced04a25522fbb9e4c6171268d12d9abbc6ca1392f0a0df",
-      "provenance.json": "1a5ff61c5d4c063bd0180f209bd01bfe391e520bfaf1eae65f831e7490f8abba",
-      "sources/GA10.uc": "8730be6f73652c778c787bbf201b84db87cc74c6c8381e4137717658617c9eea"
+      "deterministic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f",
+      "provenance.json": "10196f1a1e7133b0d41f7ba8f97336624d61bd0ba79f929ee9f66ac74b1d2915",
+      "stochastic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f",
+      "units.json": "500b0758d4e13fbac49e3a9e6d600f4dcfd6205955eb4da122cf4bd21b00b7a9",
+      "sources/20_0_1_w.mod": "412a5377dbfce0211acd550560246b7cc56ecb68f836a1abe7c69c1677131ec1"
     }
   }
 }

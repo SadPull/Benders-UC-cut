@@ -32,6 +32,7 @@ class Options:
     sa_reads: int = 16
     sa_enabled: bool = True
     enhanced_search: bool = True
+    block_sa_period: int = 1
     # 辅助工作配额独立于总 time_limit；耗尽后可继续整数认证，None 表示不另设此配额。
     sa_budget_seconds: float | None = None
     sa_sweeps: int = 5
@@ -72,7 +73,7 @@ def load_options(overrides=None, config_path=None):
         if name not in {f.name for f in fields(o)}:
             raise ValueError(f"Unknown option: {name}")
         setattr(o, name, value)
-    for name in ("block_hours", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed", "llm_max_calls"):
+    for name in ("block_hours", "block_sa_period", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed", "llm_max_calls"):
         v = getattr(o, name)
         if name == "llm_max_calls" and v is None:
             continue

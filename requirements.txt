@@ -2,5 +2,4 @@ numpy==2.2.6
 scipy==1.15.3
 gurobipy==13.0.1
 kaiwu==1.4.1
-pytest>=8,<10
 # Pass the supplied Kaiwu Windows CPython 3.10 wheel to the same pip install command.
