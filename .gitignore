@@ -9,7 +9,6 @@ results/
 tmp/
 .local/
 *.lic
-tests/
 experiments/
 docs/
 releases/

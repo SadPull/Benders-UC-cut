@@ -25,19 +25,22 @@ class Options:
     time_limit: float = 600
     seed: int = 7
     verbose: bool = True
-    # theta 步长控制费用编码精度；penalty 惩罚约束违反，reserve_scale 缩放容量罚项。
+    # theta 步长控制费用编码精度；penalty 惩罚约束违反，reserve_scale 缩放容量罚项（仅归档 qubo 使用）。
     theta_step: float = 1
     penalty: float = 1e6
     reserve_scale: float = 100
-    sa_reads: int = 16
+    # 搜索 QUBO 以"单个位的最大归一化成本"为能量单位；以下权重、温度均以该单位计。
+    # sa_reads 为独立退火链数，sa_sweeps 为每个温度对全部位的扫描次数。
+    sa_hard_weight: float = 8
+    sa_capacity_weight: float = 4
+    sa_proximity: float = 2
+    sa_reads: int = 8
     sa_enabled: bool = True
-    enhanced_search: bool = True
-    block_sa_period: int = 1
     # 辅助工作配额独立于总 time_limit；耗尽后可继续整数认证，None 表示不另设此配额。
     sa_budget_seconds: float | None = None
-    sa_sweeps: int = 5
-    sa_temperature: float = 100
-    sa_cooling: float = .98
+    sa_sweeps: int = 2
+    sa_temperature: float = 4
+    sa_cooling: float = .9
     sa_cutoff: float = .01
     kaiwu_user_id: str = field(default="", repr=False)
     kaiwu_sdk_code: str = field(default="", repr=False)
@@ -73,15 +76,16 @@ def load_options(overrides=None, config_path=None):
         if name not in {f.name for f in fields(o)}:
             raise ValueError(f"Unknown option: {name}")
         setattr(o, name, value)
-    for name in ("block_hours", "block_sa_period", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed", "llm_max_calls"):
+    for name in ("block_hours", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed", "llm_max_calls"):
         v = getattr(o, name)
         if name == "llm_max_calls" and v is None:
             continue
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
-    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance"):
+    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
+                 "sa_hard_weight", "sa_capacity_weight", "sa_proximity"):
         v = getattr(o, name)
-        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name not in ("tolerance", "llm_reserve_seconds")):
+        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name not in ("tolerance", "llm_reserve_seconds", "sa_proximity")):
             raise ValueError(f"Invalid numeric option: {name}")
     if not 0 < o.sa_cooling < 1 or not o.sa_cutoff < o.sa_temperature:
         raise ValueError("Require 0 < sa_cooling < 1 and sa_cutoff < sa_temperature")
@@ -89,8 +93,6 @@ def load_options(overrides=None, config_path=None):
         raise ValueError("llm_enabled and verbose must be boolean")
     if not isinstance(o.sa_enabled, bool):
         raise ValueError("sa_enabled must be boolean")
-    if not isinstance(o.enhanced_search, bool):
-        raise ValueError("enhanced_search must be boolean")
     if o.sa_budget_seconds is not None:
         v = o.sa_budget_seconds
         if (isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v)

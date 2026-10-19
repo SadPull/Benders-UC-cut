@@ -1,9 +1,4 @@
-"""Run the core solver from Python or the command line."""
-import argparse
-from dataclasses import asdict
-import json
-from pathlib import Path
-
+"""Python interface used by the experiment entry point."""
 import numpy as np
 
 from suc_benders.anneal import initialize
@@ -38,23 +33,3 @@ def _serializable(value):
     if hasattr(value, "__dict__"):
         return _serializable(vars(value))
     return value
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    for name, kind in (("scenario-file", str), ("block-hours", int), ("max-outer", int),
-                       ("max-inner", int), ("time-limit", float), ("seed", int)):
-        parser.add_argument(f"--{name}", type=kind)
-    parser.add_argument("--llm-enabled", action="store_true", default=None)
-    parser.add_argument("--output", type=Path, help="Optional JSON result file")
-    args = vars(parser.parse_args())
-    output = args.pop("output")
-    result = run_suc({key: value for key, value in args.items() if value is not None})
-    if output is not None:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(_serializable(asdict(result)), ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    return 1 if result.status.endswith("FAILED") or result.status == 'PAUSED_LLM_FAILURE' or result.validation is None else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

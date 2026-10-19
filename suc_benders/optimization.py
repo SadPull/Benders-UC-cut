@@ -47,7 +47,7 @@ def optimize(m, seconds, integral=False, *, method=None, log_file=None, farkas=F
                 g.setParam('MIPFocus', mip_focus)
                 g.setParam('IntFeasTol', 1e-9)
             if target_lower is not None:
-                g.setParam('BestBdStop', target_lower-getattr(m, 'constant', 0.)+1e-5)
+                g.setParam('BestBdStop', target_lower-m.constant+1e-5)
             if solution_limit is not None:
                 g.setParam('SolutionLimit', int(solution_limit))
             if farkas:

@@ -161,7 +161,7 @@ def master(b, cuts, seconds=0, *, search_reachability=False):
            rhs=np.asarray(rhs), eq=np.asarray(eq, bool), obj=np.r_[np.zeros(nb), 1.],
            q=np.zeros(nb + 1), lb=np.r_[np.zeros(nb), lo], ub=np.r_[np.ones(nb), hi],
            binary=np.arange(nb), nx=nx, and_pairs=pairs, kind=kind, scale=b.scale,
-           capacity_rows=capacity_rows)
+           capacity_rows=capacity_rows, constant=0.)
     m.purpose = 'master_lp_relaxation'
     lower = -np.inf
     if seconds > 0:
@@ -174,9 +174,9 @@ def master(b, cuts, seconds=0, *, search_reachability=False):
     return m, lower
 
 
-# 用各块的可行费用平面优化跨块乘子，返回新乘子和协调对偶模型的上界。
-# 先确定原目标最优值，再选择 L1 范数最小的乘子，避免退化方向使 QUBO 编码数值过大。
-def coordinate(planes, equality, incumbent, seconds):
+# 用各块的可行费用平面优化跨块乘子，返回新乘子、协调对偶模型的上界与处理状态。
+# 主问题被 incumbent 截顶或失败时保留 previous；L1 选择失败则回退主问题乘子，均不中止搜索。
+def coordinate(planes, equality, incumbent, seconds, previous):
     started = perf_counter()
     nc, B = len(equality), len(planes)
     rows, rhs = [], []
@@ -194,26 +194,35 @@ def coordinate(planes, equality, incumbent, seconds):
            lb=np.r_[np.where(equality, -np.inf, 0), np.full(B, -np.inf)],
            ub=np.full(nc + B, np.inf), binary=[])
     m.purpose = 'coordination_lp'
+    previous = np.asarray(previous, float).copy()
     raw = optimize(m, seconds)
     if raw.status != "OPTIMAL":
-        raise RuntimeError(f"Coordination LP failed: {raw.status}")
+        return previous, np.inf, dict(status=f"PRIMARY_{raw.status}")
     upper = -raw.objval
+    # 截顶时最优面由 incumbent 决定，乘子不含平面信息；目标带同一容差，避免与截顶行矛盾。
+    tolerance = max(1e-6 * abs(incumbent), 1e-4)
+    if upper >= incumbent - tolerance:
+        return previous, upper, dict(status="CAPPED")
+    info = dict(status="OPTIMAL")
     if nc:
         # The primary optimum can have unbounded flat multiplier directions.
-        # Select the smallest L1 multipliers without changing its certified upper bound.
+        # Select the smallest L1 multipliers within a tolerance of its upper bound.
+        primary = raw
         identity = sparse.eye(nc, format="csr")
         absolute = sparse.hstack([identity, sparse.csr_matrix((nc, B))], format="csr")
         target = sparse.csr_matrix(np.r_[np.zeros(nc), -np.ones(B), np.zeros(nc)][None, :])
         stable = NS(A=sparse.vstack([
             sparse.hstack([m.A, sparse.csr_matrix((len(m.rhs), nc))]), target,
             sparse.hstack([absolute, -identity]), sparse.hstack([-absolute, -identity])], format="csr"),
-            rhs=np.r_[m.rhs, -upper, np.zeros(2*nc)],
+            rhs=np.r_[m.rhs, -(upper - tolerance), np.zeros(2*nc)],
             eq=np.zeros(len(m.rhs)+1+2*nc, bool), obj=np.r_[np.zeros(nc+B), np.ones(nc)],
             q=np.zeros(2*nc+B), lb=np.r_[m.lb, np.zeros(nc)], ub=np.r_[m.ub, np.full(nc, np.inf)], binary=[])
         stable.purpose = 'coordination_minimum_l1_lp'
-        raw = optimize(stable, seconds-(perf_counter()-started))
+        remaining = seconds-(perf_counter()-started)
+        raw = optimize(stable, remaining) if remaining > 0 else NS(status="TIME_LIMIT")
         if raw.status != "OPTIMAL":
-            raise RuntimeError(f"Multiplier selection LP failed: {raw.status}")
+            info = dict(status="SELECTION_FALLBACK", selection_status=raw.status)
+            raw = primary
     prices = raw.x[:nc].copy()
     prices[~equality] = np.maximum(0, prices[~equality])
-    return prices, upper
+    return prices, upper, info

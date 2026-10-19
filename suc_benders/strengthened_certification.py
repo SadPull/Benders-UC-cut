@@ -18,7 +18,7 @@ def matrix_hash(m):
     digest = hashlib.sha256(b'strengthened-matrix-v1')
     a = m.A.copy(); a.sort_indices()
     for values in (a.shape, a.indptr, a.indices, a.data, m.rhs, m.eq, m.obj, m.q,
-                   m.lb, m.ub, m.binary, [getattr(m, 'constant', 0.)]):
+                   m.lb, m.ub, m.binary, [m.constant]):
         values = np.asarray(values, dtype='<f8')
         digest.update(np.asarray(values.shape, dtype='<i8').tobytes())
         digest.update(values.tobytes())
@@ -28,7 +28,7 @@ def matrix_hash(m):
 def save_matrix(path, m):
     np.savez_compressed(path, data=m.A.data, indices=m.A.indices, indptr=m.A.indptr,
         shape=m.A.shape, rhs=m.rhs, eq=m.eq, obj=m.obj, q=m.q, lb=m.lb, ub=m.ub,
-        binary=m.binary, constant=getattr(m, 'constant', 0.))
+        binary=m.binary, constant=m.constant)
 
 
 def _proof(sender, stop, d, scenarios, deadline, started, directory):

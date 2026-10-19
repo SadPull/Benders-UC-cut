@@ -52,7 +52,9 @@ def load_data(unit_file, scenario_file):
     # 先读取时长符号中的初始开停机状态，再保存正的持续小时数，后续时序规则只使用持续长度。
     d.initial_on = (d.initial_duration > 0).astype(float)
     d.initial_duration = np.abs(d.initial_duration)
-    d.initial_output = np.asarray(getattr(d, "initial_output", d.pmin * d.initial_on), dtype=float)
+    if 'initial_output' not in raw:
+        raise ValueError('initial_output is required')
+    d.initial_output = np.asarray(d.initial_output, dtype=float)
     if (d.initial_output.shape != (d.n_units,) or not np.isfinite(d.initial_output).all()
             or (d.initial_output < d.pmin * d.initial_on).any()
             or (d.initial_output > d.pmax * d.initial_on).any()):

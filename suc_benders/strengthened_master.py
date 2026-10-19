@@ -43,7 +43,7 @@ def build(physical, root, theta):
     n = len(proof.obj)
     columns = np.r_[physical.binary, np.arange(n, n+len(root.obj)-nx)]
     count = n+len(root.obj)-nx
-    constant = float(getattr(root, "constant", 0.))
+    constant = float(root.constant)
     out = NS(obj=np.zeros(count), q=np.zeros(count), lb=np.r_[proof.lb, root.lb[nx:]],
         ub=np.r_[proof.ub, root.ub[nx:]], binary=np.unique(np.r_[physical.binary, columns[root.binary]]),
         constant=constant, A=sparse.hstack([proof.A, sparse.csr_matrix((len(proof.rhs), count-n))], format="csr"),

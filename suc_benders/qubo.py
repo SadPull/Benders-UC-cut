@@ -1,6 +1,7 @@
 """Sparse assembly of archived penalties and whole-cut quantization budgets."""
 # 模块职责：将离散 Benders 主问题编码为稀疏 QUBO，处理固定变量、theta、罚函数和松弛辅助位。
 # 主问题末列是费用 theta；容量用有理数格点，Benders 割使用整条误差预算向下量化。
+# 主线块 SA 使用 search_qubo；qubo() 保留为归档编码，不再被主循环调用。
 from fractions import Fraction
 from collections import deque
 from itertools import product
@@ -153,14 +154,7 @@ def qubo(m, o, upper):
             scale = 1.
         elif label == "capacity":
             # 分母最小公倍数和系数最大公约数确定精确容量格点，不使用浮点四舍五入替代。
-            capacity_rows = getattr(m, "capacity_rows", {})
-            if k in capacity_rows:
-                original, constant = capacity_rows[k]
-            else:
-                start, end = binary.indptr[k:k+2]
-                original = {j: Fraction(str(v)) for j, v in
-                            zip(binary.indices[start:end], binary.data[start:end])}
-                constant = Fraction(str(-m.rhs[k]))
+            original, constant = m.capacity_rows[k]
             constant += sum(v * int(fixed[j]) for j, v in original.items() if not np.isnan(fixed[j]))
             exact = {mapping[j]: v for j, v in original.items() if j in mapping and v}
             denominator = math.lcm(*(v.denominator for v in exact.values()))
@@ -199,3 +193,100 @@ def qubo(m, o, upper):
     return NS(Q=Q.tocsr(), offset=float(offset), fixed=fixed, free=free, nx=m.nx,
               theta_ids=theta_ids, theta_weights=weights, theta_lower=lower, energy_unit=o.theta_step / m.scale,
               removed_rows=removed_rows)
+
+
+# 搜索专用 QUBO：只含 u/v/w 和容量/可行性割松弛位，能量单位为一个归一化成本单位。
+# 成本取锚点处最紧最优性割的线性代理；硬约束按行最大系数归一化后统一加权，容量只用 u 列，
+# 避免 v/w 充当容量补偿位；邻近项把 u 拉向锚点。能量只用于搜索，不能作为任何界。
+def search_qubo(m, b, cuts, anchors, boundary, o):
+    nx = m.nx
+    binary = m.A[:, :nx].tocsr()
+    hard = [k for k, label in enumerate(m.kind) if label == "hard"]
+    rows = [(binary.indices[binary.indptr[k]:binary.indptr[k + 1]],
+             binary.data[binary.indptr[k]:binary.indptr[k + 1]], m.rhs[k], m.eq[k]) for k in hard]
+    rows += [(np.asarray(js, int), np.asarray(values, float), rhs, eq) for js, values, rhs, eq in boundary]
+    I = [k for k, row in enumerate(rows) for _ in row[0]]
+    J = [j for row in rows for j in row[0]]
+    V = [v for row in rows for v in row[1]]
+    view = NS(kind=["hard"] * len(rows), rhs=np.asarray([row[2] for row in rows], float),
+              eq=np.asarray([row[3] for row in rows], bool), binary=np.arange(nx))
+    fixed = _fixed_binary(view, sparse.coo_matrix((V, (I, J)), shape=(len(rows), nx)).tocsr())
+    free = np.flatnonzero(np.isnan(fixed))
+    mapping = np.full(nx, -1); mapping[free] = np.arange(len(free))
+    qi, qj, qv, R, constants = [], [], [], [], []
+    nv = len(free)
+
+    # 加入 weight*(a*x+c)^2 或 weight*max(0, a*x+c)^2；系数先按整行最大值归一化。
+    # 至多两个自由位的不等式用精确真值表，其余不等式在 step 格点上用非负松弛位。
+    def penalty(js, values, rhs, equality, weight, step):
+        nonlocal nv
+        js, values = np.asarray(js, int), np.asarray(values, float)
+        scale = np.abs(values).max(initial=0.)
+        if not scale:
+            return
+        values, c, step = values / scale, -rhs / scale, step / scale
+        known = ~np.isnan(fixed[js])
+        c += values[known] @ fixed[js[known]]
+        ids, a = mapping[js[~known]], values[~known]
+        if not len(ids):
+            return
+        if not equality:
+            low, high = c + np.minimum(a, 0).sum(), c + np.maximum(a, 0).sum()
+            if high <= 1e-9:
+                return
+            if len(ids) <= 2:
+                e00 = max(0, c) ** 2
+                e10 = max(0, c + a[0]) ** 2
+                qi.append(ids[0]); qj.append(ids[0]); qv.append(weight * (e10 - e00))
+                if len(ids) == 2:
+                    e01, e11 = max(0, c + a[1]) ** 2, max(0, c + a.sum()) ** 2
+                    mixed = weight * (e11 - e10 - e01 + e00) / 2
+                    qi.extend([ids[1], ids[0], ids[1]]); qj.extend([ids[1], ids[1], ids[0]])
+                    qv.extend([weight * (e01 - e00), mixed, mixed])
+                return
+            slack = step * bit_weights(max(0, math.floor(-low / step + 1e-9)))
+            ids, a = np.r_[ids, np.arange(nv, nv + len(slack))], np.r_[a, slack]
+            nv += len(slack)
+        R.append((ids, np.sqrt(weight) * a)); constants.append(np.sqrt(weight) * c)
+
+    for js, values, rhs, equality in rows:
+        penalty(js, values, rhs, equality, o.sa_hard_weight, 1.)
+    position = np.full(len(b.obj), -1); position[b.binary] = np.arange(nx)
+    units = position[b.u]
+    # 容量行只保留 pmax*u；启停降额由全天修复与独立校验复核。格点取各 pmax 的最大公约数。
+    pmax = [Fraction(str(v)) for v in b.d.pmax]
+    denominator = math.lcm(*(v.denominator for v in pmax))
+    step = float(Fraction(math.gcd(*(int(v * denominator) for v in pmax)), denominator))
+    for t, hour in enumerate(b.times):
+        required = (1 + b.d.reserve_fraction) * max(s.load[hour] for s in b.scenarios)
+        penalty(units[:, t], -b.d.pmax, -required, False, o.sa_capacity_weight, step)
+    for c in cuts:
+        if not c.optimality:
+            penalty(np.arange(nx), c.beta, -c.alpha, False, o.sa_capacity_weight,
+                    np.abs(c.beta).max(initial=1.) / 64)
+
+    # 每个锚点取其处取值最大的最优性割作为补偿费用的线性代理，并叠加 u 位邻近项。
+    optimality = [c for c in cuts if c.optimality]
+    u = np.zeros(nx, bool); u[units.ravel()] = True
+    costs = []
+    for anchor in anchors:
+        cost = b.obj[b.binary].copy()
+        if optimality:
+            cost += max(optimality, key=lambda c: c.alpha + c.beta @ anchor).beta
+        costs.append(cost)
+    unit = max(float(np.abs(costs[0][free]).max(initial=0.)), 1e-9)
+    diagonals = []
+    for anchor, cost in zip(anchors, costs):
+        diagonal = np.zeros(nv)
+        diagonal[:len(free)] = cost[free] / unit + o.sa_proximity * u[free] * (1 - 2 * anchor[free])
+        diagonals.append(diagonal)
+    I = [k for k, (ids, _) in enumerate(R) for _ in ids]
+    J = [j for ids, _ in R for j in ids]
+    V = [v for _, values in R for v in values]
+    A = sparse.coo_matrix((V, (I, J)), shape=(len(R), nv)).tocsr()
+    c = np.asarray(constants)
+    Q = sparse.coo_matrix((qv, (qi, qj)), shape=(nv, nv)).tocsr()
+    Q = Q + A.T @ A + sparse.diags(2 * (A.T @ c))
+    Q.eliminate_zeros()
+    return NS(Q=Q.tocsr(), diagonals=diagonals, costs=costs, cost_unit=unit, offset=0.,
+              fixed=fixed, free=free, nx=nx, energy_unit=1.)

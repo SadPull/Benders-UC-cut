@@ -8,24 +8,35 @@ import re
 import shutil
 import signal
 import subprocess
+import tomli
 from time import perf_counter, time
-from uuid import uuid4
+from uuid import UUID, uuid4
 from types import SimpleNamespace as NS
 
 from . import llm
 from .data import save_json
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
 
+class SessionUnavailable(RuntimeError):
+    """A saved conversation cannot be continued without changing identity."""
+
+
+def session_file(session_id):
+    try:
+        UUID(session_id)
+    except (ValueError, TypeError, AttributeError):
+        raise SessionUnavailable('Invalid Codex session ID') from None
+    home = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))
+    for root in (home/'sessions', home/'archived_sessions'):
+        for path in root.glob(f'**/*{session_id}.jsonl'):
+            return path
+    raise SessionUnavailable('Codex session file is missing: '+session_id)
 
 # 单个在途请求的生命周期对象，提供非阻塞 poll 和终止/关闭操作。
 class AdvisorRequest:
     # Codex 命令优先于手动文件交换；HTTP 与 CLI 都在独立工作进程中执行。
     # 传给子进程的数据只包含请求体和矩阵形状，避免传递求解器对象。
-    def __init__(self, d, o, body, iteration, seconds):
+    def __init__(self, d, o, body, iteration, seconds, *, session_id=None):
         self.agent = None
         self.codex_directory = None
         self.closed = False
@@ -44,12 +55,13 @@ class AdvisorRequest:
             self.codex_directory = Path(o.llm_agent_directory).resolve()/f'{iteration:02d}-{uuid4().hex}'
             self.codex_directory.mkdir(parents=True)
             self.receipt.update(transport='codex_exec', request_directory=str(self.codex_directory),
-                                requested_model=body['model'], reasoning_effort=body['reasoning']['effort'])
+                                requested_model=body['model'], reasoning_effort=body['reasoning']['effort'],
+                                requested_session_id=session_id)
             save_json(self.codex_directory/'request.json', dict(**self.receipt,
                 shape=[d.n_units, d.horizon], created_epoch_seconds=time(), timeout_seconds=seconds))
             self.process = context.Process(target=_request_codex,
                 args=(sender, o.llm_codex_command, body, shape, iteration,
-                      self.deadline, self.codex_directory), daemon=True)
+                      self.deadline, self.codex_directory, session_id), daemon=True)
         else:
             self.process = context.Process(target=_request,
                 args=(sender, o.llm_url, o.llm_api_key, body, shape, iteration, seconds), daemon=True)
@@ -70,18 +82,19 @@ class AdvisorRequest:
         if self.agent is not None:
             return self.agent.poll()
         if self.closed:
-            return [], dict(status='CANCELLED', message='RequestClosed', accepted=0, proposals=[], **self.receipt)
+            return [], dict(status='CANCELLED', message='RequestClosed', accepted=0, proposals=[],
+                            seconds=0., background_seconds=0., **self.receipt)
         now = perf_counter()
         if self.connection.poll():
             try:
                 candidates, info = self.connection.recv()
             except EOFError:
                 candidates, info = [], dict(status="TIME_LIMIT" if now >= self.deadline else "FAILED",
-                                           message="WorkerExited", accepted=0, proposals=[])
-            if info.get("finished_at", now) > self.deadline:
+                                           message="WorkerExited", accepted=0, proposals=[], finished_at=now)
+            if info["finished_at"] > self.deadline:
                 candidates = []
                 info.update(status="TIME_LIMIT", accepted=0)
-            info["background_seconds"] = max(0., info.get("finished_at", now)-self.started)
+            info["background_seconds"] = max(0., info["finished_at"]-self.started)
             if self.codex_directory is not None:
                 info['seconds'] = info['background_seconds']
             info.update(self.receipt)
@@ -124,19 +137,13 @@ class AdvisorRequest:
 
 
 def _kill_tree(pid):
-    if os.name == 'nt':
-        subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       creationflags=subprocess.CREATE_NO_WINDOW, check=False)
-    else:
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   creationflags=subprocess.CREATE_NO_WINDOW, check=False)
 
 
 def _codex_https_args(config_path):
-    config = tomllib.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+    config = tomli.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
     provider = config.get('model_provider', 'openai')
     # 内置 openai 不允许原地覆盖，使用仅限本次调用的 HTTPS 提供方。
     if provider == 'openai':
@@ -169,10 +176,14 @@ def _codex_event_info(directory):
     return info
 
 
-def _prepare_codex(command, body, shape, directory):
+def _prepare_codex(command, body, shape, directory, session_id=None):
     """Prepare the same isolated CLI request for production and timing experiments."""
     prompt = (body['instructions']+'\n\n'+body['input']
                   +'\n\nReturn only the requested JSON. Do not invoke tools, edit files, or spawn agents.\n')
+    if session_id is not None:
+        session_file(session_id)
+        prompt = ('Continue this conversation. The latest snapshot and measured feedback below supersede '
+                  'older states. Previous proposals have already been evaluated; propose new improvements.\n\n'+prompt)
     (directory/'prompt.txt').write_bytes(prompt.encode('utf-8'))
     prompt_sha256 = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
     matrix = dict(type='array', minItems=shape.n_units, maxItems=shape.n_units,
@@ -188,9 +199,11 @@ def _prepare_codex(command, body, shape, directory):
     args = [executable, 'exec', '--model', body['model'],
                 '-c', 'model_reasoning_effort="'+body['reasoning']['effort']+'"',
                 '-c', 'approval_policy="never"', '-c', 'agents.enabled=false',
-                '--sandbox', 'read-only', '--skip-git-repo-check', '--cd', str(directory),
-                '--json', '--output-schema', str(directory/'schema.json'),
-                '--output-last-message', str(directory/'reply.json'), '-']
+                '--sandbox', 'read-only', '--cd', str(directory)]
+    if session_id is not None:
+        args += ['resume', session_id]
+    args += ['--skip-git-repo-check', '--json', '--output-schema', str(directory/'schema.json'),
+             '--output-last-message', str(directory/'reply.json'), '-']
     config_path = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))/'config.toml'
     args[2:2] = _codex_https_args(config_path)
     save_json(directory/'command.json', dict(argv=args))
@@ -200,27 +213,29 @@ def _prepare_codex(command, body, shape, directory):
     return args, environment, prompt_sha256
 
 
-def _request_codex(connection, command, body, shape, iteration, deadline, directory):
+def _request_codex(connection, command, body, shape, iteration, deadline, directory, session_id=None):
     # Ctrl+C 由主进程统一回收整棵进程树，工作进程不能先于 CLI 退出。
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    if os.name != 'nt':
-        os.setsid()
     started = perf_counter()
     candidates, process = [], None
     info = dict(status='FAILED', message='', accepted=0, format_valid=0, proposals=[], exit_code=None)
     try:
-        args, environment, info['prompt_sha256'] = _prepare_codex(command, body, shape, directory)
+        args, environment, info['prompt_sha256'] = _prepare_codex(command, body, shape, directory, session_id)
         with (directory/'prompt.txt').open('rb') as source, (directory/'events.jsonl').open('wb') as events, \
                 (directory/'stderr.log').open('wb') as errors:
             if perf_counter() >= deadline:
                 raise subprocess.TimeoutExpired(args, 0.)
             process = subprocess.Popen(args, stdin=source, stdout=events, stderr=errors,
-                env=environment, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
             info['cli_pid'] = process.pid
             info['exit_code'] = process.wait(timeout=max(0., deadline-perf_counter()))
         info.update(_codex_event_info(directory))
+        if session_id is not None and info.get('thread_id') not in (None, session_id):
+            raise SessionUnavailable('Codex returned a mismatched session ID')
         if info['exit_code'] != 0:
             raise RuntimeError('Codex CLI exited with code '+str(info['exit_code']))
+        if not info.get('thread_id') or (session_id is not None and info['thread_id'] != session_id):
+            raise SessionUnavailable('Codex returned a missing or mismatched session ID')
         reply = (directory/'reply.json').read_bytes()
         info['reply_sha256'] = hashlib.sha256(reply).hexdigest()
         text = reply.decode('utf-8')
@@ -229,6 +244,8 @@ def _request_codex(connection, command, body, shape, iteration, deadline, direct
         info.update(parsed, response_output=[text])
     except subprocess.TimeoutExpired:
         info.update(status='TIME_LIMIT', message='CodexDeadline')
+    except SessionUnavailable as error:
+        info.update(status='SESSION_FAILED', message=str(error))
     except Exception as error:
         info.update(status='FAILED', message=f'{type(error).__name__}: {error}')
     finished = perf_counter()
@@ -268,7 +285,8 @@ class SubagentAdvisor:
     def poll(self):
         now = perf_counter()
         if self.closed:
-            return [], dict(status='CANCELLED', message='SubagentClosed', accepted=0, proposals=[], **self.receipt)
+            return [], dict(status='CANCELLED', message='SubagentClosed', accepted=0, proposals=[],
+                            seconds=0., background_seconds=0., **self.receipt)
         completed = self.directory/'completion.json'
         if completed.exists():
             info = dict(status='FAILED', message='', accepted=0, format_valid=0, proposals=[])

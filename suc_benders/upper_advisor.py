@@ -9,19 +9,21 @@ from . import advisor_request, llm
 
 
 class LLMCallFailures(RuntimeError):
-    """Two consecutive failed calls require an explicit user resume."""
+    """Consecutive failures or broken conversation identity require an explicit resume."""
 
 
 class UpperAdvisor:
     def __init__(self, whole):
         self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
         self.worker, self.pending, self.baseline = None, None, None
+        self.thread_id = None
         self.state = dict(version=2, phase="sa", stalled=dict(upper=0), sa_rounds=0,
                           batch_id=0, batch=None, consecutive_failures=0)
-        whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[])
+        whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[],
+                                 upper_advice_feedback=None)
 
     def available(self):
-        return (self.o.llm_enabled and self.whole.remaining() > self.o.llm_reserve_seconds
+        return (self.o.llm_enabled and self.whole.remaining() >= self.o.llm_timeout+self.o.llm_reserve_seconds
                 and (self.o.llm_max_calls is None or self.result.llm_calls < self.o.llm_max_calls))
 
     def improved(self, upper):
@@ -64,14 +66,19 @@ class UpperAdvisor:
         iteration = self.result.llm_calls+1
         context, bases, self.baseline = self.whole.upper_context()
         self.baseline = deepcopy(self.baseline)
+        context['continuation'] = dict(session_id=self.thread_id, completed_calls=self.result.llm_calls,
+                                       latest_snapshot_authoritative=True)
+        context['last_successful_call_feedback'] = next((row.get('feedback') for row in
+            reversed(self.result.llm_history) if row['status'] == 'OK'), None)
         body = llm.request_body(self.whole.d, self.whole.scenarios, self.result,
                                 self.o, context, bases, iteration)
-        if self.whole.remaining() <= self.o.llm_reserve_seconds:
+        if not self.available():
             return
         batch["counts"]["upper"] += 1
         self.result.llm_calls = iteration
         routing = dict(channel="upper", batch_id=batch["batch_id"],
-                       batch_call=batch["counts"]["upper"], phase="formal")
+                       batch_call=batch["counts"]["upper"],
+                       phase="resume" if self.whole.diagnostics.get('resume') else "formal")
         prompt = json.loads(body["input"])
         prompt["advice_routing"] = routing
         body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
@@ -85,7 +92,7 @@ class UpperAdvisor:
             self.whole.diagnostics["llm_calls"].append(self.pending)
         try:
             self.worker = advisor_request.AdvisorRequest(self.whole.d, self.o, body, iteration,
-                min(self.o.llm_timeout, self.whole.remaining()-self.o.llm_reserve_seconds))
+                self.o.llm_timeout, session_id=self.thread_id)
         except Exception as error:
             self.pending.update(status="FAILED", message=type(error).__name__)
             self.record_failure()
@@ -105,12 +112,18 @@ class UpperAdvisor:
             return False
         self.worker = None
         proposals, info = reply
+        if self.o.llm_codex_command and info['status'] == 'OK':
+            if not info.get('thread_id') or (self.thread_id is not None and info['thread_id'] != self.thread_id):
+                proposals = []
+                info.update(status='SESSION_FAILED', message='Codex session identity mismatch', accepted=0)
+            else:
+                self.thread_id = info['thread_id']
         self.pending.update(info, consumed_seconds=perf_counter()-self.whole.started)
         if self.o.verbose:
             print(f"[LLM 回复] 调用次数={self.result.llm_calls} 状态={info['status']} "
-                  f"格式有效候选={len(proposals)} 耗时={info.get('background_seconds', 0.):.2f}秒 "
+                  f"格式有效候选={len(proposals)} 耗时={info['background_seconds']:.2f}秒 "
                   f"日志={info.get('request_directory', '见结果回执')}", flush=True)
-        self.whole.diagnostics["llm_background_seconds"] += info.get("background_seconds", info.get("seconds", 0.))
+        self.whole.diagnostics["llm_background_seconds"] += info["background_seconds"]
         if self.whole.remaining() <= 0:
             self.pending.update(status="TIME_LIMIT", accepted=0)
             return True
@@ -129,6 +142,8 @@ class UpperAdvisor:
         failed = self.pending['status'] != 'OK'
         self.state['consecutive_failures'] = self.state['consecutive_failures']+1 if failed else 0
         self.whole.emit('llm_call_status')
+        if self.pending['status'] == 'SESSION_FAILED':
+            raise LLMCallFailures(self.pending.get('message', 'Codex session unavailable'))
         if self.state['consecutive_failures'] >= 2:
             if self.state['batch'] is not None:
                 self.state['batch'].update(status='PAUSED_LLM_FAILURE', upper_after=self.result.objective,
@@ -152,8 +167,8 @@ class UpperAdvisor:
             if self.whole.remaining() <= 0:
                 reason = 'TIME_LIMIT'
             elif not self.available():
-                reason = ('VALIDATION_RESERVE' if self.whole.remaining() <= self.o.llm_reserve_seconds
-                          else 'CALL_LIMIT')
+                reason = ('CALL_LIMIT' if self.o.llm_max_calls is not None
+                          and self.result.llm_calls >= self.o.llm_max_calls else 'LLM_WINDOW_TOO_SHORT')
             elif self.improved(batch['upper_before']):
                 batch['done']['upper'] = True
                 reason = 'RETURN_TO_SA'
@@ -170,14 +185,12 @@ class UpperAdvisor:
 
     def restore(self, diagnostic):
         saved = diagnostic["advisor_state"]
-        if saved["version"] not in (1, 2):
-            raise ValueError("Unknown advice scheduling state version")
+        if saved["version"] != 2:
+            raise ValueError("Only the current advice scheduling state is supported")
         self.state.clear()
         self.state.update(deepcopy(saved))
-        self.state['version'] = 2
-        self.state['stalled'] = dict(upper=saved['stalled']['upper'])
         for name in ("advisor_rounds", "llm_batches"):
-            self.whole.diagnostics[name] = deepcopy(diagnostic.get(name, []))
+            self.whole.diagnostics[name] = deepcopy(diagnostic[name])
         if self.state["batch"] is not None:
             batch = next(b for b in self.whole.diagnostics["llm_batches"]
                          if b["batch_id"] == self.state["batch_id"])
@@ -187,7 +200,11 @@ class UpperAdvisor:
         for row in self.result.llm_history:
             if row["status"] == "RUNNING":
                 row.update(status="CANCELLED", message="ResumeWorkerUnavailable", accepted=0)
-        self.whole.feedback = deepcopy(diagnostic.get("upper_advice_feedback"))
+        self.whole.feedback = deepcopy(diagnostic["upper_advice_feedback"])
+        self.thread_id = next((row['thread_id'] for row in reversed(self.result.llm_history)
+                               if row['status'] == 'OK' and row.get('thread_id')), None)
+        if self.o.llm_codex_command and self.result.llm_calls and self.thread_id is None:
+            raise LLMCallFailures('No successful Codex session found in the checkpoint')
 
     def close(self):
         if self.worker is not None:
@@ -225,8 +242,7 @@ def summarize(advice, baseline_u, baseline, evaluations, previous_ids):
                    repair_reason=(dict(known_raw_violations=p.get('raw_constraint_violations', []),
                        note='Known violations of the original proposal; not a full explanation of every repair edit.')
                        if p.get('hamming_u') or p.get('raw_constraint_violations') else None),
-                   infeasibility_reason=(r.get('dispatch_status', 'INFEASIBLE_REASON_UNAVAILABLE')
-                                         if r and not r['feasible'] else None),
+                   infeasibility_reason=(r['dispatch_status'] if r and not r['feasible'] else None),
                    baseline_cost=baseline, costs=None, cost_change=None,
                    refreshed_incumbent=bool(r and r["improved"] and not cached))
         if r and r["feasible"]:
