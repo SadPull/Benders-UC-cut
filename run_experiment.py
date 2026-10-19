@@ -66,10 +66,12 @@ def freeze_experiment(output, options, resume_source=None):
     effective = {f.name: (getattr(options, f.name) if f.repr else
                          "<redacted>" if getattr(options, f.name) else "") for f in fields(options)}
     save(output / "effective-options.json", effective)
+    git_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJECT, capture_output=True, text=True)
+    git_status = subprocess.run(["git", "status", "--short"], cwd=PROJECT, capture_output=True, text=True)
     save(output / "manifest.json", dict(
         created_at=datetime.now(timezone(timedelta(hours=8))).isoformat(),
-        git_head=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT, text=True).strip(),
-        git_status=subprocess.check_output(["git", "status", "--short"], cwd=PROJECT, text=True),
+        git_head=git_head.stdout.strip() if git_head.returncode == 0 else None,
+        git_status=git_status.stdout if git_status.returncode == 0 else None,
         python=sys.version, executable=sys.executable,
         dependencies={name: version(name) for name in ("numpy", "scipy", "gurobipy", "kaiwu", "tomli")},
         files=hashes, effective_options_sha256=hashlib.sha256(

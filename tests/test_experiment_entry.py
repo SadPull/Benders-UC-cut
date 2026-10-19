@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+from types import SimpleNamespace as NS
 
 import pytest
 
@@ -68,6 +69,14 @@ def test_snapshot_includes_untracked_solver_and_redacts_credentials(tmp_path):
     effective = (tmp_path/'effective-options.json').read_text(encoding='utf-8')
     assert not any(value in effective for value in ('private-user', 'private-code', 'private-key'))
     assert json.loads(effective)['kaiwu_sdk_code'] == '<redacted>'
+
+
+def test_snapshot_works_without_git_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(entry.subprocess, 'run', lambda *a, **k: NS(returncode=128, stdout=''))
+    entry.freeze_experiment(tmp_path, Options())
+    manifest = json.loads((tmp_path/'manifest.json').read_text(encoding='utf-8'))
+    assert manifest['git_head'] is None and manifest['git_status'] is None
+    assert 'suc_benders/search.py' in manifest['files']
 
 
 def test_progress_solution_size_is_independent_of_history(tmp_path, tiny, options, monkeypatch):
