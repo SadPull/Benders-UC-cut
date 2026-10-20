@@ -14,6 +14,7 @@ from uuid import uuid4
 import numpy as np
 
 from run_suc import run_suc, _serializable
+from suc_benders.anneal import SA_BACKEND, SA_INITIALIZATION
 from suc_benders.config import load_options
 from suc_benders.data import load_data
 from suc_benders.model import model
@@ -73,7 +74,9 @@ def freeze_experiment(output, options, resume_source=None):
         git_head=git_head.stdout.strip() if git_head.returncode == 0 else None,
         git_status=git_status.stdout if git_status.returncode == 0 else None,
         python=sys.version, executable=sys.executable,
-        dependencies={name: version(name) for name in ("numpy", "scipy", "gurobipy", "kaiwu", "tomli")},
+        sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION,
+        dependencies={name: version(name) for name in
+                      ("numpy", "scipy", "gurobipy", "dwave-samplers", "dimod", "networkx", "tomli")},
         files=hashes, effective_options_sha256=hashlib.sha256(
             (output / "effective-options.json").read_bytes()).hexdigest(),
         cold_start=resume_source is None, inherited_evidence=resume_source is not None,
@@ -87,6 +90,8 @@ def solution_snapshot(result, elapsed, prior=0., session_id=None):
     gap = max(0., result.objective-result.lower_bound)/max(1., abs(result.objective)) if np.isfinite(
         [result.objective, result.lower_bound]).all() else np.inf
     return dict(values, format="SOLUTION_SNAPSHOT_NOT_CHECKPOINT", relative_gap=gap,
+                sa_backend=result.diagnostics.get("sa_backend"),
+                sa_initialization=result.diagnostics.get("sa_initialization"),
                 elapsed_seconds=elapsed, segment_elapsed_seconds=elapsed-prior, session_id=session_id,
                 model_fingerprint=result.diagnostics.get("model_fingerprint"),
                 sa_calls=result.diagnostics.get("sa_calls", 0))
@@ -236,6 +241,8 @@ def main():
     summary = dict(scope="RESUMED_CONVERGENCE_CHECK" if resume_state is not None else "COLD_START_EXPLORATORY",
                    audit_status="NOT_REQUESTED", **dimensions, resume_source=resume_source,
                    seed=SEED, status=result.status, message=result.message,
+                   sa_backend=result.diagnostics.get("sa_backend"),
+                   sa_initialization=result.diagnostics.get("sa_initialization"),
                    upper=result.objective, lower=result.lower_bound,
                    gap_percent=100 * result.relative_gap, reference_gap_percent=None,
                    validation=result.validation,

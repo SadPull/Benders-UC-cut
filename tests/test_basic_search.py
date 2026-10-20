@@ -1,9 +1,11 @@
 from copy import deepcopy
 from dataclasses import asdict
 from time import perf_counter
+from types import SimpleNamespace as NS
 
 import numpy as np
 import pytest
+from scipy import sparse
 
 from conftest import whole_day
 from run_suc import _serializable
@@ -12,6 +14,27 @@ from suc_benders.benders import master
 from suc_benders.config import load_options
 from suc_benders.model import model, partition
 from suc_benders.qubo import fixed_binary
+
+
+@pytest.mark.parametrize('matrix,maximum', [
+    (sparse.csr_matrix((0, 0)), 0.),
+    (sparse.csr_matrix((2, 2)), 0.),
+    (sparse.csr_matrix([[0., -3.], [0., 0.]]), 3.),
+])
+def test_progress_handles_empty_and_nonempty_qubo(tiny, options, monkeypatch, matrix, maximum):
+    whole = whole_day(tiny, options)
+    block = search.BlockSearch(whole.full, options, 1, 1, whole)
+    observed = []
+    whole.progress = lambda state, event: observed.append(
+        dict(state.diagnostics['pending_qubo'])) if event == 'before_sampling' else None
+    q = NS(Q=matrix, fixed=whole.best.point[whole.full.binary].copy(), free=np.array([], int))
+    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds: (master(b, cuts)[0], -1e6))
+    monkeypatch.setattr(search, 'search_qubo', lambda *args: q)
+    monkeypatch.setattr(search, 'anneal', lambda *args: ([], {'bits': matrix.shape[0]}))
+    block.step([whole.best.point[whole.full.binary]], 1)
+    assert observed == [dict(bits=matrix.shape[0], nonzeros=matrix.nnz,
+                             max_coefficient=maximum)]
+    assert len(block.history) == 1 and whole.result.validation['feasible']
 
 
 def test_each_block_sample_uses_derived_chain_seeds_and_current_incumbent(tiny, options, monkeypatch):
@@ -117,7 +140,33 @@ def test_joint_checkpoint_is_rejected_before_reusing_evidence(tiny, options, mon
         whole.restore(state)
 
 
-@pytest.mark.parametrize('name,value', [('enhanced_search', False), ('block_sa_period', 3)])
+@pytest.mark.parametrize('key,value', [
+    ('sa_backend', None), ('sa_backend', 'kaiwu'),
+    ('sa_initialization', None), ('sa_initialization', 'anchor_slack_nearest_v1'),
+    ('sa_initialization', 'random_sa_descent_repair_v1'),
+])
+def test_old_sa_checkpoint_is_rejected_before_reusing_evidence(tiny, options, monkeypatch, key, value):
+    whole = whole_day(tiny, options)
+    state = checkpoint(whole)
+    if value is None:
+        del state['diagnostics'][key]
+    else:
+        state['diagnostics'][key] = value
+    monkeypatch.setattr(search, 'dispatch', lambda *a, **k: pytest.fail('Old candidate reused'))
+    with pytest.raises(ValueError, match='archived version'):
+        whole.restore(state)
+
+
+@pytest.mark.parametrize('name,value', [('enhanced_search', False), ('block_sa_period', 3), ('sa_proximity', .3)])
 def test_removed_search_options_are_rejected(tmp_path, name, value):
     with pytest.raises(ValueError, match='Unknown option'):
         load_options({name: value}, config_path=tmp_path/'absent.json')
+
+
+def test_kaiwu_configuration_is_removed(tmp_path):
+    with pytest.raises(ValueError, match='Unknown option'):
+        load_options({'kaiwu_user_id': 'unused'}, config_path=tmp_path/'absent.json')
+    path = tmp_path/'config.json'
+    path.write_text('{"kaiwu": {"user_id": "unused"}}', encoding='utf-8')
+    with pytest.raises(ValueError, match='Unknown local configuration section'):
+        load_options(config_path=path)

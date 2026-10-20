@@ -1,22 +1,23 @@
 # LLM Benders SUC
 
-Python 机组组合求解器：时间分块 Kaiwu SA 搜索可行上界，Codex 提供异步上界候选，独立数值进程认证下界。
+Python 机组组合求解器：时间分块 D-Wave 开源 SA 搜索可行上界，Codex 提供异步上界候选，独立数值进程认证下界。
+
+v0.34.0 固定采用**随机初态 SA＋修复**，已删除锚点初态、邻近惩罚和额外 1-flip 下降的实现与配置入口。原始候选评价／割学习、全天修复与物理校验、独立下界认证继续使用原有流程。
 
 当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。
 
 ## 运行
 
-环境：Windows 64 位、Python 3.10、Gurobi 许可证、Kaiwu 1.4.1 授权。Kaiwu Windows wheel 由用户自行提供，不在仓库中分发。
+环境：Windows 64 位、Python 3.10、Gurobi 许可证。SA 使用 Apache-2.0 开源的 `dwave-samplers==1.8.0`（`dimod==0.12.22`、`networkx==3.4.2`），在本地 CPU 运行，无需 Kaiwu 授权、D-Wave 云账户或量子硬件。
 
 ```powershell
-py -3.10 -m pip install -r requirements.txt C:\path\kaiwu-1.4.1-cp310-none-win_amd64.whl
+py -3.10 -m pip install -r requirements.txt
 ```
 
-保留自己的 `config.local.json`，不要上传授权信息。首次配置可使用：
+保留自己的 `config.local.json`，不要上传授权信息。升级时删除旧的 `kaiwu` 段，LLM 配置保持不变。首次配置可使用：
 
 ```json
 {
-  "kaiwu": {"user_id": "", "sdk_code": ""},
   "llm": {"enabled": false, "url": "", "model": "", "api_key": "", "max_calls": 3}
 }
 ```
@@ -25,7 +26,7 @@ py -3.10 -m pip install -r requirements.txt C:\path\kaiwu-1.4.1-cp310-none-win_a
 
 入口默认从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%。`RESUME_FROM=None` 表示冷启动；续跑时填入从归档解压的完整检查点路径，程序保留已有方案、认证 LB、累计耗时和调用计数，重建局部搜索模型，并把配置预算作为追加时间。续跑跳过参考求解；冷启动另用最多 120 秒求参考解，其结果不回填主算法。
 
-每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。首次完整轮改善不足 0.05% 时可触发 LLM；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 1800 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。CLI 后续调用显式续接同一会话，恢复时选用历史中最后一次成功调用的会话；会话丢失或身份不匹配会停止，不默默新建。
+每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。首次完整轮改善不足 0.05% 时可触发 LLM；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 1800 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。CLI 后续调用显式续接同一会话，恢复时选用历史中最后一次成功调用的会话；会话丢失或身份不匹配会停止，不默默新建。
 
 结果自动写入新建的 `results/manual-seed.../` 或 `results/resume-seed.../`：
 
@@ -37,6 +38,8 @@ py -3.10 -m pip install -r requirements.txt C:\path\kaiwu-1.4.1-cp310-none-win_a
 - `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案。最新方案不含完整搜索状态，不能作为 `RESUME_FROM` 的完整检查点。
 
 默认不再保存周期或终态的全量检查点，也不序列化全部历史采样；记录开销与最终保存耗时单列。旧实验的完整检查点保留原样。
+
+manifest、精简结果及运行诊断记录 `sa_backend` 与 `sa_initialization`（当前为 `random_sa_repair_v1`）。采样诊断包含 beta 序列，以及每条链的原始／实际种子、退火终态与 QUBO 能量；这些诊断可经 `run_suc` 返回对象读取，不自动全量落盘。
 
 读取精简结果：
 
@@ -50,7 +53,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 全天联合 SA 已删除，`enhanced_search` 和 `block_sa_period` 参数不再接受，结果也不再输出联合搜索统计。新主线保留恢复接口；含联合 SA 调用、批次或采样记录的旧检查点返回 `RESUME_FAILED`，请使用归档版本读取和继续旧实验。入口只恢复显式指定的完整检查点，不自动补跑；恢复时继续累计已用预算。
 
-只接受当前完整的分块检查点和 v2 LLM 调度状态，不再迁移旧状态、补齐缺失历史或重建旧统计。机组输入必须明确提供 `initial_output`。运行环境固定为上述 Windows／Python 3.10，TOML 解析直接使用已声明的 `tomli` 依赖。
+只接受当前完整的分块检查点、匹配的 D-Wave SA／随机初始化标识和 v2 LLM 调度状态。Kaiwu、含锚点或额外下降、以及缺少 SA 标识的旧检查点返回 `RESUME_FAILED`，使用其归档版本继续；不迁移旧状态、补齐缺失历史或重建旧统计。机组输入必须明确提供 `initial_output`。运行环境固定为上述 Windows／Python 3.10，TOML 解析直接使用已声明的 `tomli` 依赖。
 
 ## 核心文件
 
@@ -66,7 +69,21 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 主线顺序：输入建模 → 连续松弛与初始可行解 → 固定乘子的分块 SA 轮询 → 全天修复/调度/校验 → 跨块协调。LLM 异步提供候选，独立认证进程提供 LB；仅全天验证通过的方案能更新 UB，最终用 UB/LB 的认证间隙停止。
 
-v0.33.0 起，块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取锚点处最紧最优性割的线性代理，不含 theta 与割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束；`sa_proximity` 把 u 拉向锚点（incumbent，及最好的 LLM 方案）。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。每条链的 SA 终态再经最速 1-flip 下降到局部最优（`chains[*].annealed_energy`/`descent_flips` 记录收尾前能量与翻转数）；`sa_proximity` 默认 0.3，须小于位间费用差，否则低温下无法靠费用偏离锚点。LLM 回复返回时若 incumbent 已变化，其相对请求快照改动的机组行会先整体、再逐台移植到当前 incumbent（来源 `llm_rebase`）。协调 LP 被 incumbent 截顶或失败时保留原乘子，L1 选择失败时回退主问题乘子，不再中止运行；状态见 `outer_history[*].coordination`。
+块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取 incumbent 处最紧最优性割的线性代理，不含 theta 与最优性割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。LLM 回复返回时若 incumbent 已变化，其相对请求快照改动的机组行会先整体、再逐台移植到当前 incumbent（来源 `llm_rebase`）。协调 LP 被 incumbent 截顶或失败时保留原乘子，L1 选择失败时回退主问题乘子，不再中止运行；状态见 `outer_history[*].coordination`。
+
+每批只有一个搜索 QUBO，直接由稀疏 Q 构造 BINARY BQM，合并 `Qij+Qji`，不生成稠密 Ising 矩阵。每条链由采样器根据种子生成随机初态，每次一个 read。退火终态恢复固定变量后，先进行原始块候选评价／割学习，再走既有全天修复、调度和独立校验；通过校验才可更新 UB。温度从 `sa_temperature*energy_unit` 起逐次乘 `sa_cooling`，严格高于 `sa_cutoff*energy_unit` 时执行，倒数作为自定义 beta；每级执行 `sa_sweeps` 次顺序 Metropolis 扫描。[采样器 API](https://docs.dwavequantum.com/en/latest/ocean/api_ref_samplers/generated/dwave.samplers.SimulatedAnnealingSampler.sample.html)
+
+建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
+
+## v0.34.0 方法选择与归档
+
+2026-10-20 对 classic10 确定性算例（10 机组、24 小时、10% 备用）做了 seed 17、每组 300 秒、关闭 LLM 的机制组合筛选。补跑 5 组，复用 3 组已验证结果；8 组均为 `TIME_LIMIT`，最终方案均通过物理与费用校验。
+
+本版本按用户选择固定三项全关闭的普通 SA＋修复。对应已验证冷启动结果：UB **585904.353740**、认证 LB **564437.299938**、认证 gap **3.663918%**；独立参考最优值 **564446.375240**，成本差距 **3.801597%**。该参考值只用于事后比较，没有回填主算法。
+
+组合筛选中三项全开得到最低成本 **585518.168990**，比最终选用方案低约 **0.0659%**；筛选仅含一个种子，不支持稳定优劣或普遍性能结论。完整 8 组数值及选择依据见 [archives/v0.34.0.json](archives/v0.34.0.json)。默认输入仍为当前 IEEE118 派生的 54 机组数据；classic10 输入保存在实验归档内。
+
+[v0.34.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.34.0) 提供发布提交对应的 `core-source-v0.34.0.zip`、清理前资料 `experiment-archive-v0.34.0.zip`、逐文件 SHA256 清单和上传／清理验证记录。历史实验快照中的三个机制只作为留证材料保存；当前主线没有相关实现或开关。授权配置及许可证仅本地保留。
 
 ## v0.33.0 实验结果与归档
 

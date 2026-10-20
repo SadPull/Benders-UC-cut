@@ -9,7 +9,7 @@ from types import SimpleNamespace as NS
 import numpy as np
 from scipy import sparse
 
-from .anneal import anneal
+from .anneal import anneal, SA_BACKEND, SA_INITIALIZATION
 from .benders import discrete_feasible, dispatch, master
 from .context import CandidateEvaluation, LLMContextInput, build_llm_context
 from .upper_advisor import UpperAdvisor, summarize
@@ -66,7 +66,8 @@ class WholeDay:
         self.advice = UpperAdvisor(self)
         self.sa_started = None
         self.diagnostics['sa_budget_seconds_used'] = 0.
-        self.diagnostics.update(block_sa_calls=0, search_mode='time_blocks')
+        self.diagnostics.update(block_sa_calls=0, search_mode='time_blocks',
+                                sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION)
         phase = perf_counter()
         reachable, _ = master(full, [], search_reachability=True)
         self.fixed = fixed_binary(reachable)[:len(full.binary)]
@@ -356,6 +357,9 @@ class WholeDay:
         if (diagnostic.get('joint_sa_calls', 0) or diagnostic.get('joint_batches')
                 or any(row.get('kind') == 'joint' for row in diagnostic.get('sampling', []))):
             raise ValueError('Joint-SA checkpoints are unsupported; start a new time-block run')
+        if (diagnostic.get('sa_backend') != SA_BACKEND
+                or diagnostic.get('sa_initialization') != SA_INITIALIZATION):
+            raise ValueError('Checkpoint SA backend/initialization mismatch; use the archived version for old runs')
         self.certifier.restore(diagnostic)
         self.result.certification_history = saved["certification_history"]
         self.result.llm_history, self.result.llm_calls = saved["llm_history"], saved["llm_calls"]
@@ -607,15 +611,12 @@ class BlockSearch:
             anchor_id, anchor_cost = commitment_hash(whole.result), whole.result.objective
             phase = perf_counter()
             local = b.cols[b.binary]
-            anchors = [whole.best.point[local]]
-            if whole.advisor_pool and not np.array_equal(whole.advisor_pool[0][1][local], anchors[0]):
-                anchors.append(whole.advisor_pool[0][1][local].astype(float))
             boundary = self.boundary_rows()
-            q = search_qubo(m, b, cuts, anchors, boundary, o)
+            q = search_qubo(m, b, cuts, whole.best.point[local], boundary, o)
             whole.timings["qubo"] += perf_counter() - phase
             if whole.progress is not None:
                 whole.diagnostics["pending_qubo"] = dict(bits=q.Q.shape[0], nonzeros=q.Q.nnz,
-                    max_coefficient=float(abs(q.Q).max()), dense_working_bytes=32*(q.Q.shape[0]+1)**2)
+                    max_coefficient=float(np.abs(q.Q.data).max(initial=0.)))
                 whole.emit("before_sampling")
             if remaining() <= 0:
                 return
@@ -629,7 +630,7 @@ class BlockSearch:
             proposals, sampling = anneal(q, o, remaining(), sample_seeds)
             whole.timings["annealing"] += perf_counter() - phase
             sampling.update(outer=outer, block=index, inner=inner, round=inner, seed=sample_seeds,
-                            anchors=len(anchors), boundary_rows=len(boundary),
+                            boundary_rows=len(boundary),
                             kind='block', anchor=anchor_id, anchor_cost=anchor_cost,
                             raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
                             unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))

@@ -196,10 +196,12 @@ def qubo(m, o, upper):
 
 
 # 搜索专用 QUBO：只含 u/v/w 和容量/可行性割松弛位，能量单位为一个归一化成本单位。
-# 成本取锚点处最紧最优性割的线性代理；硬约束按行最大系数归一化后统一加权，容量只用 u 列，
-# 避免 v/w 充当容量补偿位；邻近项把 u 拉向锚点。能量只用于搜索，不能作为任何界。
-def search_qubo(m, b, cuts, anchors, boundary, o):
+# 成本取当前方案处最紧最优性割的线性代理；硬约束按行最大系数归一化后统一加权，容量只用 u 列，
+# 避免 v/w 充当容量补偿位。能量只用于搜索，不能作为任何界。
+def search_qubo(m, b, cuts, point, boundary, o):
     nx = m.nx
+    if np.shape(point) != (nx,) or not np.isin(point, [0, 1]).all():
+        raise ValueError("Search QUBO requires a complete binary cost-reference point")
     binary = m.A[:, :nx].tocsr()
     hard = [k for k, label in enumerate(m.kind) if label == "hard"]
     rows = [(binary.indices[binary.indptr[k]:binary.indptr[k + 1]],
@@ -265,28 +267,21 @@ def search_qubo(m, b, cuts, anchors, boundary, o):
             penalty(np.arange(nx), c.beta, -c.alpha, False, o.sa_capacity_weight,
                     np.abs(c.beta).max(initial=1.) / 64)
 
-    # 每个锚点取其处取值最大的最优性割作为补偿费用的线性代理，并叠加 u 位邻近项。
+    # 当前方案仅用于选择费用代理，不添加邻近惩罚。
     optimality = [c for c in cuts if c.optimality]
-    u = np.zeros(nx, bool); u[units.ravel()] = True
-    costs = []
-    for anchor in anchors:
-        cost = b.obj[b.binary].copy()
-        if optimality:
-            cost += max(optimality, key=lambda c: c.alpha + c.beta @ anchor).beta
-        costs.append(cost)
-    unit = max(float(np.abs(costs[0][free]).max(initial=0.)), 1e-9)
-    diagonals = []
-    for anchor, cost in zip(anchors, costs):
-        diagonal = np.zeros(nv)
-        diagonal[:len(free)] = cost[free] / unit + o.sa_proximity * u[free] * (1 - 2 * anchor[free])
-        diagonals.append(diagonal)
+    cost = b.obj[b.binary].copy()
+    if optimality:
+        cost += max(optimality, key=lambda c: c.alpha + c.beta @ point).beta
+    unit = max(float(np.abs(cost[free]).max(initial=0.)), 1e-9)
+    linear = np.zeros(nv)
+    linear[:len(free)] = cost[free] / unit
     I = [k for k, (ids, _) in enumerate(R) for _ in ids]
     J = [j for ids, _ in R for j in ids]
     V = [v for _, values in R for v in values]
     A = sparse.coo_matrix((V, (I, J)), shape=(len(R), nv)).tocsr()
     c = np.asarray(constants)
     Q = sparse.coo_matrix((qv, (qi, qj)), shape=(nv, nv)).tocsr()
-    Q = Q + A.T @ A + sparse.diags(2 * (A.T @ c))
+    Q = Q + A.T @ A + sparse.diags(2 * (A.T @ c) + linear)
     Q.eliminate_zeros()
-    return NS(Q=Q.tocsr(), diagonals=diagonals, costs=costs, cost_unit=unit, offset=0.,
+    return NS(Q=Q.tocsr(), cost=cost, cost_unit=unit, offset=0.,
               fixed=fixed, free=free, nx=nx, energy_unit=1.)

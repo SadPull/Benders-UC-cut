@@ -1,5 +1,5 @@
-"""Time-block stochastic unit commitment with Benders and Kaiwu SA."""
+"""Time-block stochastic unit commitment with Benders and D-Wave SA."""
 # 包入口：提供 SUC 求解包的版本标识；导入本包不会启动求解或初始化授权。
 # 实际运行入口在 run_experiment.py，Python 接口在 run_suc.py，主要迭代流程在 solver.py。
 
-__version__ = "0.33.0"
+__version__ = "0.34.0"

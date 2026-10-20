@@ -7,6 +7,7 @@ import pytest
 
 import run_experiment as entry
 from conftest import whole_day
+from suc_benders.anneal import SA_BACKEND, SA_INITIALIZATION
 from suc_benders.config import Options
 from suc_benders.solver import Result
 
@@ -23,7 +24,8 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
         assert isinstance(progress, entry.ExperimentProgress)
         assert not hasattr(progress, 'proof_directory') and started_at > 0 and resume_state is None
         return Result(status='TIME_LIMIT', objective=110., lower_bound=100., relative_gap=10./110.,
-                      validation={'feasible': True}, diagnostics={'sa_calls': 2, 'block_sa_calls': 2})
+                      validation={'feasible': True}, diagnostics={'sa_calls': 2, 'block_sa_calls': 2,
+                      'sa_backend': SA_BACKEND, 'sa_initialization': SA_INITIALIZATION})
     monkeypatch.setattr(entry, 'run_suc', solve)
     monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')
     monkeypatch.setattr(entry, 'LLM_ENABLED', False)
@@ -43,6 +45,8 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
     with (output/'result.json').open(encoding='utf-8') as stream:
         result = json.load(stream)
     assert result['objective'] == 110. and result['lower_bound'] == 100.
+    for record in (summary, result):
+        assert record['sa_backend'] == SA_BACKEND and record['sa_initialization'] == SA_INITIALIZATION
     assert summary['audit_status'] == 'NOT_REQUESTED'
     effective = json.loads((output/'effective-options.json').read_text(encoding='utf-8'))
     assert effective['sa_reads'] == 8 and effective['llm_max_calls'] is None
@@ -59,16 +63,21 @@ def test_check_only_never_starts_solver_or_creates_results(tmp_path, monkeypatch
 
 
 def test_snapshot_includes_untracked_solver_and_redacts_credentials(tmp_path):
-    options = Options(kaiwu_user_id='private-user', kaiwu_sdk_code='private-code', llm_api_key='private-key')
+    options = Options(llm_api_key='private-key')
     entry.freeze_experiment(tmp_path, options)
     manifest = json.loads((tmp_path/'manifest.json').read_text(encoding='utf-8'))
     assert 'suc_benders/search.py' in manifest['files']
     assert 'config.local.json' not in manifest['files']
+    assert manifest['sa_backend'] == SA_BACKEND and manifest['sa_initialization'] == SA_INITIALIZATION
+    assert manifest['dependencies']['dwave-samplers'] == '1.8.0'
+    assert manifest['dependencies']['dimod'] == '0.12.22'
+    assert manifest['dependencies']['networkx'] == '3.4.2'
+    assert 'kaiwu' not in manifest['dependencies']
     for name, expected in manifest['files'].items():
         assert hashlib.sha256((tmp_path/'snapshot'/name).read_bytes()).hexdigest() == expected
     effective = (tmp_path/'effective-options.json').read_text(encoding='utf-8')
-    assert not any(value in effective for value in ('private-user', 'private-code', 'private-key'))
-    assert json.loads(effective)['kaiwu_sdk_code'] == '<redacted>'
+    assert 'private-key' not in effective and 'kaiwu' not in effective
+    assert json.loads(effective)['llm_api_key'] == '<redacted>'
 
 
 def test_snapshot_works_without_git_metadata(tmp_path, monkeypatch):

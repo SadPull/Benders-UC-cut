@@ -1,4 +1,4 @@
-"""Core options plus ignored local SDK/LLM credentials."""
+"""Core options plus ignored local LLM credentials."""
 # 模块职责：定义运行参数，合并被 Git 忽略的本地授权配置，并检查参数合法性。
 # 显式 overrides 优先于 config.local.json；所有求解/请求时间参数均以秒计。
 from dataclasses import dataclass, field, fields
@@ -33,8 +33,6 @@ class Options:
     # sa_reads 为独立退火链数，sa_sweeps 为每个温度对全部位的扫描次数。
     sa_hard_weight: float = 8
     sa_capacity_weight: float = 4
-    # 邻近权重须小于位间典型费用差，否则低温下任何偏离锚点的翻转都无法靠费用获益。
-    sa_proximity: float = .3
     sa_reads: int = 8
     sa_enabled: bool = True
     # 辅助工作配额独立于总 time_limit；耗尽后可继续整数认证，None 表示不另设此配额。
@@ -43,8 +41,6 @@ class Options:
     sa_temperature: float = 4
     sa_cooling: float = .95
     sa_cutoff: float = .05
-    kaiwu_user_id: str = field(default="", repr=False)
-    kaiwu_sdk_code: str = field(default="", repr=False)
     # 上界 LLM 请求由 llm_max_calls 限额，单次超时和连续停滞触发次数分别由后续字段控制。
     llm_enabled: bool = False
     llm_url: str = field(default="", repr=False)
@@ -65,7 +61,7 @@ def load_options(overrides=None, config_path=None):
     path = ROOT / "config.local.json" if config_path is None else Path(config_path)
     if path.exists():
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if set(raw) - {"kaiwu", "llm"}:
+        if set(raw) - {"llm"}:
             raise ValueError("Unknown local configuration section")
         for section, values in raw.items():
             for name, value in values.items():
@@ -84,9 +80,9 @@ def load_options(overrides=None, config_path=None):
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
     for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
-                 "sa_hard_weight", "sa_capacity_weight", "sa_proximity"):
+                 "sa_hard_weight", "sa_capacity_weight"):
         v = getattr(o, name)
-        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name not in ("tolerance", "llm_reserve_seconds", "sa_proximity")):
+        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name not in ("tolerance", "llm_reserve_seconds")):
             raise ValueError(f"Invalid numeric option: {name}")
     if not 0 < o.sa_cooling < 1 or not o.sa_cutoff < o.sa_temperature:
         raise ValueError("Require 0 < sa_cooling < 1 and sa_cutoff < sa_temperature")
@@ -101,7 +97,7 @@ def load_options(overrides=None, config_path=None):
             raise ValueError('SA budget requires a nonnegative finite value')
     if not o.sa_enabled and o.llm_enabled:
         raise ValueError("Disabling SA requires LLM disabled")
-    for name in ("kaiwu_user_id", "kaiwu_sdk_code", "llm_url", "llm_model", "llm_api_key", "llm_agent_directory", "llm_codex_command"):
+    for name in ("llm_url", "llm_model", "llm_api_key", "llm_agent_directory", "llm_codex_command"):
         if not isinstance(getattr(o, name), str):
             raise ValueError(f"{name} must be a string")
     if o.llm_codex_command and not o.llm_agent_directory:

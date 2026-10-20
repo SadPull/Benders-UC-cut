@@ -26,13 +26,13 @@ def block_qubo(whole, options, j, cuts=(), boundary=True):
     b = s.b
     m, _ = master(b, list(cuts))
     anchor = whole.best.point[b.cols[b.binary]]
-    q = search_qubo(m, b, list(cuts), [anchor], s.boundary_rows() if boundary else [], options)
+    q = search_qubo(m, b, list(cuts), anchor, s.boundary_rows() if boundary else [], options)
     return b, anchor, q
 
 
 def energy(q, x, slack=None):
     z = np.r_[x[q.free], np.zeros(q.Q.shape[0]-len(q.free)) if slack is None else slack]
-    return float(z @ q.Q @ z + q.diagonals[0] @ z)
+    return float(z @ q.Q @ z)
 
 
 def test_transition_violation_costs_hard_weight_and_capacity_ignores_startup_bits(tiny, options):
@@ -70,7 +70,26 @@ def test_cost_uses_tightest_optimality_cut_at_anchor(tiny, options):
     tight = NS(optimality=True, alpha=0., beta=np.linspace(-1, 1, nx))
     b, _, q = block_qubo(whole, options, 1, cuts=[loose, tight])
     assert tight.alpha + tight.beta @ anchor > loose.alpha + loose.beta @ anchor
-    assert np.allclose(q.costs[0], b.obj[b.binary] + tight.beta)
+    assert np.allclose(q.cost, b.obj[b.binary] + tight.beta)
+    _, _, baseline = block_qubo(whole, options, 1)
+    difference = q.Q - baseline.Q
+    expected = np.zeros(q.Q.shape[0])
+    expected[:len(q.free)] = q.cost[q.free] / q.cost_unit - baseline.cost[q.free] / baseline.cost_unit
+    assert np.allclose(difference.diagonal(), expected)
+    difference.setdiag(0); difference.eliminate_zeros()
+    assert difference.nnz == 0
+
+
+def test_cost_reference_does_not_attract_bits_without_cuts(tiny, options):
+    whole = make_whole(*tiny(2, 6), options, np.ones((2, 6)))
+    blocks, _ = partition(whole.m, 3)
+    b = blocks[1]
+    m, _ = master(b, [])
+    first = whole.best.point[b.cols[b.binary]]
+    a = search_qubo(m, b, [], first, [], options)
+    z = search_qubo(m, b, [], 1 - first, [], options)
+    assert (a.Q != z.Q).nnz == 0
+    assert not hasattr(a, 'initial_states') and not hasattr(a, 'diagonals')
 
 
 def test_coordination_capped_keeps_previous_multipliers():
