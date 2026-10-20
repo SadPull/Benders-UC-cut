@@ -1,10 +1,10 @@
 # LLM Benders SUC
 
-Python 机组组合求解器：时间分块 D-Wave 开源 SA 搜索可行上界，Codex 提供异步上界候选，独立数值进程认证下界。
+Python 机组组合求解器：时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步上界候选，独立数值进程认证下界。
 
-v0.34.0 固定采用**随机初态 SA＋修复**，已删除锚点初态、邻近惩罚和额外 1-flip 下降的实现与配置入口。原始候选评价／割学习、全天修复与物理校验、独立下界认证继续使用原有流程。
+v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**，原始候选评价／割学习、全天修复与物理校验、独立下界认证继续使用原有流程。
 
-当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。
+当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
 
 ## 运行
 
@@ -22,18 +22,20 @@ py -3.10 -m pip install -r requirements.txt
 }
 ```
 
-在 VS Code 中直接运行 `run_experiment.py`。预算、种子、LLM 开关等参数位于文件顶部；`CHECK_ONLY=True` 只检查输入。入口默认启用 Codex CLI，使用已有登录、`gpt-6-astra/max`，不需要在项目中填写 API 密钥。缺少 Codex 时可设置 `LLM_ENABLED=False`。
+在 VS Code 中直接运行 `run_experiment.py`。预算、种子、LLM 开关等参数位于文件顶部；`CHECK_ONLY=True` 只检查输入。`LLM_TRANSPORT="codex"`（默认）使用 Codex CLI 已有登录、`gpt-6-astra/max`，不需要在项目中填写 API 密钥；`LLM_TRANSPORT="http"` 以流式 SSE 调用 `config.local.json` 中 `url`（Responses 端点）与 `api_key`，模型取 `LLM_MODEL`，请求带 `text.format` JSON schema。流式是必需的：中转在约 300 秒处会切断无数据的非流式长推理请求。缺少 LLM 时可设置 `LLM_ENABLED=False`。
+
+LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区间（1 起始、首尾包含，空列表表示全天关机），程序以请求中的 `incumbent_u` 还原完整矩阵；`llm_requests/` 或 `result.json` 同时保留原样改动 `raw_changes` 和还原矩阵 `raw_u`。机组越界、重复、区间越界或重叠的候选单独剔除，记录 `invalid_reason` 并在下一次调用的反馈中告知模型；其余候选照常评估，全部不合格时该次调用记为 `NO_VALID_CANDIDATE`。
 
 入口默认从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%。`RESUME_FROM=None` 表示冷启动；续跑时填入从归档解压的完整检查点路径，程序保留已有方案、认证 LB、累计耗时和调用计数，重建局部搜索模型，并把配置预算作为追加时间。续跑跳过参考求解；冷启动另用最多 120 秒求参考解，其结果不回填主算法。
 
-每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。首次完整轮改善不足 0.05% 时可触发 LLM；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 1800 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。CLI 后续调用显式续接同一会话，恢复时选用历史中最后一次成功调用的会话；会话丢失或身份不匹配会停止，不默默新建。
+每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`），续跑时选用历史中最后一次成功调用的会话；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
 
 结果自动写入新建的 `results/manual-seed.../` 或 `results/resume-seed.../`：
 
 - `summary.json`：状态、UB/LB/gap、耗时和统计。
-- `result.json`：精简主结果、最终方案、计时与调用摘要。
+- `result.json`：精简主结果、最终方案、计时与调用摘要（含每次 LLM 调用的 usage 与回复原文）。
 - `reference.json`：仅冷启动运行时生成的独立参考解。
-- `llm_requests/`：实际触发时的请求与回执。
+- `llm_requests/`：Codex 通道实际触发时的请求与回执。
 - `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、SHA256、依赖版本和脱敏后的完整有效配置。
 - `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案。最新方案不含完整搜索状态，不能作为 `RESUME_FROM` 的完整检查点。
 
@@ -61,9 +63,9 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `suc_benders/search.py`：单块搜索及共享的全天候选修复、调度、校验、去重和预算。
 - `suc_benders/benders.py`：连续调度、Benders 割、块主问题和跨块乘子协调。
 - `suc_benders/strengthened_*.py`：独立强化证明模型，只返回认证下界。
-- `suc_benders/upper_advisor.py`：异步 LLM 建议调度；上下文与传输由其配套模块负责。
+- `suc_benders/upper_advisor.py`：异步 LLM 建议调度；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程。
 - `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
-- `data/`：当前输入、原始算例与溯源信息。
+- `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20 输入。
 - `tests/`：当前分块主线的必要回归；执行 `py -3.10 -m pytest -q tests`。
 - `config.local.json`、`.local/*.lic`：仅本地保留的授权配置。
 
@@ -74,6 +76,29 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 每批只有一个搜索 QUBO，直接由稀疏 Q 构造 BINARY BQM，合并 `Qij+Qji`，不生成稠密 Ising 矩阵。每条链由采样器根据种子生成随机初态，每次一个 read。退火终态恢复固定变量后，先进行原始块候选评价／割学习，再走既有全天修复、调度和独立校验；通过校验才可更新 UB。温度从 `sa_temperature*energy_unit` 起逐次乘 `sa_cooling`，严格高于 `sa_cutoff*energy_unit` 时执行，倒数作为自定义 beta；每级执行 `sa_sweeps` 次顺序 Metropolis 扫描。[采样器 API](https://docs.dwavequantum.com/en/latest/ocean/api_ref_samplers/generated/dwave.samplers.SimulatedAnnealingSampler.sample.html)
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
+
+## v0.35.0 LLM 通道、多算例实验与归档
+
+2026-10-20 在 seed 17、单次运行条件下完成以下实验，均与同条件纯 SA 成对比较。参考成本为 Gurobi 完整问题最优值，只用于事后比较，不回填主算法。机器可读汇总见 [archives/v0.35.0.json](archives/v0.35.0.json)。
+
+| 算例（机组×小时×场景） | 分块 | LLM | 纯 SA UB 差距 | SA+LLM UB 差距 | SA+LLM 状态 |
+|---|---|---|---:|---:|---|
+| RCUC20（20×24×1） | 3 h | gpt-6-astra，Codex | +3.616% | +0.043% | CONVERGED，1353 s |
+| RCUC20（20×24×1） | 12 h，16 sweeps | gpt-6-astra，Codex | +0.903% | +0.000% | CONVERGED，1429 s |
+| classic10（10×24×3） | 12 h，16 sweeps | gpt-6-astra，Codex | +3.770% | +0.051% | CONVERGED，1092 s |
+| RTS-24（32×24×3） | 12 h，16 sweeps | gpt-6-astra，Codex | +5.475% | +1.108% | TIME_LIMIT，1800 s |
+| RTS-24，5400 s 预算 | 12 h，16 sweeps | gpt-6-astra，Codex | +5.475% | +0.040% | CONVERGED，2255 s |
+| IEEE118 派生（54×24×1） | 12 h，16 sweeps | deepseek-v4.1-flash，HTTP 流式 | +7.515% | +4.934% | TIME_LIMIT，1800 s |
+
+- **12 h 分块**：RCUC20 敏感性筛选表明 3 h 块会被长最小停机时间锁在块坐标局部最优，12 h 块配 16 sweeps 是该算例最好的纯 SA 设置；其余算例沿用此设置，未逐算例调参。
+- **LLM 延迟**：gpt-6-astra（max）单次 391–900 s，主要是推理 token 以约 28 tok/s 生成；1800 s 内只能完成 2 次调用。同一首调 prompt 下，deepseek-v4.1-flash（max）单次 156–277 s、约 220 tok/s，推理 token 为 gpt 的 3–5 倍，候选质量与 gpt 首调相当。
+- **非流式 HTTP 会在约 300 秒处被中转切断（HTTP 503）**，因此 HTTP 通道改为流式；IEEE118 中 315 秒的调用传输完整。
+- **整矩阵输出不可靠**：IEEE118 的 4 次 DeepSeek 调用中有 2 次在 54×24 矩阵里漏写一行（均位于连续相同的全天开机行中间，其余改动正确），旧解析规则将整个回复作废。v0.35.0 改为增量输出、JSON schema 约束和逐候选校验；同一 IEEE118 首调 prompt 的试探中 4 个候选全部合格且可行，正文输出从约 10,600 token 降到 431 token，单次调用把 UB 从 4,004,999.77 降到 3,847,762.95（+4.760%）。修复后尚未重跑完整求解。
+- **Codex 通道注入用户级配置**：Codex CLI 会带入个人 memory、AGENTS.md 和插件提示（每次多约 2.4 万输入 token），其中 memory 含历史实验信息，包括 RTS-24 参考最优值。gpt 组结果应在此限制下解读；HTTP 通道不受影响。
+
+局限：每组只有一个种子、一次运行；gpt 组与 DeepSeek 组的通道、会话方式和输出格式都不同，不能直接比较模型；v0.35.0 改变了提示与输出格式，此后结果不能与整矩阵输出的历史结果直接比较。
+
+[v0.35.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.35.0) 提供发布提交对应的 `core-source-v0.35.0.zip`、全部 34 项实验目录与驱动／分析脚本 `experiment-archive-v0.35.0.zip`、逐文件 SHA256 清单和上传／清理验证记录。本地 `results/` 只保留 DeepSeek 相关的五项：`deepseek-flash-pilot-20261020`、`ieee118-deepseek-20261020`、`manual-seed17-20261020-224136-14459f84`、`manual-seed17-20261020-224136-7326d548`、`schema-probe-20261020`。
 
 ## v0.34.0 方法选择与归档
 

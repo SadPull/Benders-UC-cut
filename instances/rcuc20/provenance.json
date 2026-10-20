@@ -1,0 +1,159 @@
+{
+  "name": "Pisa RCUC 20_0_1_w: original deterministic parameters under the project UC model",
+  "scope": "RCUC 原始参数／项目模型；非原论文最优值复现",
+  "sources": {
+    "20_0_1_w.mod": {
+      "url": "https://commalab.di.unipi.it/files/Data/UC/RCUC.tgz",
+      "documentation_url": "https://commalab.di.unipi.it/datasets/uc/",
+      "archive_member": "RCUC/T-Ramp/20_0_1_w.mod",
+      "archive_sha256": "b9870dd19532d6d38187dbc338a6ad97fb5adca9136d744922826a3ffa8cee1c",
+      "sha256": "412a5377dbfce0211acd550560246b7cc56ecb68f836a1abe7c69c1677131ec1",
+      "local_file": "sources/20_0_1_w.mod",
+      "local_sha256": "412a5377dbfce0211acd550560246b7cc56ecb68f836a1abe7c69c1677131ec1",
+      "local_format": "Unmodified archive member bytes, including original line endings"
+    }
+  },
+  "generator_mapping": [
+    {
+      "index": 0,
+      "source_generator_id": 0
+    },
+    {
+      "index": 1,
+      "source_generator_id": 1
+    },
+    {
+      "index": 2,
+      "source_generator_id": 2
+    },
+    {
+      "index": 3,
+      "source_generator_id": 3
+    },
+    {
+      "index": 4,
+      "source_generator_id": 4
+    },
+    {
+      "index": 5,
+      "source_generator_id": 5
+    },
+    {
+      "index": 6,
+      "source_generator_id": 6
+    },
+    {
+      "index": 7,
+      "source_generator_id": 7
+    },
+    {
+      "index": 8,
+      "source_generator_id": 8
+    },
+    {
+      "index": 9,
+      "source_generator_id": 9
+    },
+    {
+      "index": 10,
+      "source_generator_id": 10
+    },
+    {
+      "index": 11,
+      "source_generator_id": 11
+    },
+    {
+      "index": 12,
+      "source_generator_id": 12
+    },
+    {
+      "index": 13,
+      "source_generator_id": 13
+    },
+    {
+      "index": 14,
+      "source_generator_id": 14
+    },
+    {
+      "index": 15,
+      "source_generator_id": 15
+    },
+    {
+      "index": 16,
+      "source_generator_id": 16
+    },
+    {
+      "index": 17,
+      "source_generator_id": 17
+    },
+    {
+      "index": 18,
+      "source_generator_id": 18
+    },
+    {
+      "index": 19,
+      "source_generator_id": 19
+    }
+  ],
+  "thermal_field_order": [
+    "id",
+    "cost_a",
+    "cost_b",
+    "cost_c",
+    "pmin",
+    "pmax",
+    "initial_duration",
+    "min_up",
+    "min_down",
+    "coolAndFuelCost",
+    "hotAndFuelCost",
+    "tau",
+    "tauMax",
+    "fixedCost",
+    "SUCC_unused",
+    "initial_output"
+  ],
+  "field_sources": {
+    "cost_a": "ThermalSection column 2; unchanged",
+    "cost_b": "ThermalSection column 3; unchanged",
+    "cost_c": "ThermalSection column 4; unchanged",
+    "pmin": "ThermalSection column 5; unchanged",
+    "pmax": "ThermalSection column 6; unchanged",
+    "initial_duration": "ThermalSection column 7; unchanged",
+    "min_up": "ThermalSection column 8; unchanged",
+    "min_down": "ThermalSection column 9; unchanged",
+    "startup_cost": "fixedCost, column 14. coolAndFuelCost and hotAndFuelCost are zero, so startup cost is constant",
+    "initial_output": "ThermalSection column 16; unchanged",
+    "ramp_up,ramp_down": "The following RampConstraints row; unchanged",
+    "base_load": "Loads: original 24 hourly values; unchanged",
+    "reserve_fraction": "SpinningReserve: all original 24 values are zero",
+    "pstart,pshut": "Not specified separately in the source; project choice: Pmax",
+    "shutdown_cost": "Not specified in the source; project choice: zero"
+  },
+  "model_choices": [
+    "One deterministic base scenario with probability 1; both scenario filenames represent the same original load and zero reserve.",
+    "Preserve original quadratic fuel coefficients and all input units without scaling or piecewise approximation.",
+    "Preserve signed initial on/off duration and the final P0 column; do not replace initial output with Pmin.",
+    "SUCC is an unused compatibility column; use fixedCost for startup and P0 for initial output.",
+    "No hot/cold startup extension: both time-dependent startup coefficients are zero.",
+    "Use the existing project aggregate UC model, unconditional ramp limits, initial residual durations, last-hour shutdown prohibition and horizon-truncated minimum up/down rules.",
+    "This imports original parameters; it does not reproduce the original RCUC paper formulation or adopt its published optimum as an acceptance target."
+  ],
+  "input_hash_format": "SHA256 of exact file bytes",
+  "input_sha256": {
+    "units.json": "500b0758d4e13fbac49e3a9e6d600f4dcfd6205955eb4da122cf4bd21b00b7a9",
+    "deterministic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f",
+    "stochastic.json": "5ddc1d4886e73e5415dbf9dde91787fd17a471c1b9e0fdb99597ec5939390c2f"
+  },
+  "preserved_classic10": {
+    "directory": "classic10",
+    "hash_format": "SHA256 of exact copied file bytes",
+    "sha256": {
+      "units.json": "def19f3e0eb3ad5abcb2fc49df9a0189a2420d75d5ce1b7413b8350321b2a96a",
+      "deterministic.json": "be59f9cc929dd0cc1dd8e726a5c7e109d8a6c359db5858fc628b6b5913618080",
+      "stochastic.json": "ef1449667234504c3ced04a25522fbb9e4c6171268d12d9abbc6ca1392f0a0df",
+      "provenance.json": "1a5ff61c5d4c063bd0180f209bd01bfe391e520bfaf1eae65f831e7490f8abba",
+      "sources/GA10.uc": "8730be6f73652c778c787bbf201b84db87cc74c6c8381e4137717658617c9eea"
+    }
+  }
+}

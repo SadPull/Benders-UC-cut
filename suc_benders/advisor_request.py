@@ -48,7 +48,8 @@ class AdvisorRequest:
         self.deadline = self.started + seconds
         context = mp.get_context("spawn")
         self.connection, sender = context.Pipe(duplex=False)
-        shape = NS(n_units=d.n_units, horizon=d.horizon)
+        # base_u 取自请求体中的 incumbent_u，保证增量候选按模型看到的方案还原。
+        shape = NS(n_units=d.n_units, horizon=d.horizon, base_u=llm.prompt_base(body))
         self.receipt = dict(request=body, request_sha256=hashlib.sha256(
             json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
         if o.llm_codex_command:
@@ -178,7 +179,8 @@ def _codex_event_info(directory):
 
 def _prepare_codex(command, body, shape, directory, session_id=None):
     """Prepare the same isolated CLI request for production and timing experiments."""
-    prompt = (body['instructions']+'\n\n'+body['input']
+    # 续接的增量提示没有 instructions，不能留下空段落。
+    prompt = ((body['instructions']+'\n\n' if body['instructions'] else '')+body['input']
                   +'\n\nReturn only the requested JSON. Do not invoke tools, edit files, or spawn agents.\n')
     if session_id is not None:
         session_file(session_id)
@@ -186,13 +188,7 @@ def _prepare_codex(command, body, shape, directory, session_id=None):
                   'older states. Previous proposals have already been evaluated; propose new improvements.\n\n'+prompt)
     (directory/'prompt.txt').write_bytes(prompt.encode('utf-8'))
     prompt_sha256 = hashlib.sha256(prompt.encode('utf-8')).hexdigest()
-    matrix = dict(type='array', minItems=shape.n_units, maxItems=shape.n_units,
-            items=dict(type='array', minItems=shape.horizon, maxItems=shape.horizon,
-                       items=dict(type='integer', enum=[0, 1])))
-    save_json(directory/'schema.json', dict(type='object', additionalProperties=False,
-            required=['candidates'], properties=dict(candidates=dict(type='array', maxItems=4,
-                items=dict(type='object', additionalProperties=False, required=['name', 'reason', 'u'],
-                    properties=dict(name=dict(type='string'), reason=dict(type='string'), u=matrix))))))
+    save_json(directory/'schema.json', llm.output_schema(shape.n_units, shape.horizon))
     executable = shutil.which(command)
     if executable is None:
         raise FileNotFoundError('Codex CLI not found; install it or set llm_codex_command')
@@ -240,7 +236,7 @@ def _request_codex(connection, command, body, shape, iteration, deadline, direct
         info['reply_sha256'] = hashlib.sha256(reply).hexdigest()
         text = reply.decode('utf-8')
         raw = dict(status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
-        candidates, parsed = llm.parse_response(raw, shape, iteration)
+        candidates, parsed = llm.parse_response(raw, shape, iteration, shape.base_u)
         info.update(parsed, response_output=[text])
     except subprocess.TimeoutExpired:
         info.update(status='TIME_LIMIT', message='CodexDeadline')
@@ -308,7 +304,8 @@ class SubagentAdvisor:
                     raise ValueError('Mismatched subagent receipt')
                 # Adapt the generated text to the existing parser; this is not an HTTP response.
                 raw = dict(status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
-                candidates, info = llm.parse_response(raw, self.d, self.iteration)
+                candidates, info = llm.parse_response(raw, self.d, self.iteration,
+                                                      llm.prompt_base(saved['request']))
                 info.update(agent_id=done['agent_id'], response_id='codex-subagent:'+done['agent_id'],
                     response_model=dispatch['model'], reasoning_effort=dispatch['reasoning_effort'],
                     response_output=[text], reply_sha256=digest,
@@ -344,7 +341,7 @@ def _request(connection, url, key, body, shape, iteration, seconds):
     info = dict(status="FAILED", message="", accepted=0, format_valid=0, proposals=[])
     try:
         raw = llm.post_response(url, key, body, seconds)
-        candidates, info = llm.parse_response(raw, shape, iteration)
+        candidates, info = llm.parse_response(raw, shape, iteration, shape.base_u)
         info.update(response_id=raw.get("id"), response_model=raw.get("model"), usage=raw.get("usage"),
                     response_output=[part["text"] for item in raw.get("output", [])
                                      if item.get("type") == "message" for part in item.get("content", [])

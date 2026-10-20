@@ -30,7 +30,6 @@ class CandidateEvaluation:
 class LLMContextInput:
     incumbent: Any | None
     incumbent_results: Sequence[Any]
-    base_evaluations: Sequence[CandidateEvaluation]
     candidate_evaluations: Sequence[CandidateEvaluation]
     history: Sequence[Any]
     infeasible_diagnostics: Sequence[Mapping[str, Any]] = field(default_factory=list)
@@ -70,29 +69,6 @@ def _expected_fuel(results: Sequence[Any], scenarios: Sequence[Any]) -> float:
     return float(
         sum(scenario.probability * result.objective for scenario, result in zip(scenarios, results))
     )
-
-
-# 按实测总费用保留至多十个基础方案摘要，并标出是否优于当前 incumbent。
-def _base_candidate_rows(
-    evaluations: Sequence[CandidateEvaluation],
-    incumbent_total: float | None,
-) -> list[dict]:
-    rows = []
-    for evaluation in sorted(evaluations, key=lambda item: item.total_cost)[:10]:
-        rows.append(
-            {
-                "id": len(rows),
-                "source": evaluation.source,
-                "total_cost": evaluation.total_cost,
-                "fixed_cost": evaluation.fixed_cost,
-                "expected_fuel_cost": evaluation.expected_fuel_cost,
-                "better_than_incumbent": (
-                    incumbent_total is not None and evaluation.total_cost < incumbent_total
-                ),
-                "hamming_to_incumbent": evaluation.hamming_to_incumbent,
-            }
-        )
-    return rows
 
 
 # 将各场景的平衡/备用对偶价格转换成可序列化列表；缺失价格返回空列表。
@@ -172,37 +148,6 @@ def _reserve_margin(
     ]
 
 
-# 按平衡/备用对偶价格绝对值列出至多二十个敏感时段，供 LLM 判断可能的紧约束。
-def _tight_constraints(
-    scenarios: Sequence[Any],
-    results: Sequence[Any],
-) -> list[dict]:
-    rows = []
-    for scenario, result in zip(scenarios, results):
-        if result.balance_dual is not None:
-            for period, dual in enumerate(result.balance_dual):
-                rows.append(
-                    {
-                        "type": "balance",
-                        "scenario": scenario.name,
-                        "period": period,
-                        "dual": float(dual),
-                    }
-                )
-        if result.reserve_dual is not None:
-            for period, dual in enumerate(result.reserve_dual):
-                rows.append(
-                    {
-                        "type": "reserve",
-                        "scenario": scenario.name,
-                        "period": period,
-                        "dual": float(dual),
-                    }
-                )
-    rows.sort(key=lambda row: abs(row["dual"]), reverse=True)
-    return rows[:20]
-
-
 # 只保留最近五轮的上界改善、割增量、候选数和 LLM 失败摘要，控制提示词长度。
 def _iteration_history_rows(history: Sequence[Any]) -> list[dict]:
     rows = []
@@ -225,26 +170,30 @@ def _iteration_history_rows(history: Sequence[Any]) -> list[dict]:
     return rows
 
 
-# 用燃料导数 2*a*P+b 估算各机组在 Pmin、概率加权平均出力和 Pmax 处的边际费用。
+# 用燃料导数 2*a*P+b 估算各机组在 Pmin、开机小时概率加权平均出力和 Pmax 处的边际费用。
+# 全天未开机的机组没有当前出力，at_current_p 为 None。
 def _unit_marginal_cost(
     data: Any,
     scenarios: Sequence[Any],
+    incumbent: Any | None,
     results: Sequence[Any],
 ) -> list[dict]:
-    if not results:
+    if incumbent is None or not results:
         return []
     expected_p = sum(
         scenario.probability * np.asarray(result.p, dtype=float)
         for scenario, result in zip(scenarios, results)
     )
-    current_p = expected_p.mean(axis=1)
+    on_hours = incumbent.u.sum(axis=1)
+    current_p = (expected_p * incumbent.u).sum(axis=1) / np.maximum(on_hours, 1)
     rows = []
     for i in range(data.n_units):
         rows.append(
             {
                 "unit": i,
                 "at_pmin": float(2.0 * data.cost_a[i] * data.pmin[i] + data.cost_b[i]),
-                "at_current_p": float(2.0 * data.cost_a[i] * current_p[i] + data.cost_b[i]),
+                "at_current_p": (float(2.0 * data.cost_a[i] * current_p[i] + data.cost_b[i])
+                                 if on_hours[i] else None),
                 "at_pmax": float(2.0 * data.cost_a[i] * data.pmax[i] + data.cost_b[i]),
             }
         )
@@ -309,27 +258,20 @@ def build_llm_context(
     return _round3(
         {
             "incumbent_cost": incumbent_cost,
-            "base_candidates": _base_candidate_rows(
-                context_input.base_evaluations, total
-            ),
             "scenario_duals": _scenario_duals(results),
             "candidate_comparison": _candidate_comparison_rows(
                 context_input.candidate_evaluations
             ),
             "scenario_dispatch_summary": _scenario_dispatch_summary(data, scenarios, incumbent, results),
             "reserve_margin": _reserve_margin(data, scenarios, incumbent),
-            "tight_constraints": _tight_constraints(scenarios, results),
             "infeasible_diagnostics": list(context_input.infeasible_diagnostics)[:20],
             "iteration_history": _iteration_history_rows(context_input.history),
-            "unit_marginal_cost": _unit_marginal_cost(data, scenarios, results),
+            "unit_marginal_cost": _unit_marginal_cost(data, scenarios, incumbent, results),
             "unit_cost_decomposition": _unit_cost_decomposition(
                 data, scenarios, incumbent, results
             ),
             "unit_hour_decommit_gradient": _unit_hour_decommit_gradient(
                 data, scenarios, incumbent, results, limit=60
-            ),
-            "top_decommit_opportunities": _unit_hour_decommit_gradient(
-                data, scenarios, incumbent, results, limit=20
             ),
             "hourly_commitment_profile": _hourly_commitment_profile(data, incumbent),
             "peaker_usage": _peaker_usage(data, incumbent),

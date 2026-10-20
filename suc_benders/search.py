@@ -284,7 +284,11 @@ class WholeDay:
                 record["outcome"] = "dispatch_timeout"
             return False
         if r.status not in ("OPTIMAL", "INFEASIBLE", "DISCRETE_INFEASIBLE"):
-            raise RuntimeError(f"Full dispatch failed: {r.status}")
+            # SUBOPTIMAL 等数值状态只拒绝该候选且不缓存，求解继续。
+            self.diagnostics["dispatch_failures"] = self.diagnostics.get("dispatch_failures", 0) + 1
+            if record is not None:
+                record["outcome"] = "dispatch_failed"
+            return False
         before = self.result.objective
         z = commitment(self.d, x)
         fixed = fixed_cost(self.d, z.u, z.w)
@@ -417,7 +421,7 @@ class WholeDay:
             r["fixed_cost"], r["expected_fuel_cost"] if r["feasible"] else np.inf,
             r["scenario_costs"], r["feasible"], 0, 0, None) for r in measurements]
         context = build_llm_context(self.d, self.scenarios, LLMContextInput(
-            self.result, self.dispatches, evaluations[-16:], evaluations,
+            self.result, self.dispatches, evaluations,
             [NS(**row) for row in self.diagnostics["iterations"]]))
         context["previous_call_feedback"] = self.feedback
         context['reachability'] = deepcopy(self.diagnostics['reachability'])
@@ -567,7 +571,9 @@ class BlockSearch:
             if residual.max(initial=0) > 1e-5:
                 raise RuntimeError("Local dispatch validation failed")
         elif r.status not in ("INFEASIBLE", "DISCRETE_INFEASIBLE"):
-            raise RuntimeError(f"Local dispatch failed: {r.status}")
+            # 与全天调度相同：数值状态按未完成处理，不缓存。
+            whole.diagnostics["dispatch_failures"] = whole.diagnostics.get("dispatch_failures", 0) + 1
+            return
         if remaining() <= 0:
             return
         cache[key] = r

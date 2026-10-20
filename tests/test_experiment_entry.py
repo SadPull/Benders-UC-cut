@@ -36,7 +36,8 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
     assert entry.main() == 0
     assert len(seen) == 1
     assert not {'enhanced_search', 'block_sa_period'} & seen[0].keys()
-    assert seen[0]['seed'] == entry.SEED and seen[0]['block_hours'] == 3
+    assert seen[0]['seed'] == entry.SEED and seen[0]['block_hours'] == entry.BLOCK_HOURS == 12
+    assert seen[0]['sa_sweeps'] == entry.SA_SWEEPS == 16
     output, = (tmp_path/'results').iterdir()
     summary = json.loads((output/'summary.json').read_text(encoding='utf-8'))
     assert summary['sa_calls'] == summary['block_sa_calls'] == 2
@@ -78,6 +79,16 @@ def test_snapshot_includes_untracked_solver_and_redacts_credentials(tmp_path):
     effective = (tmp_path/'effective-options.json').read_text(encoding='utf-8')
     assert 'private-key' not in effective and 'kaiwu' not in effective
     assert json.loads(effective)['llm_api_key'] == '<redacted>'
+
+
+def test_snapshot_follows_selected_instance_directory(tmp_path):
+    folder = entry.PROJECT/'instances'/'classic10'
+    entry.freeze_experiment(tmp_path, Options(data_file=str(folder/'units.json'),
+                                              scenario_file=str(folder/'stochastic.json')))
+    files = json.loads((tmp_path/'manifest.json').read_text(encoding='utf-8'))['files']
+    assert {'instances/classic10/units.json', 'instances/classic10/sources/GA10.uc'} <= files.keys()
+    assert not any(name.startswith('data/') for name in files)
+    assert files['instances/classic10/units.json'] == hashlib.sha256((folder/'units.json').read_bytes()).hexdigest()
 
 
 def test_snapshot_works_without_git_metadata(tmp_path, monkeypatch):

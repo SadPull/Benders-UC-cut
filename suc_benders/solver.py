@@ -9,7 +9,6 @@ from .benders import coordinate
 from .model import model, partition
 from .optimization import optimize
 from .search import BlockSearch, WholeDay, SABudgetExhausted, closed
-from .upper_advisor import LLMCallFailures
 from .validation import validate
 
 
@@ -80,6 +79,8 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
             raise RuntimeError("No validated initial schedule")
         whole.emit("initialization")
         whole.certifier.start()
+        if resume_state is None:
+            whole.advice.kickoff()
         if not o.sa_enabled and whole.certifier.converged():
             result.status = "CONVERGED"
         try:
@@ -222,8 +223,6 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
             if remaining() <= 0:
                 raise TimeoutError
             result.status = "CONVERGED"
-    except LLMCallFailures as error:
-        result.status, result.message = 'PAUSED_LLM_FAILURE', str(error)
     except Exception as error:
         result.status = "TIME_LIMIT" if remaining() <= 0 or isinstance(error, TimeoutError) else f"{stage}_FAILED"
         result.message = f"{type(error).__name__}: {error}"
@@ -234,8 +233,7 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                 whole.certifier.close()
             except Exception as error:
                 whole.diagnostics['proof_shutdown_error'] = type(error).__name__
-                if result.status != 'PAUSED_LLM_FAILURE':
-                    result.status, result.message = 'CERTIFICATION_FAILED', str(error)
+                result.status, result.message = 'CERTIFICATION_FAILED', str(error)
     for search in searches:
         search.summarize()
     if np.isfinite(result.objective):

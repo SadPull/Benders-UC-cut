@@ -18,24 +18,29 @@ from suc_benders.anneal import SA_BACKEND, SA_INITIALIZATION
 from suc_benders.config import load_options
 from suc_benders.data import load_data
 from suc_benders.model import model
-from suc_benders.advisor_request import session_file
+from suc_benders.advisor_request import SessionUnavailable, session_file
 from suc_benders.optimization import optimize
 from suc_benders.validation import unpack, validate
 
 
-# 算例直接修改 data/units.json 和 data/stochastic.json；以下只设置运行参数。
+# 默认算例为 data/；切换算例改 DATA_DIR。以下只设置运行参数。
 SEED = 17                # SA 随机种子
 TIME_LIMIT_SECONDS = 7200  # 本次运行预算；续跑时额外增加这些秒，包含恢复、LLM 和记录开销
 RESUME_FROM = None       # 从零开始；续跑时填入解压后的完整 checkpoint.json.gz 路径
 REFERENCE_TIME_LIMIT_SECONDS = 120  # 完整问题参考求解的独立预算，单位：秒
 TARGET_GAP_PERCENT = 0.1  # 认证间隙目标，单位：%；0.1 就是 0.1%
 CHECK_ONLY = False       # True：只检查输入；False：实际求解
-LLM_ENABLED = True       # True：停滞时自动启动 Codex 独立任务；False：关闭 LLM
+LLM_ENABLED = True       # True：停滞时自动请求 LLM 建议（通道见 LLM_TRANSPORT）；False：关闭 LLM
 LLM_PATIENCE = 1         # 连续一个完整 SA 轮次改善不足 0.05% 时触发
+LLM_FIRST_CALL_AT_START = True  # True：初始化后立即发首个请求，不等待 SA 停滞
 LLM_MODEL = "gpt-6-astra"  # 使用 Codex 已登录账号，推理档位为 max
+LLM_TRANSPORT = "codex"  # "codex"：Codex 独立任务；"http"：流式 Responses，URL/密钥取自 config.local.json
 LLM_TIMEOUT_SECONDS = 1800  # 剩余时间不足完整请求窗口加预留时，不启动新请求
 LLM_RESERVE_SECONDS = 60  # 不用于等待 LLM，留给后续调度、校验和数值搜索
 LLM_MAX_CALLS = None     # 全程调用上限；None：在预算内按停滞规则继续，保留累计调用计数
+BLOCK_HOURS = 12         # 分块小时数；RCUC20 调参：3 h 块被长最小停机时间锁在块坐标局部最优
+SA_SWEEPS = 16           # 每个温度对全部位的扫描次数；12 h 块下 16 优于默认 4
+DATA_DIR = "data"        # 算例目录（相对项目根）；其他算例在 instances/<名称>
 
 # Codex 提供上界候选，独立数值进程提供认证下界。
 PROJECT = Path(__file__).resolve().parent
@@ -54,8 +59,9 @@ def freeze_experiment(output, options, resume_source=None):
     paths = [PROJECT / name for name in ("run_experiment.py", "run_suc.py", "requirements.txt", "README.md")]
     paths += sorted((PROJECT / "suc_benders").glob("*.py"))
     paths += sorted((PROJECT / "tests").glob("*.py"))
-    paths += sorted((PROJECT / "data").rglob("*.json"))
-    paths += sorted((PROJECT / "data" / "sources").glob("*.mod"))
+    folder = Path(options.data_file).resolve().parent
+    paths += sorted(folder.rglob("*.json"))
+    paths += sorted(p for p in (folder / "sources").glob("*") if p.is_file())
     hashes = {}
     for source in paths:
         relative = source.relative_to(PROJECT)
@@ -153,15 +159,18 @@ def solve_reference(data, scenarios, seconds, log_file):
 def main():
     stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
     output = RESULTS / f"{'resume' if RESUME_FROM else 'manual'}-seed{SEED}-{stamp}-{uuid4().hex[:8]}"
-    folder = PROJECT / "data"
+    folder = PROJECT / DATA_DIR
+    if LLM_TRANSPORT not in ("codex", "http"):
+        raise ValueError("LLM_TRANSPORT must be 'codex' or 'http'")
+    codex = LLM_ENABLED and LLM_TRANSPORT == "codex"
     options = dict(data_file=str(folder / "units.json"), scenario_file=str(folder / "stochastic.json"),
                    seed=SEED, time_limit=TIME_LIMIT_SECONDS,
-                   tolerance=TARGET_GAP_PERCENT / 100, block_hours=3, max_outer=1000000,
+                   tolerance=TARGET_GAP_PERCENT / 100, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS, max_outer=1000000,
                    max_inner=20, llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL, llm_patience=LLM_PATIENCE,
-                   llm_max_calls=LLM_MAX_CALLS,
+                   llm_max_calls=LLM_MAX_CALLS, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
                    llm_timeout=LLM_TIMEOUT_SECONDS, llm_reserve_seconds=LLM_RESERVE_SECONDS,
-                   llm_codex_command="codex" if LLM_ENABLED else "",
-                   llm_agent_directory=str(output / "llm_requests") if LLM_ENABLED else "")
+                   llm_codex_command="codex" if codex else "",
+                   llm_agent_directory=str(output / "llm_requests") if codex else "")
     checked = load_options(options)
     data, scenarios = load_data(checked.data_file, checked.scenario_file)
     dimensions = dict(units=data.n_units, hours=data.horizon, scenarios=len(scenarios))
@@ -183,7 +192,7 @@ def main():
                 raise ValueError("Source checkpoint audit/hash mismatch")
         manifest = json.loads((source.parent / "manifest.json").read_text(encoding="utf-8"))
         for name in ("units.json", "stochastic.json"):
-            if hashlib.sha256((folder/name).read_bytes()).hexdigest() != manifest["files"]["data/"+name]:
+            if hashlib.sha256((folder/name).read_bytes()).hexdigest() != manifest["files"][(folder/name).relative_to(PROJECT).as_posix()]:
                 raise ValueError("Resume inputs differ from the source experiment")
         with gzip.open(source, "rt", encoding="utf-8") as stream:
             resume_state = json.load(stream)
@@ -194,7 +203,10 @@ def main():
         session_id = next((row["thread_id"] for row in reversed(resume_state["llm_history"])
                            if row["status"] == "OK" and row.get("thread_id")), None)
         if LLM_ENABLED and prior_calls:
-            session_file(session_id)
+            try:
+                session_file(session_id)
+            except SessionUnavailable as error:
+                print(f"续跑会话不可用（{error}）；首次请求失败后将新开会话。", flush=True)
         resume_source = dict(path=str(source), sha256=digest, charged_elapsed_seconds=prior,
                              initial_upper=resume_state["objective"], initial_lower=resume_state["lower_bound"],
                              prior_llm_calls=prior_calls, session_id=session_id)
@@ -207,12 +219,18 @@ def main():
     print(f"随机种子：{SEED}；主算法预算：{TIME_LIMIT_SECONDS} 秒；"
           f"认证间隙目标：{TARGET_GAP_PERCENT}%；LLM：{'开启' if LLM_ENABLED else '关闭'}", flush=True)
     if LLM_ENABLED:
-        print(f"调用方式：Codex 独立任务；模型：{checked.llm_model}；推理档位：max；"
+        print(f"调用方式：{'Codex 独立任务' if codex else 'HTTP Responses 流式'}；模型：{checked.llm_model}；推理档位：max；"
+              f"{'初始化后先发首个请求，之后' if checked.llm_first_call_at_start else ''}"
               f"连续 {checked.llm_patience} 个完整 SA 轮次改善不足时触发，"
               f"最多调用 {checked.llm_max_calls if checked.llm_max_calls is not None else '不限'} 次。", flush=True)
-        print("复用 Codex 已有登录；请求和日志保存到 llm_requests；开启不代表立即调用。", flush=True)
-        print(f"Codex 直接使用 HTTPS；单次最多等待 {checked.llm_timeout:g} 秒，"
-              f"保留 {checked.llm_reserve_seconds:g} 秒给后续数值处理。", flush=True)
+        if codex:
+            print("复用 Codex 已有登录；请求和日志保存到 llm_requests；开启不代表立即调用。", flush=True)
+            print(f"Codex 直接使用 HTTPS；单次最多等待 {checked.llm_timeout:g} 秒，"
+                  f"保留 {checked.llm_reserve_seconds:g} 秒给后续数值处理。", flush=True)
+        else:
+            print(f"URL 与密钥取自 config.local.json；每次发送完整提示，用量和回复保存到 result.json；"
+                  f"单次最多等待 {checked.llm_timeout:g} 秒，保留 {checked.llm_reserve_seconds:g} 秒给后续数值处理。",
+                  flush=True)
     print("指标说明：UB 是通过全天物理校验的可行方案成本；LB 是认证下界；"
           "认证间隙 = (UB - LB) / max(1, |UB|)。", flush=True)
     print("块内上下界用于分块搜索，不等于全天原问题的上下界。", flush=True)
@@ -234,7 +252,8 @@ def main():
                    search_statistics=result.diagnostics.get("search_statistics", {}),
                    certification_history=result.certification_history,
                    llm_history=[{key: row.get(key) for key in ("call_id", "status", "thread_id", "requested_session_id",
-                       "request_directory", "background_seconds", "request_upper", "upper_before_probes", "upper_after_probes")}
+                       "request_directory", "background_seconds", "request_upper", "upper_before_probes", "upper_after_probes",
+                       "prompt_mode", "usage", "message", "accepted", "response_model", "response_output")}
                        for row in result.llm_history])
     save(output / "result.json", compact)
     final_save_seconds = perf_counter() - final_save_started
@@ -255,14 +274,16 @@ def main():
                    wall_to_result_saved_seconds=perf_counter() - started,
                    sa_calls=result.diagnostics.get("sa_calls", 0), llm_calls=result.llm_calls,
                    block_sa_calls=result.diagnostics.get('block_sa_calls', 0),
-                   llm_patience=LLM_PATIENCE,
+                   llm_patience=LLM_PATIENCE, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
+                   llm_disabled=result.diagnostics.get('llm_disabled'),
+                   data_dir=DATA_DIR, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS,
+                   dispatch_failures=result.diagnostics.get('dispatch_failures', 0),
                    search_statistics=result.diagnostics.get('search_statistics', {}),
                    note="轻量留证；latest-solution.json 仅保存方案，不是完整搜索检查点。"
                         "续跑不做参考求解或完整审计；没有自动补跑。")
     save(output / "summary.json", summary)
     status_text = {"CONVERGED": "已达到认证间隙目标", "TIME_LIMIT": "达到时间上限",
-                   "MAX_ITERATIONS": "达到迭代上限",
-                   "PAUSED_LLM_FAILURE": "LLM 调用或会话异常，已停止主算法"}.get(result.status, "求解未正常完成")
+                   "MAX_ITERATIONS": "达到迭代上限"}.get(result.status, "求解未正常完成")
     print(f"\n主算法状态：{status_text}（{result.status}）", flush=True)
     if result.message:
         print(f"状态详情：{result.message}", flush=True)
@@ -279,7 +300,7 @@ def main():
         print(f"本段运行 {solver_wall:.2f} 秒；累计调用 {result.llm_calls} 次，其中新增 {result.llm_calls-prior_calls} 次；"
               f"记录开销 {progress.recording_seconds:.3f} 秒；最终保存 {final_save_seconds:.3f} 秒。", flush=True)
         print(f"续跑结果已保存：{output}；本次不再求参考解或执行完整审计。", flush=True)
-        return int(result.status.endswith("FAILED") or result.status == "PAUSED_LLM_FAILURE" or result.validation is None)
+        return int(result.status.endswith("FAILED") or result.validation is None)
 
     print(f"\n[2/2] Gurobi 直接求解同一完整问题（保留全部整数变量、时段和场景），"
           f"另用最多 {REFERENCE_TIME_LIMIT_SECONDS} 秒。", flush=True)
@@ -313,7 +334,7 @@ def main():
               "（(UB - 参考成本) / 参考成本 × 100%）", flush=True)
     else:
         print("主算法 UB 相对 Gurobi 参考成本的差距：无法计算（缺少通过校验的可行成本，或参考成本为零）。", flush=True)
-    return int(result.status.endswith("FAILED") or result.status == "PAUSED_LLM_FAILURE" or result.validation is None
+    return int(result.status.endswith("FAILED") or result.validation is None
                or reference["validation"] is None)
 
 

@@ -73,6 +73,19 @@ def test_repair_runs_for_each_proposal_but_dispatch_still_deduplicates(tiny, opt
     assert second['outcome'] == 'duplicate' and second['incumbent_decrease'] == 0
 
 
+def test_numerical_dispatch_status_rejects_candidate_without_caching(tiny, options, monkeypatch):
+    whole = whole_day(tiny, options)
+    dispatch = search.dispatch
+    monkeypatch.setattr(search, 'dispatch', lambda *a, **k: NS(status='SUBOPTIMAL', feasible=False))
+    raw = whole.result.u.copy(); raw[0] = 0
+    record = {}
+    x = whole.prepare(raw, 'sa', record)
+    assert not whole.accept(x, 'sa', record)
+    assert record['outcome'] == 'dispatch_failed' and whole.diagnostics['dispatch_failures'] == 1
+    monkeypatch.setattr(search, 'dispatch', dispatch)
+    assert whole.accept(x, 'sa', {})
+
+
 def test_reachability_survives_without_joint_master(tiny, options):
     d, scenarios = tiny(1, 6)
     d.ramp_up[:] = 5.; scenarios[0].load[:] = 0.

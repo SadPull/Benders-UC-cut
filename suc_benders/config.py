@@ -52,6 +52,8 @@ class Options:
     llm_reserve_seconds: float = 0.
     llm_patience: int = 3
     llm_max_calls: int | None = 3
+    # True：初始化后立即发首个请求，不等待 SA 停滞；之后仍按 llm_patience 触发。
+    llm_first_call_at_start: bool = False
 
 
 # 按默认值 → 本地配置 → 显式覆盖构造 Options，拒绝未知字段、非法数值和不兼容模式。
@@ -86,8 +88,8 @@ def load_options(overrides=None, config_path=None):
             raise ValueError(f"Invalid numeric option: {name}")
     if not 0 < o.sa_cooling < 1 or not o.sa_cutoff < o.sa_temperature:
         raise ValueError("Require 0 < sa_cooling < 1 and sa_cutoff < sa_temperature")
-    if not isinstance(o.llm_enabled, bool) or not isinstance(o.verbose, bool):
-        raise ValueError("llm_enabled and verbose must be boolean")
+    if not all(isinstance(getattr(o, name), bool) for name in ("llm_enabled", "verbose", "llm_first_call_at_start")):
+        raise ValueError("llm_enabled, verbose and llm_first_call_at_start must be boolean")
     if not isinstance(o.sa_enabled, bool):
         raise ValueError("sa_enabled must be boolean")
     if o.sa_budget_seconds is not None:

@@ -8,23 +8,35 @@ import numpy as np
 from . import advisor_request, llm
 
 
-class LLMCallFailures(RuntimeError):
-    """Consecutive failures or broken conversation identity require an explicit resume."""
-
-
 class UpperAdvisor:
     def __init__(self, whole):
         self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
         self.worker, self.pending, self.baseline = None, None, None
-        self.thread_id = None
+        # 会话身份、重置次数和停用原因都放在 state 中，随检查点保存。
         self.state = dict(version=2, phase="sa", stalled=dict(upper=0), sa_rounds=0,
-                          batch_id=0, batch=None, consecutive_failures=0)
+                          batch_id=0, batch=None, consecutive_failures=0,
+                          thread_id=None, session_resets=0, disabled=None)
         whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[],
                                  upper_advice_feedback=None)
 
+    @property
+    def thread_id(self):
+        return self.state["thread_id"]
+
+    @thread_id.setter
+    def thread_id(self, value):
+        self.state["thread_id"] = value
+
     def available(self):
-        return (self.o.llm_enabled and self.whole.remaining() >= self.o.llm_timeout+self.o.llm_reserve_seconds
+        return (self.o.llm_enabled and not self.state["disabled"]
+                and self.whole.remaining() >= self.o.llm_timeout+self.o.llm_reserve_seconds
                 and (self.o.llm_max_calls is None or self.result.llm_calls < self.o.llm_max_calls))
+
+    # 冷启动初始化后立即开一批；请求由后续 advance 异步发出，不阻塞 SA。
+    def kickoff(self):
+        if (self.o.llm_first_call_at_start and self.result.llm_calls == 0 and self.state["batch"] is None
+                and self.available() and not self.cert.converged()):
+            self.begin(trigger="start")
 
     def improved(self, upper):
         return upper-self.result.objective >= .0005*max(1., abs(upper))
@@ -43,11 +55,11 @@ class UpperAdvisor:
             self.begin(outer=outer, inner=inner)
         self.advance(searches)
 
-    def begin(self, *, outer=None, inner=None):
+    def begin(self, *, outer=None, inner=None, trigger="stall"):
         if self.state["phase"] != "sa" or self.worker is not None:
             raise RuntimeError("An advice batch is already active")
         self.state["batch_id"] += 1
-        batch = dict(batch_id=self.state["batch_id"], channels=["upper"],
+        batch = dict(batch_id=self.state["batch_id"], channels=["upper"], trigger=trigger,
             counts=dict(upper=0), done=dict(upper=False),
             upper_before=self.result.objective, lower_before=self.result.lower_bound,
             trigger_stalled=self.state["stalled"].copy(), trigger_sa_round=self.state["sa_rounds"],
@@ -56,8 +68,9 @@ class UpperAdvisor:
         self.state.update(phase="llm", batch=batch)
         self.whole.diagnostics["llm_batches"].append(batch)
         if self.o.verbose:
-            print(f"[LLM 触发] 连续 {batch['trigger_stalled']['upper']} 个完整 SA 轮次改善不足，"
-                  f"开始第 {batch['batch_id']} 批上界建议。", flush=True)
+            reason = ("初始化完成" if trigger == "start" else
+                      f"连续 {batch['trigger_stalled']['upper']} 个完整 SA 轮次改善不足")
+            print(f"[LLM 触发] {reason}，开始第 {batch['batch_id']} 批上界建议。", flush=True)
 
     def start_request(self):
         batch = self.state["batch"]
@@ -68,10 +81,9 @@ class UpperAdvisor:
         self.baseline = deepcopy(self.baseline)
         context['continuation'] = dict(session_id=self.thread_id, completed_calls=self.result.llm_calls,
                                        latest_snapshot_authoritative=True)
-        context['last_successful_call_feedback'] = next((row.get('feedback') for row in
-            reversed(self.result.llm_history) if row['status'] == 'OK'), None)
+        continuation = self.thread_id is not None
         body = llm.request_body(self.whole.d, self.whole.scenarios, self.result,
-                                self.o, context, bases, iteration)
+                                self.o, context, bases, iteration, continuation)
         if not self.available():
             return
         batch["counts"]["upper"] += 1
@@ -84,6 +96,7 @@ class UpperAdvisor:
         body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
         self.pending = dict(call_id=f"llm_upper:{iteration}", stage="advice_batch", **routing,
             status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
+            prompt_mode="delta" if continuation else "full",
             trigger_stalled=batch["trigger_stalled"].copy(),
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
@@ -138,18 +151,27 @@ class UpperAdvisor:
         self.whole.emit("llm_response")
         return True
 
+    # 会话失效或连续两次失败时，先丢弃会话身份新开一次；再失败就停用 LLM，主算法继续 SA。
     def record_failure(self):
         failed = self.pending['status'] != 'OK'
         self.state['consecutive_failures'] = self.state['consecutive_failures']+1 if failed else 0
         self.whole.emit('llm_call_status')
         if self.pending['status'] == 'SESSION_FAILED':
-            raise LLMCallFailures(self.pending.get('message', 'Codex session unavailable'))
-        if self.state['consecutive_failures'] >= 2:
-            if self.state['batch'] is not None:
-                self.state['batch'].update(status='PAUSED_LLM_FAILURE', upper_after=self.result.objective,
-                    lower_after=self.result.lower_bound, sa_calls_at_end=self.whole.diagnostics['sa_calls'],
-                    ended_seconds=perf_counter()-self.whole.started)
-            raise LLMCallFailures('Two consecutive upper subagent calls failed')
+            reason = self.pending.get('message') or 'Codex session unavailable'
+        elif self.state['consecutive_failures'] >= 2:
+            reason = 'Two consecutive upper calls failed'
+        else:
+            return
+        if self.state['session_resets'] < 1:
+            self.state.update(session_resets=self.state['session_resets']+1, consecutive_failures=0)
+            self.thread_id = None
+            if self.o.verbose:
+                print(f"[LLM 会话] {reason}；下一次请求新开会话。", flush=True)
+            return
+        self.state['disabled'] = reason
+        self.whole.diagnostics['llm_disabled'] = dict(reason=reason, seconds=perf_counter()-self.whole.started)
+        if self.o.verbose:
+            print(f"[LLM 停用] {reason}；新会话后仍失败，剩余预算只用数值搜索。", flush=True)
 
     def advance(self, searches):
         """Consume at most one reply and launch at most one request; never wait."""
@@ -167,7 +189,8 @@ class UpperAdvisor:
             if self.whole.remaining() <= 0:
                 reason = 'TIME_LIMIT'
             elif not self.available():
-                reason = ('CALL_LIMIT' if self.o.llm_max_calls is not None
+                reason = ('LLM_DISABLED' if self.state['disabled'] else
+                          'CALL_LIMIT' if self.o.llm_max_calls is not None
                           and self.result.llm_calls >= self.o.llm_max_calls else 'LLM_WINDOW_TOO_SHORT')
             elif self.improved(batch['upper_before']):
                 batch['done']['upper'] = True
@@ -189,6 +212,9 @@ class UpperAdvisor:
             raise ValueError("Only the current advice scheduling state is supported")
         self.state.clear()
         self.state.update(deepcopy(saved))
+        self.state.setdefault('thread_id', None)
+        self.state.setdefault('session_resets', 0)
+        self.state.setdefault('disabled', None)
         for name in ("advisor_rounds", "llm_batches"):
             self.whole.diagnostics[name] = deepcopy(diagnostic[name])
         if self.state["batch"] is not None:
@@ -201,10 +227,10 @@ class UpperAdvisor:
             if row["status"] == "RUNNING":
                 row.update(status="CANCELLED", message="ResumeWorkerUnavailable", accepted=0)
         self.whole.feedback = deepcopy(diagnostic["upper_advice_feedback"])
-        self.thread_id = next((row['thread_id'] for row in reversed(self.result.llm_history)
-                               if row['status'] == 'OK' and row.get('thread_id')), None)
-        if self.o.llm_codex_command and self.result.llm_calls and self.thread_id is None:
-            raise LLMCallFailures('No successful Codex session found in the checkpoint')
+        # 没有会话身份且未主动重置过时，取最后一次成功会话；找不到则下一次请求新开会话。
+        if self.thread_id is None and not self.state['session_resets']:
+            self.thread_id = next((row['thread_id'] for row in reversed(self.result.llm_history)
+                                   if row['status'] == 'OK' and row.get('thread_id')), None)
 
     def close(self):
         if self.worker is not None:
@@ -235,6 +261,7 @@ def summarize(advice, baseline_u, baseline, evaluations, previous_ids):
                    proposed_changes=changes(baseline_u, p.get("raw_u")),
                    repair_changes=changes(p.get("raw_u"), p.get("repaired_u")),
                    repair_bits=p.get("hamming_u"), outcome=p.get("outcome"),
+                   invalid_reason=p.get("invalid_reason"),
                    duplicate=cached, cache_hit=bool(cached and r),
                    continuous_dispatch_completed=bool(r or p.get("local_dispatch_completed")),
                    local_feasible=p.get("local_feasible"),

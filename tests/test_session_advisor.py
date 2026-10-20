@@ -10,7 +10,6 @@ import pytest
 
 from conftest import whole_day
 from suc_benders import advisor_request as transport
-from suc_benders.upper_advisor import LLMCallFailures
 
 SESSION = '01a15229-5327-7e13-af26-d1281e24d0bb'
 OTHER = '01a15235-74b6-7352-bba9-6f7dc1008463'
@@ -37,6 +36,14 @@ def test_resume_command_has_explicit_identity_and_current_context(tmp_path, cli_
     assert 'supersede older states' in prompt and '"upper":100' in prompt
 
 
+def test_delta_prompt_without_instructions_starts_with_continuation(tmp_path, cli_environment):
+    body = dict(cli_environment, instructions='')
+    transport._prepare_codex('codex', body, NS(n_units=1, horizon=1), tmp_path, SESSION)
+    prompt = (tmp_path/'prompt.txt').read_text(encoding='utf-8')
+    assert prompt.startswith('Continue this conversation.') and '\n\n\n' not in prompt
+    assert 'Only return candidates' not in prompt and '"upper":100' in prompt
+
+
 @pytest.mark.parametrize('event_id,timeout,expected', [(SESSION, False, 'OK'),
     (OTHER, False, 'SESSION_FAILED'), (SESSION, True, 'TIME_LIMIT')])
 def test_cli_reply_identity_and_timeout(tmp_path, cli_environment, monkeypatch, event_id, timeout, expected):
@@ -45,7 +52,8 @@ def test_cli_reply_identity_and_timeout(tmp_path, cli_environment, monkeypatch, 
         kwargs['stdout'].write((json.dumps(dict(type='thread.started', thread_id=event_id))+'\n').encode())
         kwargs['stdout'].write(b'{"type":"turn.completed","usage":{}}\n')
         Path(args[args.index('--output-last-message')+1]).write_text(
-            '{"candidates":[{"name":"one","reason":"test","u":[[1]]}]}', encoding='utf-8')
+            json.dumps({"candidates": [{"name": "one", "reason": "test", "changes": [
+                {"unit": 1, "on_intervals": [{"start": 1, "end": 1}]}]}]}), encoding='utf-8')
         def wait(**kw):
             if timeout:
                 raise subprocess.TimeoutExpired(args, 20)
@@ -53,10 +61,12 @@ def test_cli_reply_identity_and_timeout(tmp_path, cli_environment, monkeypatch, 
         return NS(pid=123, wait=wait, poll=lambda: 0)
     monkeypatch.setattr(transport.subprocess, 'Popen', popen)
     transport._request_codex(NS(send=sent.append, close=lambda: None), 'codex', cli_environment,
-        NS(n_units=1, horizon=1), 4, perf_counter()+20, tmp_path, SESSION)
+        NS(n_units=1, horizon=1, base_u=[[0]]), 4, perf_counter()+20, tmp_path, SESSION)
     candidates, info = sent[0]
     assert info['status'] == expected
     assert len(candidates) == (1 if expected == 'OK' else 0)
+    if expected == 'OK':
+        assert candidates[0][0].tolist() == [[1.]] and candidates[0][1]['raw_changes'][0]['unit'] == 1
 
 
 def test_missing_session_does_not_start_a_new_conversation(tmp_path, cli_environment, monkeypatch):
@@ -76,11 +86,14 @@ def setup_advice(tiny, options, monkeypatch):
     whole.result.llm_history = [dict(status='OK', thread_id=SESSION, feedback={'previous': 2}),
                                 dict(status='TIME_LIMIT', thread_id=OTHER)]
     whole.diagnostics['resume'] = {'source': 'test'}
+    whole.diagnostics['upper_advice_feedback'] = {'previous': 2}
     whole.advice.restore(deepcopy(whole.diagnostics))
-    monkeypatch.setattr(whole, 'upper_context', lambda: ({'upper': whole.result.objective}, [], None))
+    monkeypatch.setattr(whole, 'upper_context', lambda: (
+        {'upper': whole.result.objective, 'previous_call_feedback': whole.feedback}, [], None))
     monkeypatch.setattr('suc_benders.upper_advisor.llm.request_body',
-        lambda d, s, r, o, context, bases, iteration:
-            dict(instructions='test', input=json.dumps(context), model=o.llm_model, reasoning={'effort': 'max'}))
+        lambda d, s, r, o, context, bases, iteration, continuation=False:
+            dict(instructions='' if continuation else 'test', input=json.dumps(dict(context, delta=continuation)),
+                 model=o.llm_model, reasoning={'effort': 'max'}))
     def consume(proposals, info, searches, baseline):
         info['feedback'] = {'measured_upper': whole.result.objective}
         whole.feedback = info['feedback']
@@ -105,8 +118,9 @@ def test_multiple_calls_keep_session_and_send_new_measured_feedback(tiny, option
     whole.result.objective -= 1
     whole.advice.start_request(); whole.advice.poll([])
     assert [r[:3] for r in calls] == [(4, 1800, SESSION), (5, 1800, SESSION)]
-    assert calls[0][3]['last_successful_call_feedback'] == {'previous': 2}
-    assert calls[1][3]['last_successful_call_feedback'] == {'measured_upper': prior_upper}
+    assert calls[0][3]['previous_call_feedback'] == {'previous': 2}
+    assert calls[1][3]['previous_call_feedback'] == {'measured_upper': prior_upper}
+    assert 'last_successful_call_feedback' not in calls[1][3]
     assert calls[1][3]['upper'] == prior_upper-1
     assert calls[1][3]['advice_routing']['phase'] == 'resume'
 
@@ -136,11 +150,69 @@ def test_inflight_call_keeps_polling_and_convergence_cancels_it(tiny, options, m
     assert closed == [True] and whole.advice.worker is None
 
 
-def test_session_mismatch_stops_before_evaluating_candidates(tiny, options, monkeypatch):
+def test_session_mismatch_resets_session_without_evaluating_candidates(tiny, options, monkeypatch):
     whole = setup_advice(tiny, options, monkeypatch)
     whole.advice.begin(); whole.advice.pending = {'status': 'RUNNING'}
     whole.advice.worker = NS(poll=lambda: ([object()], dict(status='OK', thread_id=OTHER,
                                                           background_seconds=1., proposals=[])))
     monkeypatch.setattr(whole, 'consume_upper', lambda *a: pytest.fail('Wrong-session candidate evaluated'))
-    with pytest.raises(LLMCallFailures, match='session identity'):
-        whole.advice.poll([])
+    whole.advice.poll([])
+    assert whole.advice.pending['status'] == 'SESSION_FAILED'
+    assert whole.advice.thread_id is None and whole.advice.state['session_resets'] == 1
+    assert not whole.advice.state['disabled']
+
+
+def test_failure_after_session_reset_disables_llm_and_keeps_searching(tiny, options, monkeypatch):
+    whole = setup_advice(tiny, options, monkeypatch)
+    calls = []
+    deltas = []
+    class Worker:
+        def __init__(self, d, o, body, iteration, seconds, *, session_id):
+            calls.append(session_id); deltas.append(json.loads(body['input'])['delta'])
+        def poll(self):
+            return [], dict(status='FAILED', message='boom', background_seconds=1., proposals=[])
+    monkeypatch.setattr(transport, 'AdvisorRequest', Worker)
+    batches = []
+    for _ in range(8):
+        if whole.advice.state['batch'] is None and whole.advice.available():
+            whole.advice.begin(); batches.append(whole.advice.state['batch'])
+        whole.advice.advance([])
+    # 旧会话连续两次失败 → 新会话；新会话再连续两次失败（跨批次）→ 停用，不再计费。
+    assert calls == [SESSION, SESSION, None, None]
+    # 续接旧会话发增量；会话重置后新会话必须发完整提示。
+    assert deltas == [True, True, False, False]
+    assert [r['prompt_mode'] for r in whole.result.llm_history[2:]] == ['delta', 'delta', 'full', 'full']
+    assert [b['status'] for b in batches] == ['BATCH_LIMIT', 'LLM_DISABLED']
+    assert whole.advice.state['disabled'] and whole.diagnostics['llm_disabled']['reason']
+    assert whole.advice.state['batch'] is None and not whole.advice.available()
+    assert whole.result.llm_calls == 7
+
+
+def test_restore_without_successful_session_starts_fresh(tiny, options, monkeypatch):
+    whole = whole_day(tiny, options)
+    options.llm_enabled = True; options.llm_model = 'gpt-6-astra'; options.llm_codex_command = 'codex'
+    whole.result.llm_calls = 1
+    whole.result.llm_history = [dict(status='TIME_LIMIT', thread_id=OTHER)]
+    whole.advice.restore(deepcopy(whole.diagnostics))
+    assert whole.advice.thread_id is None
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+def test_kickoff_starts_one_request_only_when_enabled(tiny, options, monkeypatch, enabled):
+    whole = setup_advice(tiny, options, monkeypatch)
+    whole.result.llm_calls = 0; whole.result.llm_history = []
+    options.llm_first_call_at_start = enabled
+    calls = []
+    class Worker:
+        def __init__(self, d, o, body, iteration, seconds, *, session_id):
+            calls.append(iteration)
+        def poll(self):
+            return None
+    monkeypatch.setattr(transport, 'AdvisorRequest', Worker)
+    whole.advice.kickoff()
+    whole.advice.advance([]); whole.advice.advance([])
+    batch = whole.advice.state['batch']
+    if enabled:
+        assert batch['trigger'] == 'start' and calls == [1]
+    else:
+        assert batch is None and calls == []
