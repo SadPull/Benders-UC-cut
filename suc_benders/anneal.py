@@ -23,8 +23,28 @@ def initialize(user_id, sdk_code):
         raise RuntimeError("Kaiwu initialization failed; check SDK 1.4.1 and local authorization") from None
 
 
+# 对 x^T Q x 做最速 1-flip 下降直到局部最优；SA 截止温度以上残留的可改进翻转在此收尾。
+def descend(Q, x):
+    x = x.astype(np.int8)
+    S = (Q + Q.T).tocsc()
+    d = Q.diagonal()
+    field = S @ x
+    flips = 0
+    while True:
+        # 翻转 i 的能量变化：(1-2x_i)·(Q_ii + Σ_{j≠i}(Q_ij+Q_ji)x_j)。
+        delta = (1 - 2 * x) * (d + field - 2 * d * x)
+        i = int(np.argmin(delta))
+        if delta[i] >= -1e-9:
+            return x, flips
+        step = 1 - 2 * int(x[i])
+        x[i] += step
+        column = S[:, i]
+        field[column.indices] += step * column.data
+        flips += 1
+
+
 # 输入搜索 QUBO、退火参数、剩余秒数和每条链的种子，返回二进制候选列表与统计。
-# 每条链是一次独立退火，只取其能量最低的终态；第 k 条链使用第 k % len(diagonals) 个锚点的线性项。
+# 每条链是一次独立退火，取其能量最低的终态后再做 1-flip 下降；第 k 条链使用第 k % len(diagonals) 个锚点的线性项。
 # Kaiwu 的 size_limit 返回同一轨迹上的近邻状态，iterations_per_t 是单点翻转次数，因此按位数换算扫描。
 def anneal(q, o, seconds, seeds):
     import kaiwu as kw
@@ -55,8 +75,11 @@ def anneal(q, o, seconds, seeds):
         # 含额外辅助自旋时，必须先乘该自旋恢复相对符号，再映射为二进制位。
         x = (((1 + spins[:, :n] * spins[:, -1:]) // 2 if spins.shape[1] == n + 1
               else (1 + spins) // 2))[0]
+        annealed = float(x @ Q @ x)
+        x, flips = descend(Q, x)
         samples.append(x)
-        chains.append(dict(seed=int(seed), anchor=anchor, energy=float(x @ Q @ x)))
+        chains.append(dict(seed=int(seed), anchor=anchor, annealed_energy=annealed,
+                           descent_flips=flips, energy=float(x @ Q @ x)))
     candidates = []
     for sample in samples:
         x = q.fixed.copy(); x[q.free] = sample[:len(q.free)]

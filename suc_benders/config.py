@@ -33,15 +33,16 @@ class Options:
     # sa_reads 为独立退火链数，sa_sweeps 为每个温度对全部位的扫描次数。
     sa_hard_weight: float = 8
     sa_capacity_weight: float = 4
-    sa_proximity: float = 2
+    # 邻近权重须小于位间典型费用差，否则低温下任何偏离锚点的翻转都无法靠费用获益。
+    sa_proximity: float = .3
     sa_reads: int = 8
     sa_enabled: bool = True
     # 辅助工作配额独立于总 time_limit；耗尽后可继续整数认证，None 表示不另设此配额。
     sa_budget_seconds: float | None = None
-    sa_sweeps: int = 2
+    sa_sweeps: int = 4
     sa_temperature: float = 4
-    sa_cooling: float = .9
-    sa_cutoff: float = .01
+    sa_cooling: float = .95
+    sa_cutoff: float = .05
     kaiwu_user_id: str = field(default="", repr=False)
     kaiwu_sdk_code: str = field(default="", repr=False)
     # 上界 LLM 请求由 llm_max_calls 限额，单次超时和连续停滞触发次数分别由后续字段控制。

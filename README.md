@@ -66,7 +66,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 主线顺序：输入建模 → 连续松弛与初始可行解 → 固定乘子的分块 SA 轮询 → 全天修复/调度/校验 → 跨块协调。LLM 异步提供候选，独立认证进程提供 LB；仅全天验证通过的方案能更新 UB，最终用 UB/LB 的认证间隙停止。
 
-v0.33.0 起，块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取锚点处最紧最优性割的线性代理，不含 theta 与割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束；`sa_proximity` 把 u 拉向锚点（incumbent，及最好的 LLM 方案）。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。LLM 回复返回时若 incumbent 已变化，其相对请求快照改动的机组行会先整体、再逐台移植到当前 incumbent（来源 `llm_rebase`）。协调 LP 被 incumbent 截顶或失败时保留原乘子，L1 选择失败时回退主问题乘子，不再中止运行；状态见 `outer_history[*].coordination`。
+v0.33.0 起，块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取锚点处最紧最优性割的线性代理，不含 theta 与割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束；`sa_proximity` 把 u 拉向锚点（incumbent，及最好的 LLM 方案）。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。每条链的 SA 终态再经最速 1-flip 下降到局部最优（`chains[*].annealed_energy`/`descent_flips` 记录收尾前能量与翻转数）；`sa_proximity` 默认 0.3，须小于位间费用差，否则低温下无法靠费用偏离锚点。LLM 回复返回时若 incumbent 已变化，其相对请求快照改动的机组行会先整体、再逐台移植到当前 incumbent（来源 `llm_rebase`）。协调 LP 被 incumbent 截顶或失败时保留原乘子，L1 选择失败时回退主问题乘子，不再中止运行；状态见 `outer_history[*].coordination`。
 
 ## v0.33.0 实验结果与归档
 
