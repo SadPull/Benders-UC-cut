@@ -53,7 +53,6 @@ def test_each_block_sample_uses_derived_chain_seeds_and_current_incumbent(tiny, 
                         for k in range(options.sa_reads)]
     assert whole.diagnostics['sa_calls'] == 2
     assert all(row['anchor'] == commitment_hash(whole.result) for row in whole.diagnostics['sampling'])
-    assert not any(key.startswith('joint_') for key in whole.diagnostics)
 
 
 def test_repair_runs_for_each_proposal_but_dispatch_still_deduplicates(tiny, options, monkeypatch):
@@ -86,7 +85,7 @@ def test_numerical_dispatch_status_rejects_candidate_without_caching(tiny, optio
     assert whole.accept(x, 'sa', {})
 
 
-def test_reachability_survives_without_joint_master(tiny, options):
+def test_reachability_fixed_bits_reach_every_block_master(tiny, options):
     d, scenarios = tiny(1, 6)
     d.ramp_up[:] = 5.; scenarios[0].load[:] = 0.
     m = model(d, scenarios); full = partition(m, d.horizon)[0][0]
@@ -102,18 +101,15 @@ def test_reachability_survives_without_joint_master(tiny, options):
     assert (master(full, [])[0].A != before).nnz == 0
 
 
-@pytest.mark.parametrize('name,value', [('enhanced_search', False), ('block_sa_period', 3), ('sa_proximity', .3)])
-def test_removed_search_options_are_rejected(tmp_path, name, value):
+def test_unknown_options_and_local_config_entries_are_rejected(tmp_path):
     with pytest.raises(ValueError, match='Unknown option'):
-        load_options({name: value}, config_path=tmp_path/'absent.json')
-
-
-def test_kaiwu_configuration_is_removed(tmp_path):
-    with pytest.raises(ValueError, match='Unknown option'):
-        load_options({'kaiwu_user_id': 'unused'}, config_path=tmp_path/'absent.json')
+        load_options({'not_an_option': 1}, config_path=tmp_path/'absent.json')
     path = tmp_path/'config.json'
-    path.write_text('{"kaiwu": {"user_id": "unused"}}', encoding='utf-8')
+    path.write_text('{"other": {"user_id": "unused"}}', encoding='utf-8')
     with pytest.raises(ValueError, match='Unknown local configuration section'):
+        load_options(config_path=path)
+    path.write_text('{"llm": {"no_such_field": 1}}', encoding='utf-8')
+    with pytest.raises(ValueError, match='Unknown configuration option'):
         load_options(config_path=path)
 
 

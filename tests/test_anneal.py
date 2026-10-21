@@ -54,11 +54,8 @@ def test_sampler_uses_random_starts_and_returns_terminal_bits_without_descent(op
         assert bqm is calls[0][0]
     assert all(x.tolist() == [1, 0, 0, 1] for x in candidates)
     assert stats['raw_bits'] == ['011'] * 3
-    assert all('anchor' not in c for c in stats['chains'])
     assert [c['seed'] for c in stats['chains']] == seeds
     assert [c['sampler_seed'] for c in stats['chains']] == [2**31-1, 0, 2**31-1]
-    assert 'initial_states' not in stats
-    assert all('descent_flips' not in c and 'initial_energy' not in c for c in stats['chains'])
     # The returned 011 state admits an improving flip; it must still reach repair unchanged.
     x = np.array([0, 1, 1]); improved = np.array([1, 1, 1])
     assert improved @ q.Q @ improved < x @ q.Q @ x

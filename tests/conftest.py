@@ -31,11 +31,15 @@ def options():
                    sa_reads=4, sa_sweeps=2, sa_temperature=10, sa_cooling=.8, sa_cutoff=.01)
 
 
-def whole_day(tiny, options, n=2):
-    d, scenarios = tiny(n)
+# 为手写算例建立 WholeDay，并以 u（默认全开）作为已校验的初始 incumbent。
+def make_whole(d, scenarios, options, u=None):
     m = model(d, scenarios)
     full = partition(m, d.horizon)[0][0]
     started = perf_counter()
     whole = search_core.WholeDay(m, full, options, started+30, solver.Result(lower_bound=0.), started)
-    assert whole.accept(pack(d, np.ones((n, d.horizon))), "initial")
+    assert whole.accept(pack(d, np.ones((d.n_units, d.horizon)) if u is None else u), "initial")
     return whole
+
+
+def whole_day(tiny, options, n=2):
+    return make_whole(*tiny(n), options)

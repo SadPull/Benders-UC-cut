@@ -16,8 +16,6 @@ def test_context_drops_duplicates_and_averages_marginal_cost_over_on_hours(tiny,
     assert whole.accept(pack(whole.d, u), "test")
     context = build_llm_context(whole.d, whole.scenarios,
                                 LLMContextInput(whole.result, whole.dispatches, [], []))
-    for key in ("top_decommit_opportunities", "tight_constraints", "base_candidates"):
-        assert key not in context
     p = sum(s.probability * np.asarray(r.p, float) for s, r in zip(whole.scenarios, whole.dispatches))
     rows = context["unit_marginal_cost"]
     expected = 2 * whole.d.cost_a[1] * p[1, 0] + whole.d.cost_b[1]

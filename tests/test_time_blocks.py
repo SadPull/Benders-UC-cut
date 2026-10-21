@@ -1,11 +1,10 @@
-from time import perf_counter
-
 import numpy as np
 import pytest
 
 from suc_benders import solver, search as search_core
-from suc_benders.model import model, partition
+from suc_benders.model import partition
 from suc_benders.validation import commitment, pack
+from conftest import make_whole
 
 
 @pytest.fixture(autouse=True)
@@ -17,14 +16,6 @@ def proof_after_upper_search(monkeypatch):
         if cert.whole.diagnostics['coordination_count'] >= cert.o.max_outer:
             cert.update_bound(cert.result.objective)
     monkeypatch.setattr(backend, 'step', step)
-
-
-def make_whole(d, scenarios, options):
-    m = model(d, scenarios); full = partition(m, d.horizon)[0][0]
-    started = perf_counter()
-    whole = search_core.WholeDay(m, full, options, started+30, solver.Result(), started)
-    assert whole.accept(pack(d, np.ones((d.n_units, d.horizon))), "initial")
-    return whole
 
 
 def search_block(b, seeds, options, deadline, outer, index, whole):

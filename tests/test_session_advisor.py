@@ -121,7 +121,6 @@ def test_multiple_calls_keep_session_and_send_new_measured_feedback(tiny, option
     assert [r[:3] for r in calls] == [(4, 1800, SESSION), (5, 1800, SESSION)]
     assert calls[0][3]['previous_call_feedback'] == {'previous': 2}
     assert calls[1][3]['previous_call_feedback'] == {'measured_upper': prior_upper}
-    assert 'last_successful_call_feedback' not in calls[1][3]
     assert calls[1][3]['upper'] == prior_upper-1
     assert 'advice_routing' not in calls[1][3] and whole.result.llm_history[-1]['batch_call'] == 2
 

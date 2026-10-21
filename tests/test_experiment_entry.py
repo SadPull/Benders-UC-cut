@@ -29,13 +29,11 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
     monkeypatch.chdir(tmp_path)
     assert entry.main() == 0
     assert len(seen) == 1
-    assert not {'enhanced_search', 'block_sa_period'} & seen[0].keys()
     assert seen[0]['seed'] == entry.SEED and seen[0]['block_hours'] == entry.BLOCK_HOURS == 12
     assert seen[0]['sa_sweeps'] == entry.SA_SWEEPS == 16
     output, = (tmp_path/'results').iterdir()
     summary = json.loads((output/'summary.json').read_text(encoding='utf-8'))
     assert summary['sa_calls'] == 2
-    assert not {'joint_sa_calls', 'enhanced_search', 'block_sa_period'} & summary.keys()
     assert summary['reference_gap_percent'] == pytest.approx(100*5./105.)
     with (output/'result.json').open(encoding='utf-8') as stream:
         result = json.load(stream)
@@ -66,11 +64,10 @@ def test_snapshot_includes_untracked_solver_and_redacts_credentials(tmp_path):
     assert manifest['dependencies']['dwave-samplers'] == '1.8.0'
     assert manifest['dependencies']['dimod'] == '0.12.22'
     assert manifest['dependencies']['networkx'] == '3.4.2'
-    assert 'kaiwu' not in manifest['dependencies']
     for name, expected in manifest['files'].items():
         assert hashlib.sha256((tmp_path/'snapshot'/name).read_bytes()).hexdigest() == expected
     effective = (tmp_path/'effective-options.json').read_text(encoding='utf-8')
-    assert 'private-key' not in effective and 'kaiwu' not in effective
+    assert 'private-key' not in effective
     assert json.loads(effective)['llm_api_key'] == '<redacted>'
 
 

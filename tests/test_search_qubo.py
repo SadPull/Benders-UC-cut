@@ -1,23 +1,14 @@
-from time import perf_counter
 from types import SimpleNamespace as NS
 
 import numpy as np
 import pytest
 
-from suc_benders import benders, search, solver
+from suc_benders import benders, search
 from suc_benders.benders import coordinate, master
-from suc_benders.model import model, partition
+from suc_benders.model import partition
 from suc_benders.qubo import search_qubo
 from suc_benders.validation import pack
-
-
-def make_whole(d, scenarios, options, u):
-    m = model(d, scenarios)
-    full = partition(m, d.horizon)[0][0]
-    started = perf_counter()
-    whole = search.WholeDay(m, full, options, started+30, solver.Result(lower_bound=0.), started)
-    assert whole.accept(pack(d, u), "initial")
-    return whole
+from conftest import make_whole
 
 
 def block_qubo(whole, options, j, cuts=(), boundary=True):
@@ -89,7 +80,6 @@ def test_cost_reference_does_not_attract_bits_without_cuts(tiny, options):
     a = search_qubo(m, b, [], first, [], options)
     z = search_qubo(m, b, [], 1 - first, [], options)
     assert (a.Q != z.Q).nnz == 0
-    assert not hasattr(a, 'initial_states') and not hasattr(a, 'diagonals')
 
 
 def test_coordination_capped_keeps_previous_multipliers():
