@@ -22,12 +22,16 @@ class SessionUnavailable(RuntimeError):
     """A saved conversation cannot be continued without changing identity."""
 
 
+def _codex_home():
+    return Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))
+
+
 def session_file(session_id):
     try:
         UUID(session_id)
     except (ValueError, TypeError, AttributeError):
         raise SessionUnavailable('Invalid Codex session ID') from None
-    home = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))
+    home = _codex_home()
     for root in (home/'sessions', home/'archived_sessions'):
         for path in root.glob(f'**/*{session_id}.jsonl'):
             return path
@@ -48,8 +52,8 @@ class AdvisorRequest:
         self.deadline = self.started + seconds
         context = mp.get_context("spawn")
         self.connection, sender = context.Pipe(duplex=False)
-        # base_u 取自请求体中的 incumbent_u，保证增量候选按模型看到的方案还原。
-        shape = NS(n_units=d.n_units, horizon=d.horizon, base_u=llm.prompt_base(body))
+        # 增量候选按请求体中模型看到的 incumbent_u 还原。
+        shape = NS(n_units=d.n_units, horizon=d.horizon, incumbent_u=llm.prompt_incumbent(body))
         self.receipt = dict(request=body, request_sha256=hashlib.sha256(
             json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
         if o.llm_codex_command:
@@ -178,7 +182,7 @@ def _toml_table(table, path, lines):
 # 建立临时 CODEX_HOME：过滤后的 config.toml 与 auth.json 副本，返回路径，由调用方负责删除。
 # 写出前回读校验，数组表、日期等无法原样写出的结构直接报错，不生成残缺配置。
 def isolated_home():
-    source = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))
+    source = _codex_home()
     path = source/'config.toml'
     config = tomli.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
     for key in ISOLATED_DROP:
@@ -267,7 +271,7 @@ def _prepare_codex(command, body, shape, directory, session_id=None, home=None):
         args += ['resume', session_id]
     args += ['--skip-git-repo-check', '--json', '--output-schema', str(directory/'schema.json'),
              '--output-last-message', str(directory/'reply.json'), '-']
-    config_path = Path(home if home is not None else os.environ.get('CODEX_HOME', Path.home()/'.codex'))/'config.toml'
+    config_path = (Path(home) if home is not None else _codex_home())/'config.toml'
     args[2:2] = _codex_https_args(config_path)
     if home is not None:
         args.insert(2, '--ephemeral')
@@ -301,13 +305,13 @@ def _request_codex(connection, command, body, shape, iteration, deadline, direct
             raise SessionUnavailable('Codex returned a mismatched session ID')
         if info['exit_code'] != 0:
             raise RuntimeError('Codex CLI exited with code '+str(info['exit_code']))
-        if not info.get('thread_id') or (session_id is not None and info['thread_id'] != session_id):
+        # 不一致的会话身份已在退出码检查之前拒绝，这里只剩缺失。
+        if not info.get('thread_id'):
             raise SessionUnavailable('Codex returned a missing or mismatched session ID')
         reply = (directory/'reply.json').read_bytes()
         info['reply_sha256'] = hashlib.sha256(reply).hexdigest()
         text = reply.decode('utf-8')
-        raw = dict(status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
-        candidates, parsed = llm.parse_response(raw, shape, iteration, shape.base_u)
+        candidates, parsed = llm.parse_candidates(text, shape, iteration, shape.incumbent_u)
         info.update(parsed, response_output=[text])
     except subprocess.TimeoutExpired:
         info.update(status='TIME_LIMIT', message='CodexDeadline')
@@ -335,11 +339,9 @@ def _request(connection, url, key, body, shape, iteration, seconds):
     info = dict(status="FAILED", message="", accepted=0, format_valid=0, proposals=[])
     try:
         raw = llm.post_response(url, key, body, seconds)
-        candidates, info = llm.parse_response(raw, shape, iteration, shape.base_u)
+        candidates, info = llm.parse_response(raw, shape, iteration, shape.incumbent_u)
         info.update(response_id=raw.get("id"), response_model=raw.get("model"), usage=raw.get("usage"),
-                    response_output=[part["text"] for item in raw.get("output", [])
-                                     if item.get("type") == "message" for part in item.get("content", [])
-                                     if part.get("type") == "output_text"])
+                    response_output=llm.output_texts(raw))
     except Exception as error:
         info["message"] = type(error).__name__
         if isinstance(getattr(error, "code", None), int):

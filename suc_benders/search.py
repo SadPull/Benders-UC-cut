@@ -12,6 +12,7 @@ from scipy import sparse
 from .anneal import anneal, SA_BACKEND, SA_INITIALIZATION
 from .benders import discrete_feasible, dispatch, master
 from .context import CandidateEvaluation, LLMContextInput, build_llm_context
+from .llm import MAX_CANDIDATES
 from .upper_advisor import UpperAdvisor, summarize
 from .strengthened_certification import StrengthenedCertification
 from .model import fingerprint
@@ -373,7 +374,7 @@ class WholeDay:
         costs = dict(total=baseline["objective"], fixed=baseline["fixed_cost"], expected_fuel=baseline["expected_fuel_cost"])
         prior_ids = {r["commitment_hash"] for r in measurements}
         pool = sorted(((key, row) for key, row in self.cache.items() if row["feasible"]),
-                      key=lambda item: item[1]["objective"])[:16]
+                      key=lambda item: item[1]["objective"])[:MAX_CANDIDATES]
         bases = [commitment(self.d, np.frombuffer(key, dtype=np.uint8)) for key, _ in pool]
         self.timings["context"] += perf_counter() - phase
         return context, bases, (baseline_u, costs, prior_ids)

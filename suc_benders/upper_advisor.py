@@ -110,7 +110,7 @@ class UpperAdvisor:
             tier="regular", requested_model=self.o.llm_model, transport=transport(self.o),
             deadline_seconds=self.o.llm_timeout,
             status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
-            base_u=llm.prompt_base(body), prompt_mode="delta" if continuation else "full",
+            base_u=llm.prompt_incumbent(body), prompt_mode="delta" if continuation else "full",
             trigger_stalled=batch["trigger_stalled"],
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
@@ -295,7 +295,7 @@ class UpperAdvisor:
         lane.pending = row = dict(call_id=f"llm_escalation:{iteration}", stage="escalation", **routing,
             triggered_by=triggered_by, requested_model=o.llm_model, transport=transport(o),
             deadline_seconds=seconds, status="RUNNING", accepted=0, proposals=[],
-            base_u=llm.prompt_base(body), prompt_mode="full",
+            base_u=llm.prompt_incumbent(body), prompt_mode="full",
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
         self.result.llm_history.append(row)

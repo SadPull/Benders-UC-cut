@@ -60,7 +60,7 @@ def test_cli_reply_identity_and_timeout(tmp_path, cli_environment, monkeypatch, 
         return NS(pid=123, wait=wait, poll=lambda: 0)
     monkeypatch.setattr(transport.subprocess, 'Popen', popen)
     transport._request_codex(NS(send=sent.append, close=lambda: None), 'codex', cli_environment,
-        NS(n_units=1, horizon=1, base_u=[[0]]), 4, perf_counter()+20, tmp_path, SESSION)
+        NS(n_units=1, horizon=1, incumbent_u=[[0]]), 4, perf_counter()+20, tmp_path, SESSION)
     candidates, info = sent[0]
     assert info['status'] == expected
     assert len(candidates) == (1 if expected == 'OK' else 0)

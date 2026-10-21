@@ -149,8 +149,8 @@ def test_both_transports_share_the_output_schema(tiny, options, tmp_path, monkey
     change = schema["properties"]["candidates"]["items"]["properties"]["changes"]["items"]
     assert change["properties"]["unit"]["maximum"] == whole.d.n_units
     assert change["properties"]["on_intervals"]["items"]["properties"]["end"]["maximum"] == whole.d.horizon
-    assert llm.prompt_base(body) == whole.result.u.tolist()
-    assert llm.prompt_base({"input": "not json"}) is None
+    assert llm.prompt_incumbent(body) == whole.result.u.tolist()
+    assert llm.prompt_incumbent({"input": "not json"}) is None
     from suc_benders import advisor_request
     monkeypatch.setattr(advisor_request.shutil, "which", lambda command: command)
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))

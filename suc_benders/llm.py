@@ -12,12 +12,16 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 
+# 每次调用至多请求、接受的候选数；提示文字与 JSON schema 都按此上限。
+MAX_CANDIDATES = 4
+
+
 # 将系统约束与用户上下文封装为流式、禁止存储的 Responses 请求体，推理档位为 max。
 # text.format 用 JSON schema 约束输出结构；返回的请求体不含 Authorization，密钥仅由发送函数放入 HTTP 头。
 # continuation=True 用于续接会话：静态规则和机组数据已在首条消息中，只发送动态快照。
 def request_body(d, scenarios, best, o, context, base_candidates, iteration, continuation=False):
     system, user = _prompt(d, scenarios, iteration, best, base_candidates,
-                           4, context, continuation)
+                           MAX_CANDIDATES, context, continuation)
     return {"model": o.llm_model, "instructions": system, "input": user, "stream": True, "store": False,
             "reasoning": {"effort": "max"},
             "text": {"format": {"type": "json_schema", "name": "uc_candidates", "strict": True,
@@ -37,11 +41,12 @@ def output_schema(n_units, horizon):
                      properties=dict(name=dict(type="string"), reason=dict(type="string"),
                                      changes=dict(type="array", minItems=1, items=change)))
     return dict(type="object", additionalProperties=False, required=["candidates"],
-                properties=dict(candidates=dict(type="array", maxItems=4, items=candidate)))
+                properties=dict(candidates=dict(type="array", maxItems=MAX_CANDIDATES, items=candidate)))
 
 
 # 从请求体取出模型看到的 incumbent_u，作为增量候选的还原基准；缺失或无法解析时返回 None。
-def prompt_base(body):
+# 回执里以 base_u 键保存它；注意提示中的 base_u 键是另一回事（供参考的基准候选列表）。
+def prompt_incumbent(body):
     try:
         base = json.loads(body["input"]).get("incumbent_u")
     except (KeyError, TypeError, ValueError, AttributeError):
@@ -82,19 +87,36 @@ def _apply_changes(base, changes, n_units, horizon):
     return u
 
 
-# 提取已完成响应中的 output_text，逐个还原并检查至多四个候选，返回 (原始矩阵及提议记录, 回执)。
-# 不合格候选单独剔除并记录 invalid_reason，其余照常保留；全部不合格才算失败。
-# 时序与调度仍由数值程序验证。
-def parse_response(response, d, iteration=1, base=None):
-    info = {"status": "FAILED", "message": "", "accepted": 0, "format_valid": 0, "invalid": 0, "proposals": []}
+# Responses 对象中所有消息的 output_text 片段，按出现顺序。
+def output_texts(response):
+    return [part["text"] for item in response.get("output", []) if item.get("type") == "message"
+            for part in item.get("content", []) if part.get("type") == "output_text"]
+
+
+def _receipt(**values):
+    return dict(dict(status="FAILED", message="", accepted=0, format_valid=0, invalid=0, proposals=[]), **values)
+
+
+# 解析已完成的 Responses 对象（HTTP 通道）；未完成或无法取出文本时记为 INVALID_RESPONSE。
+def parse_response(response, shape, iteration=1, base=None):
     try:
         if response.get("status") != "completed":
             raise ValueError("Response is not completed")
-        text = "".join(part["text"] for item in response["output"] if item.get("type") == "message"
-                       for part in item.get("content", []) if part.get("type") == "output_text")
+        text = "".join(output_texts(response))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return [], _receipt(message="INVALID_RESPONSE")
+    return parse_candidates(text, shape, iteration, base)
+
+
+# 解析回复正文，逐个还原并检查至多 MAX_CANDIDATES 个候选，返回 (原始矩阵及提议记录, 回执)。
+# 不合格候选单独剔除并记录 invalid_reason，其余照常保留；全部不合格才算失败。
+# 时序与调度仍由数值程序验证。shape 只需 n_units 与 horizon。
+def parse_candidates(text, shape, iteration=1, base=None):
+    info = _receipt()
+    try:
         parsed = json.loads(text)
         rows = parsed.get("candidates") if isinstance(parsed, dict) else None
-        if not isinstance(rows, list) or len(rows) > 4:
+        if not isinstance(rows, list) or len(rows) > MAX_CANDIDATES:
             raise ValueError("Expected at most four candidates")
     except (KeyError, TypeError, ValueError, AttributeError):
         info["message"] = "INVALID_RESPONSE"
@@ -105,7 +127,7 @@ def parse_response(response, d, iteration=1, base=None):
         info["proposals"].append(proposal)
         try:
             proposal["raw_changes"] = row.get("changes")
-            raw = _apply_changes(base, row["changes"], d.n_units, d.horizon)
+            raw = _apply_changes(base, row["changes"], shape.n_units, shape.horizon)
         except ValueError as error:
             reason = str(error)
         except (KeyError, TypeError, AttributeError):
