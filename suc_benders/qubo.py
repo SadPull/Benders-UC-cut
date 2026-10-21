@@ -1,5 +1,5 @@
 """Sparse search QUBO for block SA; energies are search scores, never bounds."""
-# 模块职责：把块主问题的硬约束、跨块边界行、容量与可行性割编码为稀疏 QUBO，
+# 模块职责：把块内硬约束行、跨块边界行、容量与可行性割编码为稀疏 QUBO，
 # 先由硬约束传播固定位，再对自由位加权罚函数和费用代理。
 from fractions import Fraction
 from collections import deque
@@ -23,19 +23,19 @@ def bit_weights(maximum):
     return np.asarray([2 ** j for j in range(n - 1)] + [maximum - (2 ** (n - 1) - 1)], float)
 
 
-# 反复穷举至多四个变量的 hard 行，包含跨小时状态转移；只固定所有合法组合共有的值。
+# 反复穷举至多四个变量的硬约束行（m 为 hard_rows 的结果），包含跨小时状态转移；只固定所有合法组合共有的值。
 # 未确定值使用 NaN 标记；无满足组合说明硬约束不一致。
 def fixed_binary(m):
-    return _fixed_binary(m, m.A[:, :len(m.binary)].tocsr())
+    return _fixed_binary(m, m.A.tocsr())
 
 
 def _fixed_binary(m, binary):
-    fixed = np.full(len(m.binary), np.nan)
+    fixed = np.full(binary.shape[1], np.nan)
     rows = []
     adjacent = [[] for _ in fixed]
-    for k, label in enumerate(m.kind):
+    for k in range(binary.shape[0]):
         start, end = binary.indptr[k:k+2]
-        if label == "hard" and end-start <= 4:
+        if end-start <= 4:
             js, values = binary.indices[start:end], binary.data[start:end]
             for index in js:
                 adjacent[index].append(len(rows))
@@ -73,20 +73,19 @@ def _fixed_binary(m, binary):
 # 搜索专用 QUBO：只含 u/v/w 和容量/可行性割松弛位，能量单位为一个归一化成本单位。
 # 成本取当前方案处最紧最优性割的线性代理；硬约束按行最大系数归一化后统一加权，容量只用 u 列，
 # 避免 v/w 充当容量补偿位。能量只用于搜索，不能作为任何界。
+# m 为块的 hard_rows 结果。
 def search_qubo(m, b, cuts, point, boundary, o):
     nx = m.nx
     if np.shape(point) != (nx,) or not np.isin(point, [0, 1]).all():
         raise ValueError("Search QUBO requires a complete binary cost-reference point")
-    binary = m.A[:, :nx].tocsr()
-    hard = [k for k, label in enumerate(m.kind) if label == "hard"]
+    binary = m.A.tocsr()
     rows = [(binary.indices[binary.indptr[k]:binary.indptr[k + 1]],
-             binary.data[binary.indptr[k]:binary.indptr[k + 1]], m.rhs[k], m.eq[k]) for k in hard]
+             binary.data[binary.indptr[k]:binary.indptr[k + 1]], m.rhs[k], m.eq[k]) for k in range(binary.shape[0])]
     rows += [(np.asarray(js, int), np.asarray(values, float), rhs, eq) for js, values, rhs, eq in boundary]
     I = [k for k, row in enumerate(rows) for _ in row[0]]
     J = [j for row in rows for j in row[0]]
     V = [v for row in rows for v in row[1]]
-    view = NS(kind=["hard"] * len(rows), rhs=np.asarray([row[2] for row in rows], float),
-              eq=np.asarray([row[3] for row in rows], bool), binary=np.arange(nx))
+    view = NS(rhs=np.asarray([row[2] for row in rows], float), eq=np.asarray([row[3] for row in rows], bool))
     fixed = _fixed_binary(view, sparse.coo_matrix((V, (I, J)), shape=(len(rows), nx)).tocsr())
     free = np.flatnonzero(np.isnan(fixed))
     mapping = np.full(nx, -1); mapping[free] = np.arange(len(free))

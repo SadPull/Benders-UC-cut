@@ -152,8 +152,6 @@ class ExperimentProgress:
         if llm_row is not None:
             row.update(llm_call_id=llm_row.get("call_id"), llm_tier=llm_row.get("tier"),
                        llm_status=llm_row.get("status"))
-        if event == "coordination" and result.outer_history:
-            row["coordination"] = result.outer_history[-1]["coordination"]
         with (self.output / "progress.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(jsonable(row), ensure_ascii=False, allow_nan=False) + "\n")
         if improved or event in ("initialization", "final"):
@@ -175,8 +173,8 @@ def build_options(output, folder):
         raise ValueError("LLM escalation requires LLM_TRANSPORT='http' for the regular tier")
     options = dict(data_file=str(folder / "units.json"), scenario_file=str(folder / "stochastic.json"),
                    seed=SEED, time_limit=TIME_LIMIT_SECONDS, reference_time_limit=REFERENCE_TIME_LIMIT_SECONDS,
-                   tolerance=TARGET_GAP_PERCENT / 100, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS, max_outer=1000000,
-                   max_inner=20, llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL, llm_patience=LLM_PATIENCE,
+                   tolerance=TARGET_GAP_PERCENT / 100, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS, max_rounds=1000000,
+                   llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL, llm_patience=LLM_PATIENCE,
                    llm_max_calls=LLM_MAX_CALLS, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
                    llm_timeout=LLM_TIMEOUT_SECONDS, llm_reserve_seconds=LLM_RESERVE_SECONDS,
                    llm_codex_command="codex" if codex else "",
@@ -215,7 +213,6 @@ def print_run_settings(checked, codex, escalation):
     print("指标说明：UB 是通过全天物理校验的可行方案成本；"
           "参考差距 = (UB - 参考成本) / |参考成本| × 100%，允许为负；参考成本为零时不计算百分比。", flush=True)
     print("先行参考预算独立；只有通过校验的 OPTIMAL 参考允许按目标提前停止。", flush=True)
-    print("块内上下界用于分块搜索，不等于全天原问题的上下界。", flush=True)
 
 
 # 汇总搜索与独立参考的状态、差距、计时和调用统计。

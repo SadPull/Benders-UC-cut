@@ -110,7 +110,7 @@ def test_only_optimal_reference_can_stop_at_initialization(tiny, options, monkey
     d, scenarios = tiny()
     initial = solver.solve(d, scenarios, NS(**dict(vars(options), sa_enabled=False)))
     monkeypatch.setattr(solver, 'solve_reference', lambda *a: record(status, initial.objective))
-    options.max_outer = options.max_inner = 1
+    options.max_rounds = 1
     result = solver.solve(d, scenarios, options)
     assert result.status == expected
     assert result.reference_gap_percent <= .001

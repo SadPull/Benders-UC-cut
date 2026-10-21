@@ -10,39 +10,23 @@ import numpy as np
 from scipy import sparse
 
 from .anneal import anneal, SA_BACKEND, SA_INITIALIZATION
-from .benders import discrete_feasible, dispatch, master
+from .benders import discrete_feasible, dispatch, hard_rows
 from .context import CandidateEvaluation, LLMContextInput, build_llm_context
 from .llm import MAX_CANDIDATES
 from .upper_advisor import UpperAdvisor, summarize
-from .model import fingerprint
+from .model import fingerprint, relaxed_rows
 from .optimization import optimize
 from .qubo import search_qubo, fixed_binary
 from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, transition_violations, reachable_shortfall
 
 
-# LLM 来源的可行方案池与块重调度种子各保留费用最低的 16 个。
+# LLM 来源的可行方案池保留费用最低的 16 个。
 ADVISOR_POOL_SIZE = 16
-BLOCK_SEED_LIMIT = 16
 
 
 # 全天 u/v/w 二进制向量的缓存键。
 def _cache_key(x):
     return x.astype(np.uint8).tobytes()
-
-
-def context_id(b, outer, block):
-    digest = hashlib.sha256(np.asarray(b.obj, '<f8').tobytes())
-    digest.update(np.asarray([b.constant], '<f8').tobytes())
-    digest.update(np.asarray(b.cols, '<i8').tobytes())
-    return f'{outer}:{block}:{digest.hexdigest()}'
-
-
-# 用固定绝对余量 1e-5 加相对容差判断有限上下界是否闭合，同时拒绝明显交叉的上下界。
-# reference 可指定相对容差的计价基准，默认使用 upper。
-def closed(lower, upper, tolerance, reference=None):
-    reference = upper if reference is None else reference
-    return (np.isfinite(lower) and np.isfinite(upper) and upper - lower >= -1e-5
-            and upper - lower <= 1e-5 + tolerance * max(1, abs(reference)))
 
 
 # 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，以便收尾已有 LLM 工作。
@@ -64,9 +48,9 @@ class WholeDay:
         self.diagnostics = result.diagnostics
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
                                 local_evaluations=[], llm_background_seconds=0., blocks=[], rounds=[],
-                                complete_rounds=0, coordination_count=0, timings={name: 0. for name in (
-                                    "initialization", "relaxation", "qubo", "annealing", "repair",
-                                    "local_dispatch", "subproblems", "validation", "context", "llm", "coordination")})
+                                complete_rounds=0, timings={name: 0. for name in (
+                                    "initialization", "qubo", "annealing", "repair",
+                                    "local_dispatch", "subproblems", "validation", "context", "llm")})
         self.timings = self.diagnostics["timings"]
         self.progress = progress
         self.diagnostics["model_fingerprint"] = fingerprint(m)
@@ -75,8 +59,7 @@ class WholeDay:
         self.diagnostics['sa_budget_seconds_used'] = 0.
         self.diagnostics.update(search_mode='time_blocks', sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION)
         phase = perf_counter()
-        reachable, _ = master(full, [], reachability=True)
-        self.fixed = fixed_binary(reachable)[:len(full.binary)]
+        self.fixed = fixed_binary(hard_rows(full, reachability=True))
         start, stop = transition_allowed(self.d)
         fixed_u = self.fixed_u = self.fixed[full.u]
         self.diagnostics['reachability'] = dict(index_base=1,
@@ -440,31 +423,29 @@ class WholeDay:
         return records
 
 
-# 固定乘子下单个时间块的持久搜索状态，跨轮保存割、调度缓存、最好方案和协调平面。
+# 一个时间块的原始邻域搜索，整个运行只建立一次。块费用按固定价格定价（只含被松弛的连续耦合行），
+# 跨块纯二进制行代入当前 incumbent 作为硬边界行；跨轮保存块内 Benders 割、调度缓存和定价费用最低的块点。
 class BlockSearch:
-    """One fixed-multiplier block, retained across round-robin visits."""
+    """Persistent primal neighbourhood search of one time block at fixed prices."""
 
-    # 绑定块与价格上下文，初始化连续费用基础下界、空割池和局部诊断。
-    def __init__(self, b, o, outer, index, whole, planes=None):
-        self.b, self.o, self.outer, self.index, self.whole = b, o, outer, index, whole
-        # 全天可达性推出的块内固定位，由块主问题以等式行强制。
+    # 绑定定价后的块，建立块内硬约束行、跨块边界行和局部诊断。
+    def __init__(self, b, o, index, whole):
+        self.b, self.o, self.index, self.whole = b, o, index, whole
+        # 全天推出的块内固定位，与块内硬约束行一起进入搜索 QUBO；价格固定，硬约束行只需建立一次。
         self.fixed = whole.fixed[b.cols[b.binary]].copy()
-        self.context = context_id(b, outer, index)
-        self.lower = float(np.minimum(b.obj * b.lb, b.obj * b.ub).sum() + b.constant)
-        self.upper, self.best = np.inf, None
+        self.hard = hard_rows(b, fixed=self.fixed)
+        self.best_local = None
         self.cuts, self.cache, self.history = [], {}, []
-        self.planes = [] if planes is None else planes
-        # 跨块纯二进制行：块外列代入当前 incumbent 后成为块内硬约束，只进入搜索 QUBO。
+        # 跨块纯二进制行（relaxed_rows 的补集）：块外列代入当前 incumbent 后成为块内硬约束，只进入搜索 QUBO。
         m = whole.m
         rows = m.A[b.cross].tocsr()
-        continuous = np.ones(rows.shape[1], bool); continuous[m.binary] = False
         inside = np.zeros(rows.shape[1], bool); inside[b.cols[b.binary]] = True
-        keep = (rows[:, continuous].getnnz(axis=1) == 0) & (rows[:, inside].getnnz(axis=1) > 0)
+        keep = ~relaxed_rows(m, b.cross) & (rows[:, inside].getnnz(axis=1) > 0)
         rows = rows[keep]
         self.boundary = NS(inner=rows[:, b.cols[b.binary]].tocsr(),
                            outer=(rows @ sparse.diags((~inside).astype(float))).tocsr(),
                            rhs=m.rhs[b.cross][keep], eq=m.eq[b.cross][keep])
-        self.diagnostic = dict(outer=outer, block=index, hours=(b.times + 1).tolist(), visits=0,
+        self.diagnostic = dict(block=index, hours=(b.times + 1).tolist(), visits=0,
                                sa_calls=0, first_visit_seconds=None)
         whole.diagnostics["blocks"].append(self.diagnostic)
         self.summarize()
@@ -477,23 +458,15 @@ class BlockSearch:
                  ring.inner.data[ring.inner.indptr[k]:ring.inner.indptr[k+1]], rhs[k], ring.eq[k])
                 for k in range(len(rhs))]
 
-    # 刷新本块的局部上下界、gap、收敛标记及两类割数量，供进度与终态诊断读取。
+    # 刷新本块的最好定价费用及两类割数量，供进度与终态诊断读取。
     def summarize(self):
-        self.diagnostic.update(lower=self.lower, upper=self.upper,
-            relative_gap=(max(0., self.upper-self.lower)/max(1., abs(self.upper))
-                          if np.isfinite(self.upper) else None),
-            converged=closed(self.lower, self.upper, self.o.tolerance),
+        self.diagnostic.update(
+            best_local_cost=self.best_local.cost if self.best_local is not None else None,
             optimality_cuts=sum(c.optimality for c in self.cuts),
             feasibility_cuts=sum(not c.optimality for c in self.cuts))
 
-    # 返回费用较好的历史可行二进制方案，用于重新调度；不是额外注入 SA 样本。
-    @property
-    def seeds(self):
-        pool = sorted((r for r in self.cache.values() if r.feasible), key=lambda r: r.cost)[:BLOCK_SEED_LIMIT]
-        return [r.point[self.b.binary].astype(np.uint8) for r in pool]
-
-    # 在当前块价格环境中评估精确二进制点，缓存调度、更新局部割和可行协调平面。
-    # 超时结果不缓存；局部费用含当前拉格朗日价格，不能直接替代全天原始费用。
+    # 在固定价格下评估精确二进制块点（块内约束，跨块行松弛），缓存调度并学习块内割。
+    # 超时或数值状态不缓存；定价费用只用于块内比较和 QUBO 代理，不能替代全天原始费用。
     def evaluate(self, x, source):
         b, whole = self.b, self.whole
         key = np.asarray(x, np.uint8).tobytes()
@@ -520,28 +493,15 @@ class BlockSearch:
         self.cache[key] = r
         if r.cut is not None:
             self.cuts.append(r.cut)
-        if r.feasible:
-            p = r.point
-            self.planes.append((float(b.original_obj @ p + b.q @ (p ** 2)), b.crossA @ p - b.crossrhs))
-            if r.cost < self.upper:
-                self.best, self.upper = r, r.cost
-        whole.diagnostics["local_evaluations"].append(dict(outer=self.outer, block=self.index, source=source,
-            feasible=r.feasible, cost=r.cost if r.feasible else None, context=self.context))
+        if r.feasible and (self.best_local is None or r.cost < self.best_local.cost):
+            self.best_local = r
+        whole.diagnostics["local_evaluations"].append(dict(block=self.index, source=source,
+            feasible=r.feasible, cost=r.cost if r.feasible else None))
         return r
 
-    # 用当前割重解块 LP 主问题并抬高块下界；超时返回 None，否则返回主问题供搜索 QUBO 编码。
-    def _refresh_lower(self):
-        phase = perf_counter()
-        master_lp, bound = master(self.b, self.cuts, self.whole.remaining(), fixed=self.fixed)
-        self.whole.timings["relaxation"] += perf_counter() - phase
-        if self.whole.remaining() <= 0:
-            return None
-        self.lower = max(self.lower, bound)
-        return master_lp
-
-    # 完成本块的一次访问：重调度种子、求 LP 下界，未闭合时最多采样一批 SA，再评估并刷新下界。
+    # 完成本块的一次访问：先评估种子，再采样一批 SA，评估原始块候选并把修复后的全天方案交给全天校验。
     # 整批候选共享采样前的全天方案快照。
-    def step(self, seeds, inner):
+    def step(self, seeds, k):
         b, o, whole = self.b, self.o, self.whole
         if whole.remaining() <= 0:
             return
@@ -552,65 +512,57 @@ class BlockSearch:
             self.evaluate(seed, "initial")
         if whole.remaining() <= 0:
             return
-        master_lp = self._refresh_lower()
-        if master_lp is None:
-            return
-        sampling = {"bits": 0, "candidates": 0, "best_energy": None, "seconds": 0.}
-        if not closed(self.lower, self.upper, o.tolerance):
-            if self.best is None:
-                raise RuntimeError("No feasible block seed")
-            baseline_u = whole.result.u.copy()
-            anchor_id, anchor_cost = commitment_hash(whole.result), whole.result.objective
-            phase = perf_counter()
-            columns = b.cols[b.binary]
-            boundary = self.boundary_rows()
-            q = search_qubo(master_lp, b, self.cuts, whole.best.point[columns], boundary, o)
-            whole.timings["qubo"] += perf_counter() - phase
-            if whole.progress is not None:
-                whole.diagnostics["pending_qubo"] = dict(bits=q.Q.shape[0], nonzeros=q.Q.nnz,
-                    max_coefficient=float(np.abs(q.Q.data).max(initial=0.)))
-                whole.emit("before_sampling")
-            if whole.remaining() <= 0:
-                return
-            phase = perf_counter()
-            whole.diagnostics["sa_calls"] += 1
-            self.diagnostic["sa_calls"] += 1
-            # 每条链的种子由配置种子、全局调用序号和链号派生：可复现且互不相同。
-            sample_seeds = [int(np.random.SeedSequence([o.seed, whole.diagnostics["sa_calls"], k]).generate_state(1)[0])
-                            for k in range(o.sa_reads)]
-            proposals, sampling = anneal(q, o, whole.remaining(), sample_seeds)
-            whole.timings["annealing"] += perf_counter() - phase
-            # 采样诊断只保留标量与哈希；anchor 是本批共享的 incumbent 身份。
-            sampling.update(outer=self.outer, block=self.index, round=inner, seed=sample_seeds,
-                            boundary_rows=len(boundary), anchor=anchor_id, anchor_cost=anchor_cost,
-                            raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
-                            unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
-            whole.diagnostics["sampling"].append(sampling)
-            whole.emit("sampling")
-            del q
-            if whole.remaining() <= 0:
-                return
-            # 整批候选都拼接到采样前的 incumbent 快照上，不受本批中途的改进影响。
-            for k, x in enumerate(proposals):
-                if whole.remaining() <= 0:
-                    return
-                self.evaluate(x, 'sa_raw')  # 原始块候选也参与局部割学习
-                block_x = np.zeros(len(b.obj)); block_x[b.binary] = x
-                raw = baseline_u.copy(); raw[:, b.times] = block_x[b.u]
-                record = {"proposal_id": f"sa:{whole.diagnostics['sa_calls']}:{k}", "outer": self.outer,
-                          "block": self.index, "round": inner}
-                repaired = whole.prepare(raw, "sa", record)
-                if repaired is not None and whole.remaining() > 0:
-                    repaired_eval = self.evaluate(repaired[columns], "sa")
-                    record.update(local_dispatch_completed=repaired_eval is not None,
-                                  local_feasible=repaired_eval.feasible if repaired_eval is not None else None)
-                    whole.accept(repaired, "sa", record)
+        if self.best_local is None:
+            raise RuntimeError("No feasible block seed")
+        baseline_u = whole.result.u.copy()
+        anchor_id, anchor_cost = commitment_hash(whole.result), whole.result.objective
+        phase = perf_counter()
+        columns = b.cols[b.binary]
+        boundary = self.boundary_rows()
+        q = search_qubo(self.hard, b, self.cuts, whole.best.point[columns], boundary, o)
+        whole.timings["qubo"] += perf_counter() - phase
+        if whole.progress is not None:
+            whole.diagnostics["pending_qubo"] = dict(bits=q.Q.shape[0], nonzeros=q.Q.nnz,
+                max_coefficient=float(np.abs(q.Q.data).max(initial=0.)))
+            whole.emit("before_sampling")
         if whole.remaining() <= 0:
             return
-        if self._refresh_lower() is None:
+        phase = perf_counter()
+        whole.diagnostics["sa_calls"] += 1
+        self.diagnostic["sa_calls"] += 1
+        # 每条链的种子由配置种子、全局调用序号和链号派生：可复现且互不相同。
+        sample_seeds = [int(np.random.SeedSequence([o.seed, whole.diagnostics["sa_calls"], j]).generate_state(1)[0])
+                        for j in range(o.sa_reads)]
+        proposals, sampling = anneal(q, o, whole.remaining(), sample_seeds)
+        whole.timings["annealing"] += perf_counter() - phase
+        # 采样诊断只保留标量与哈希；anchor 是本批共享的 incumbent 身份。
+        sampling.update(block=self.index, round=k, seed=sample_seeds,
+                        boundary_rows=len(boundary), anchor=anchor_id, anchor_cost=anchor_cost,
+                        raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
+                        unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
+        whole.diagnostics["sampling"].append(sampling)
+        whole.emit("sampling")
+        del q
+        if whole.remaining() <= 0:
+            return
+        # 整批候选都拼接到采样前的 incumbent 快照上，不受本批中途的改进影响。
+        for j, x in enumerate(proposals):
+            if whole.remaining() <= 0:
+                return
+            self.evaluate(x, 'sa_raw')  # 原始块候选也参与局部割学习
+            block_x = np.zeros(len(b.obj)); block_x[b.binary] = x
+            raw = baseline_u.copy(); raw[:, b.times] = block_x[b.u]
+            record = {"proposal_id": f"sa:{whole.diagnostics['sa_calls']}:{j}", "block": self.index, "round": k}
+            repaired = whole.prepare(raw, "sa", record)
+            if repaired is not None and whole.remaining() > 0:
+                repaired_eval = self.evaluate(repaired[columns], "sa")
+                record.update(local_dispatch_completed=repaired_eval is not None,
+                              local_feasible=repaired_eval.feasible if repaired_eval is not None else None)
+                whole.accept(repaired, "sa", record)
+        if whole.remaining() <= 0:
             return
         optimality = sum(c.optimality for c in self.cuts)
-        self.history.append(dict(outer=self.outer, block=self.index, inner=inner, lower=self.lower, upper=self.upper,
+        self.history.append(dict(block=self.index, round=k, best_local_cost=self.best_local.cost,
                                  optimality_cuts=optimality, feasibility_cuts=len(self.cuts)-optimality,
                                  sampling=sampling))
         whole.result.history.append(self.history[-1])

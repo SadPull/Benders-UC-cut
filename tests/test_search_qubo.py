@@ -3,8 +3,8 @@ from types import SimpleNamespace as NS
 import numpy as np
 import pytest
 
-from suc_benders import benders, search
-from suc_benders.benders import coordinate, master
+from suc_benders import search
+from suc_benders.benders import hard_rows
 from suc_benders.model import partition
 from suc_benders.qubo import search_qubo
 from suc_benders.validation import pack
@@ -13,11 +13,10 @@ from conftest import make_whole
 
 def block_qubo(whole, options, j, cuts=(), boundary=True):
     blocks, _ = partition(whole.m, 3)
-    s = search.BlockSearch(blocks[j], options, 1, j+1, whole)
+    s = search.BlockSearch(blocks[j], options, j+1, whole)
     b = s.b
-    m, _ = master(b, list(cuts), fixed=s.fixed)
     anchor = whole.best.point[b.cols[b.binary]]
-    q = search_qubo(m, b, list(cuts), anchor, s.boundary_rows() if boundary else [], options)
+    q = search_qubo(s.hard, b, list(cuts), anchor, s.boundary_rows() if boundary else [], options)
     return b, anchor, q
 
 
@@ -75,41 +74,11 @@ def test_cost_reference_does_not_attract_bits_without_cuts(tiny, options):
     whole = make_whole(*tiny(2, 6), options, np.ones((2, 6)))
     blocks, _ = partition(whole.m, 3)
     b = blocks[1]
-    m, _ = master(b, [])
+    m = hard_rows(b)
     first = whole.best.point[b.cols[b.binary]]
     a = search_qubo(m, b, [], first, [], options)
     z = search_qubo(m, b, [], 1 - first, [], options)
     assert (a.Q != z.Q).nnz == 0
-
-
-def test_coordination_capped_keeps_previous_multipliers():
-    prices, upper, info = coordinate([[(100., np.array([1.]))]], np.array([True]), 50., 10, np.array([.3]))
-    assert info["status"] == "CAPPED" and prices.tolist() == [.3] and upper == pytest.approx(50.)
-
-
-def test_coordination_selects_minimum_multiplier_below_incumbent():
-    planes = [[(10., np.array([1.])), (10., np.array([-1.]))]]
-    prices, upper, info = coordinate(planes, np.array([True]), 100., 10, np.array([.3]))
-    assert info["status"] == "OPTIMAL" and upper == pytest.approx(10.) and prices[0] == pytest.approx(0.)
-
-
-def test_coordination_selection_failure_falls_back_to_primary(monkeypatch):
-    calls, original = [], benders.optimize
-    def optimize(m, seconds):
-        calls.append(m.purpose)
-        return NS(status="INFEASIBLE") if m.purpose == "coordination_minimum_l1_lp" else original(m, seconds)
-    monkeypatch.setattr(benders, "optimize", optimize)
-    planes = [[(10., np.array([1.])), (10., np.array([-1.]))]]
-    prices, upper, info = coordinate(planes, np.array([True]), 100., 10, np.array([.3]))
-    assert calls == ["coordination_lp", "coordination_minimum_l1_lp"]
-    assert info["status"] == "SELECTION_FALLBACK" and upper == pytest.approx(10.)
-    assert prices[0] == pytest.approx(0., abs=1e-6)
-
-
-def test_coordination_primary_failure_keeps_previous(monkeypatch):
-    monkeypatch.setattr(benders, "optimize", lambda m, seconds: NS(status="NUMERIC"))
-    prices, upper, info = coordinate([[(1., np.array([1.]))]], np.array([True]), 5., 10, np.array([.3]))
-    assert info["status"] == "PRIMARY_NUMERIC" and prices.tolist() == [.3] and upper == np.inf
 
 
 def test_stale_advice_is_rebased_onto_current_incumbent(tiny, options):

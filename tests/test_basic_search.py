@@ -9,7 +9,7 @@ from scipy import sparse
 
 from conftest import whole_day
 from suc_benders import search, solver
-from suc_benders.benders import master
+from suc_benders.benders import hard_rows
 from suc_benders.config import load_options
 from suc_benders.data import load_data
 from suc_benders.model import model, partition
@@ -24,12 +24,11 @@ from suc_benders.validation import commitment_hash
 ])
 def test_progress_handles_empty_and_nonempty_qubo(tiny, options, monkeypatch, matrix, maximum):
     whole = whole_day(tiny, options)
-    block = search.BlockSearch(whole.full, options, 1, 1, whole)
+    block = search.BlockSearch(whole.full, options, 1, whole)
     observed = []
     whole.progress = lambda state, event: observed.append(
         dict(state.diagnostics['pending_qubo'])) if event == 'before_sampling' else None
     q = NS(Q=matrix, fixed=whole.best.point[whole.full.binary].copy(), free=np.array([], int))
-    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds, **kw: (master(b, cuts, **kw)[0], -1e6))
     monkeypatch.setattr(search, 'search_qubo', lambda *args: q)
     monkeypatch.setattr(search, 'anneal', lambda *args: ([], {'bits': matrix.shape[0]}))
     block.step([whole.best.point[whole.full.binary]], 1)
@@ -40,9 +39,8 @@ def test_progress_handles_empty_and_nonempty_qubo(tiny, options, monkeypatch, ma
 
 def test_each_block_sample_uses_derived_chain_seeds_and_current_incumbent(tiny, options, monkeypatch):
     whole = whole_day(tiny, options)
-    block = search.BlockSearch(whole.full, options, 1, 1, whole)
+    block = search.BlockSearch(whole.full, options, 1, whole)
     seeds = []
-    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds, **kw: (master(b, cuts, **kw)[0], -1e6))
     monkeypatch.setattr(search, 'anneal', lambda q, o, seconds, seed:
                         (seeds.append(seed) or [], {'bits': q.Q.shape[0]}))
     for inner in (1, 2):
@@ -96,20 +94,19 @@ def test_llm_proposal_without_block_searches_has_unknown_local_feasibility(tiny,
     assert whole.feedback["proposals"][0]["local_feasible"] is None
 
 
-def test_reachability_fixed_bits_reach_every_block_master(tiny, options):
+def test_reachability_fixed_bits_reach_every_block_hard_rows(tiny, options):
     d, scenarios = tiny(1, 6)
     d.ramp_up[:] = 5.; scenarios[0].load[:] = 0.
     m = model(d, scenarios); full = partition(m, d.horizon)[0][0]
-    native, _ = master(full, [])
+    native = hard_rows(full)
     before = native.A.copy()
     started = perf_counter()
     whole = search.WholeDay(m, full, options, started+30, solver.Result(), started)
     assert (whole.fixed[full.u] == 0).all()
     for b in partition(m, 3)[0]:
-        block = search.BlockSearch(b, options, 1, 1, whole)
-        block_master, _ = master(b, [], fixed=block.fixed)
-        assert (fixed_binary(block_master)[b.u] == 0).all()
-    assert (master(full, [])[0].A != before).nnz == 0
+        block = search.BlockSearch(b, options, 1, whole)
+        assert (fixed_binary(block.hard)[b.u] == 0).all()
+    assert (hard_rows(full).A != before).nnz == 0
 
 
 def test_unknown_options_and_local_config_entries_are_rejected(tmp_path):

@@ -8,7 +8,6 @@ from scipy import sparse
 
 from conftest import whole_day
 from suc_benders import anneal as sa, search
-from suc_benders.benders import master
 
 
 @pytest.mark.parametrize('values', [
@@ -120,8 +119,7 @@ def test_zero_bits_do_not_invoke_sampler(options, monkeypatch):
 
 def test_real_sa_block_candidates_reach_whole_day_validation(tiny, options, monkeypatch):
     whole = whole_day(tiny, options, n=3)
-    block = search.BlockSearch(whole.full, options, 1, 1, whole)
-    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds, **kw: (master(b, cuts, **kw)[0], -1e6))
+    block = search.BlockSearch(whole.full, options, 1, whole)
     block.step([whole.best.point[whole.full.binary]], 1)
     sampling, = whole.diagnostics['sampling']
     assert sampling['sa_backend'] == sa.SA_BACKEND

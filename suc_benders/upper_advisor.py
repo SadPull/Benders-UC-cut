@@ -61,27 +61,27 @@ class UpperAdvisor:
     def improved(self, upper):
         return upper-self.result.objective >= IMPROVEMENT_FRACTION*max(1., abs(upper))
 
-    def after_round(self, upper, sa_before, searches, outer, inner, allow=True):
+    def after_round(self, upper, sa_before, searches, k, allow=True):
         if self.whole.diagnostics["sa_calls"] <= sa_before:
             return
         self.state["sa_rounds"] += 1
         self.state["stalled"] = 0 if self.improved(upper) else self.state["stalled"]+1
         self.whole.diagnostics["advisor_rounds"].append(dict(
-            outer=outer, round=inner, sa_round=self.state["sa_rounds"], upper_before=upper,
+            round=k, sa_round=self.state["sa_rounds"], upper_before=upper,
             upper=self.result.objective, reference_cost=self.result.reference_cost, stalled=self.state["stalled"]))
         if (allow and self.state['batch'] is None and self.available() and not self.result.reference_target_reached(self.o.tolerance)
                 and self.state["stalled"] >= self.o.llm_patience):
-            self.begin(outer=outer, inner=inner)
+            self.begin(round_index=k)
         self.advance(searches)
 
-    def begin(self, *, outer=None, inner=None, trigger="stall"):
+    def begin(self, *, round_index=None, trigger="stall"):
         if self.state["phase"] != "sa" or self.regular.worker is not None:
             raise RuntimeError("An advice batch is already active")
         self.state["batch_id"] += 1
         batch = dict(batch_id=self.state["batch_id"], trigger=trigger, calls=0,
             upper_before=self.result.objective, reference_cost=self.result.reference_cost,
             trigger_stalled=self.state["stalled"], trigger_sa_round=self.state["sa_rounds"],
-            sa_calls_at_start=self.whole.diagnostics["sa_calls"], outer=outer, round=inner,
+            sa_calls_at_start=self.whole.diagnostics["sa_calls"], round=round_index,
             status="RUNNING", started_seconds=perf_counter()-self.whole.started)
         self.state.update(phase="llm", batch=batch)
         self.whole.diagnostics["llm_batches"].append(batch)
@@ -110,7 +110,7 @@ class UpperAdvisor:
         row = dict(call_id=f"llm_upper:{iteration}", stage="advice_batch", **routing,
             tier="regular", requested_model=self.o.llm_model, transport=transport(self.o),
             deadline_seconds=self.o.llm_timeout,
-            status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
+            status="RUNNING", round=batch["round"], accepted=0, proposals=[],
             base_u=llm.prompt_incumbent(body), prompt_mode="delta" if continuation else "full",
             trigger_stalled=batch["trigger_stalled"],
             request_upper=self.result.objective, reference_cost=self.result.reference_cost,

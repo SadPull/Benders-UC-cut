@@ -18,9 +18,8 @@ class Options:
     data_file: str = str(ROOT / "data" / "units.json")
     scenario_file: str = str(ROOT / "data" / "stochastic.json")
     block_hours: int = 3
-    max_outer: int = 20
-    # max_inner 限制固定乘子下遍历全部块的完整轮数，不是单个块独占的采样次数。
-    max_inner: int = 20
+    # max_rounds 限制遍历全部块的完整轮数（每轮每块一批 SA），不是单个块独占的采样次数。
+    max_rounds: int = 400
     tolerance: float = 1e-4
     time_limit: float = 600
     reference_time_limit: float = 120
@@ -62,7 +61,7 @@ class Options:
 
 
 # 整数参数至少为 1，其中 seed 与 llm_max_calls 可为 0（llm_max_calls 为 None 表示不限次数）。
-INTEGER_OPTIONS = ("block_hours", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed",
+INTEGER_OPTIONS = ("block_hours", "max_rounds", "sa_reads", "sa_sweeps", "llm_patience", "seed",
                    "llm_max_calls")
 NONNEGATIVE_INTEGERS = ("seed", "llm_max_calls")
 # 数值参数须有限且为正，ZERO_ALLOWED 中的参数还可为 0。
