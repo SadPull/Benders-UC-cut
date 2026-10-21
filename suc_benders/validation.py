@@ -43,6 +43,26 @@ def transition_violations(d, u):
     return rows
 
 
+# 与负荷无关的可达出力上界：开机首小时 <= min(pstart, ramp_up)，持续开机 <= 上一小时上界 + ramp_up，
+# 下一小时关机前 <= min(pshut, ramp_down)，均不超过 pmax。合计低于最大场景负荷即证明方案不可行；
+# 返回这些小时（1 起始）及缺口，空列表不代表可行。
+def reachable_shortfall(d, scenarios, u):
+    u = np.asarray(u) > .5
+    load = np.max([s.load for s in scenarios], axis=0)
+    previous, was_on, rows = d.initial_output.astype(float), d.initial_on.astype(bool), []
+    for t in range(d.horizon):
+        bound = np.where(was_on, np.minimum(d.pmax, previous+d.ramp_up),
+                         np.minimum(np.minimum(d.pstart, d.ramp_up), d.pmax))
+        if t+1 < d.horizon:
+            bound = np.where(u[:, t] & ~u[:, t+1], np.minimum(bound, np.minimum(d.pshut, d.ramp_down)), bound)
+        bound = np.where(u[:, t], bound, 0.)
+        if bound.sum() < load[t]-1e-6:
+            rows.append(dict(hour=t+1, reachable_mw=round(float(bound.sum()), 3), load_mw=round(float(load[t]), 3),
+                             shortfall_mw=round(float(load[t]-bound.sum()), 3)))
+        previous, was_on = bound, u[:, t]
+    return rows
+
+
 # 按初始历史修复启停时序、必要的启停爬坡条件和场景容量；连续可行性仍由调度判断。
 # 返回重建 u/v/w 或 None；容量修复可把机组从允许最早开机时刻一直打开，因此会修改其他小时。
 def repair(d, scenarios, u):

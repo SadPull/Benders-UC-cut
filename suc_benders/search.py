@@ -17,7 +17,7 @@ from .strengthened_certification import StrengthenedCertification
 from .model import fingerprint
 from .optimization import optimize
 from .qubo import search_qubo, fixed_binary
-from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, transition_violations
+from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, transition_violations, reachable_shortfall
 
 
 def context_id(b, outer, block):
@@ -467,7 +467,8 @@ class WholeDay:
         info["accepted"] = sum(p.get("outcome") == "accepted" for p in info.get("proposals", []))
         self.feedback = summarize(NS(diagnostics=info, failed=info["status"] != "OK",
                                      message=info.get("message", "")),
-                                  baseline_u, costs, self.diagnostics["evaluations"], prior_ids)
+                                  baseline_u, costs, self.diagnostics["evaluations"], prior_ids,
+                                  shortfall=lambda u: reachable_shortfall(self.d, self.scenarios, u))
         self.feedback["rebase"] = dict(attempts=len(rebased),
             improved=sum(r.get("incumbent_decrease", 0.) > 0 for r in rebased),
             incumbent_decrease=float(sum(r.get("incumbent_decrease", 0.) for r in rebased)))

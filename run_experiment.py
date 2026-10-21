@@ -119,7 +119,8 @@ def llm_record(row):
             proposal_id=p.get("proposal_id"), raw_changes=p.get("raw_changes"), invalid_reason=p.get("invalid_reason"),
             outcome=p.get("outcome"), repair_bits=p.get("hamming_u"),
             raw_constraint_violations=p.get("raw_constraint_violations"), feasible=m.get("feasible"),
-            infeasibility_reason=m.get("infeasibility_reason"), costs=m.get("costs"),
+            infeasibility_reason=m.get("infeasibility_reason"), reachable_shortfall=m.get("reachable_shortfall"),
+            costs=m.get("costs"),
             cost_change=m.get("cost_change"), incumbent_decrease=p.get("incumbent_decrease")))
     record["rebase"] = [dict(proposal_id=r.get("proposal_id"), rebased_from=r.get("rebased_from"),
                              units=r.get("units"), outcome=r.get("outcome"), repair_bits=r.get("hamming_u"),

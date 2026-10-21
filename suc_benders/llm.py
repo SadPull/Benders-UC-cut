@@ -186,7 +186,13 @@ def _prompt(
         "Describe each candidate only by the units whose schedule differs from incumbent_u: for every "
         "listed unit give its complete set of ON intervals for the whole day (1-based hours, both ends "
         "inclusive; hours outside the intervals are OFF; an empty list means OFF all day). Units you do "
-        "not list keep their incumbent_u rows. Use 1-based unit/hour numbers in name, reason and changes."
+        "not list keep their incumbent_u rows. Use 1-based unit/hour numbers in name, reason and changes. "
+        "For a dispatch-infeasible earlier candidate, previous_call_feedback.proposals[*].reachable_shortfall "
+        "lists the 1-based hours where the summed reachable output of its ON units is below the maximum "
+        "scenario load, with the MW shortfall. Reachable output per ON unit: startup hour <= min(pstart, "
+        "ramp_up); continuing hour <= previous-hour reachable output + ramp_up (first hour: initial_output + "
+        "ramp_up); hour before a shutdown <= min(pshut, ramp_down); never above pmax. Check this bound for "
+        "every hour of every new candidate, especially peak hours with thin margins."
     )
     body = {
         "task": "Suggest diverse feasible-looking first-stage commitment schedules.",
@@ -200,7 +206,7 @@ def _prompt(
             "reachability_and_feedback": 1,
             "candidate_changes": 1,
             "explanation": "Context unit, period and unit_ids are zero-based. Reachability unit lists, "
-                           "previous_call_feedback unit/start_hour/end_hour and candidate changes "
+                           "previous_call_feedback unit/start_hour/end_hour/hour and candidate changes "
                            "(unit, on_intervals start/end, inclusive) are one-based. "
                            "All matrices retain their ordinary row/column order; do not shift them.",
         },

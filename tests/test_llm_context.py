@@ -156,3 +156,44 @@ def test_both_transports_share_the_output_schema(tiny, options, tmp_path, monkey
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     advisor_request._prepare_codex("codex", body, NS(n_units=whole.d.n_units, horizon=whole.d.horizon), tmp_path)
     assert json.loads((tmp_path/"schema.json").read_text(encoding="utf-8")) == schema
+
+
+def ramp_case():
+    # 机组 1 初始开机、出力 50、爬坡 20；机组 2 初始停机，开机首小时受 pstart=30 限制，第 3 小时关机，关机前受 pshut=25 限制。
+    d = NS(n_units=2, horizon=3, pmax=np.array([100., 100.]), pstart=np.array([100., 30.]),
+           pshut=np.array([100., 25.]), ramp_up=np.array([20., 40.]), ramp_down=np.array([100., 100.]),
+           initial_output=np.array([50., 0.]), initial_on=np.array([1, 0]))
+    scenarios = [NS(load=np.array([101., 110., 99.])), NS(load=np.array([90., 115., 100.5]))]
+    return d, scenarios, np.array([[1, 1, 1], [1, 1, 0]])
+
+
+def test_reachable_shortfall_reports_startup_ramp_and_shutdown_limits():
+    from suc_benders.validation import reachable_shortfall
+    d, scenarios, u = ramp_case()
+    # 可达上界：h1 = 70+30，h2 = 90+min(70, 25)，h3 = 100+0；负荷取各场景最大值。
+    assert reachable_shortfall(d, scenarios, u) == [
+        dict(hour=1, reachable_mw=100., load_mw=101., shortfall_mw=1.),
+        dict(hour=3, reachable_mw=100., load_mw=100.5, shortfall_mw=.5)]
+    assert reachable_shortfall(d, scenarios, np.ones((2, 3))) == [dict(hour=1, reachable_mw=100., load_mw=101.,
+                                                                      shortfall_mw=1.)]
+
+
+def test_feedback_attaches_reachable_shortfall_only_to_infeasible_candidates():
+    from suc_benders.upper_advisor import summarize
+    from suc_benders.validation import reachable_shortfall
+    d, scenarios, u = ramp_case()
+    advice = NS(diagnostics=dict(call_id='llm_upper:1', proposals=[
+        dict(proposal_id='llm:1:0', commitment_id='bad', raw_u=np.ones((2, 3)).tolist(), outcome='infeasible'),
+        dict(proposal_id='llm:1:1', commitment_id='good', raw_u=u.tolist(), outcome='accepted'),
+        dict(proposal_id='llm:1:2', commitment_id='bad', outcome='duplicate')]),
+        failed=False, message='')
+    evaluations = [dict(commitment_hash='bad', feasible=False, dispatch_status='INFEASIBLE', improved=False, u=u.tolist()),
+                   dict(commitment_hash='good', feasible=True, dispatch_status='OPTIMAL', improved=True, u=u.tolist(),
+                        objective=1., fixed_cost=0., expected_fuel_cost=1.)]
+    rows = summarize(advice, u, None, evaluations, set(),
+                     shortfall=lambda x: reachable_shortfall(d, scenarios, x))['proposals']
+    # 按模型原样方案计算（全开只缺第 1 小时）；没有 raw_u 时退回实际评估的方案（缺第 1、3 小时）。
+    assert [r['hour'] for r in rows[0]['reachable_shortfall']] == [1]
+    assert [r['hour'] for r in rows[2]['reachable_shortfall']] == [1, 3]
+    assert rows[0]['infeasibility_reason'] == 'INFEASIBLE' and rows[1]['reachable_shortfall'] is None
+    assert summarize(advice, u, None, evaluations, set())['proposals'][0]['reachable_shortfall'] is None

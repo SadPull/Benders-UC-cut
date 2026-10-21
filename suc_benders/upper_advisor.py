@@ -251,7 +251,9 @@ class UpperAdvisor:
 
 # 关联候选回执、调用前方案与已完成评估，返回费用变化、修复距离和缓存命中反馈。
 # 没有实际调度结果时不编造费用；历史或重复方案不记为本次刷新 incumbent。
-def summarize(advice, baseline_u, baseline, evaluations, previous_ids):
+# shortfall 给定时，对调度不可行的候选附上可达出力低于负荷的小时及缺口（MW），供模型修正；
+# 按模型原样提出的 raw_u 计算，没有时退回实际评估的修复后方案。
+def summarize(advice, baseline_u, baseline, evaluations, previous_ids, shortfall=None):
     measured = {r["commitment_hash"]: r for r in evaluations}
     rows = []
     for p in advice.diagnostics.get("proposals", []):
@@ -271,6 +273,9 @@ def summarize(advice, baseline_u, baseline, evaluations, previous_ids):
                        note='Known violations of the original proposal; not a full explanation of every repair edit.')
                        if p.get('hamming_u') or p.get('raw_constraint_violations') else None),
                    infeasibility_reason=(r['dispatch_status'] if r and not r['feasible'] else None),
+                   reachable_shortfall=(shortfall(p['raw_u'] if p.get('raw_u') is not None else r['u'])
+                                        if shortfall and r and not r['feasible']
+                                        and (p.get('raw_u') is not None or r.get('u') is not None) else None),
                    baseline_cost=baseline, costs=None, cost_change=None,
                    refreshed_incumbent=bool(r and r["improved"] and not cached))
         if r and r["feasible"]:

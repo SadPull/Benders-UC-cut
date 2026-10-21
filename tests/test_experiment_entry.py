@@ -181,7 +181,8 @@ def test_llm_record_keeps_base_and_per_candidate_outcomes():
                feedback=dict(proposals=[dict(proposal_id='llm:1:0', feasible=True, infeasibility_reason=None,
                                              costs=dict(total=95.), cost_change=dict(total=-5.)),
                                         dict(proposal_id='llm:1:1', feasible=None),
-                                        dict(proposal_id='llm:1:2', feasible=False, infeasibility_reason='INFEASIBLE')]),
+                                        dict(proposal_id='llm:1:2', feasible=False, infeasibility_reason='INFEASIBLE',
+                                             reachable_shortfall=[dict(hour=9, shortfall_mw=30.)])]),
                rebase=[dict(proposal_id='llm:1:0:rebase:0', rebased_from='llm:1:0', units=[1], raw_u=[[0., 1.]],
                             outcome='duplicate', hamming_u=0, incumbent_decrease=0.)])
     record = entry.llm_record(row)
@@ -191,6 +192,7 @@ def test_llm_record_keeps_base_and_per_candidate_outcomes():
     assert 'raw_u' not in first and 'repaired_u' not in first
     assert invalid['outcome'] == 'invalid_candidate' and invalid['invalid_reason'] == 'unit 9 out of range 1..1'
     assert infeasible['feasible'] is False and infeasible['infeasibility_reason'] == 'INFEASIBLE'
+    assert infeasible['reachable_shortfall'] == [dict(hour=9, shortfall_mw=30.)] and first['reachable_shortfall'] is None
     assert record['rebase'] == [dict(proposal_id='llm:1:0:rebase:0', rebased_from='llm:1:0', units=[1],
                                      outcome='duplicate', repair_bits=0, incumbent_decrease=0.)]
     json.dumps(record)
