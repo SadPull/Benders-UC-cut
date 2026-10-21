@@ -94,9 +94,10 @@ class UpperAdvisor:
         prompt = json.loads(body["input"])
         prompt["advice_routing"] = routing
         body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
+        # base_u 是提示中模型看到的 incumbent_u；增量候选只有配合它才能还原成完整方案，随回执落盘。
         self.pending = dict(call_id=f"llm_upper:{iteration}", stage="advice_batch", **routing,
             status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
-            prompt_mode="delta" if continuation else "full",
+            base_u=llm.prompt_base(body), prompt_mode="delta" if continuation else "full",
             trigger_stalled=batch["trigger_stalled"].copy(),
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)

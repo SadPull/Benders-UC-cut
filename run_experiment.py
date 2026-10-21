@@ -103,6 +103,31 @@ def solution_snapshot(result, elapsed, prior=0., session_id=None):
                 sa_calls=result.diagnostics.get("sa_calls", 0))
 
 
+# 精简一次 LLM 调用的回执：保留请求基准 base_u 与模型原样改动 raw_changes（二者可还原完整方案），
+# 逐候选写出格式剔除原因、评估结果、调度状态与费用，以及移植结果；不保存可由此重建的整张矩阵。
+# accepted 是评估后被接受的候选数，format_valid/invalid 是解析阶段的合格/剔除数。
+def llm_record(row):
+    record = {key: row.get(key) for key in (
+        "call_id", "status", "thread_id", "requested_session_id", "request_directory", "background_seconds",
+        "request_upper", "upper_before_probes", "upper_after_probes", "prompt_mode", "usage", "message",
+        "accepted", "format_valid", "invalid", "base_u", "response_model", "response_output")}
+    measured = {r["proposal_id"]: r for r in (row.get("feedback") or {}).get("proposals", [])}
+    record["candidates"] = []
+    for p in row.get("proposals") or []:
+        m = measured.get(p.get("proposal_id"), {})
+        record["candidates"].append(dict(
+            proposal_id=p.get("proposal_id"), raw_changes=p.get("raw_changes"), invalid_reason=p.get("invalid_reason"),
+            outcome=p.get("outcome"), repair_bits=p.get("hamming_u"),
+            raw_constraint_violations=p.get("raw_constraint_violations"), feasible=m.get("feasible"),
+            infeasibility_reason=m.get("infeasibility_reason"), costs=m.get("costs"),
+            cost_change=m.get("cost_change"), incumbent_decrease=p.get("incumbent_decrease")))
+    record["rebase"] = [dict(proposal_id=r.get("proposal_id"), rebased_from=r.get("rebased_from"),
+                             units=r.get("units"), outcome=r.get("outcome"), repair_bits=r.get("hamming_u"),
+                             incumbent_decrease=r.get("incumbent_decrease"))
+                        for r in row.get("rebase") or []]
+    return record
+
+
 class ExperimentProgress:
     def __init__(self, output, prior=0.):
         self.output = output
@@ -251,10 +276,7 @@ def main():
     compact.update(timings=result.diagnostics.get("timings", {}),
                    search_statistics=result.diagnostics.get("search_statistics", {}),
                    certification_history=result.certification_history,
-                   llm_history=[{key: row.get(key) for key in ("call_id", "status", "thread_id", "requested_session_id",
-                       "request_directory", "background_seconds", "request_upper", "upper_before_probes", "upper_after_probes",
-                       "prompt_mode", "usage", "message", "accepted", "response_model", "response_output")}
-                       for row in result.llm_history])
+                   llm_history=[llm_record(row) for row in result.llm_history])
     save(output / "result.json", compact)
     final_save_seconds = perf_counter() - final_save_started
     summary = dict(scope="RESUMED_CONVERGENCE_CHECK" if resume_state is not None else "COLD_START_EXPLORATORY",

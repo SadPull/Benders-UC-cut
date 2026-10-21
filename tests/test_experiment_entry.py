@@ -167,3 +167,30 @@ def test_resume_entry_adds_budget_preserves_state_and_skips_reference(tmp_path, 
     assert not (output/'reference.json').exists()
     manifest = json.loads((output/'manifest.json').read_text(encoding='utf-8'))
     assert manifest['inherited_evidence'] and not manifest['cold_start']
+
+
+def test_llm_record_keeps_base_and_per_candidate_outcomes():
+    changes = [dict(unit=1, on_intervals=[])]
+    row = dict(call_id='llm_upper:1', status='OK', message='1 of 3 candidates invalid', accepted=1,
+               format_valid=2, invalid=1, base_u=[[1., 1.]], response_output=['{}'],
+               proposals=[dict(proposal_id='llm:1:0', raw_changes=changes, raw_u=[[0., 0.]], repaired_u=[[0., 0.]],
+                               outcome='accepted', hamming_u=0, raw_constraint_violations=[], incumbent_decrease=5.),
+                          dict(proposal_id='llm:1:1', raw_changes=[dict(unit=9, on_intervals=[])],
+                               outcome='invalid_candidate', invalid_reason='unit 9 out of range 1..1'),
+                          dict(proposal_id='llm:1:2', raw_changes=changes, outcome='infeasible', hamming_u=1)],
+               feedback=dict(proposals=[dict(proposal_id='llm:1:0', feasible=True, infeasibility_reason=None,
+                                             costs=dict(total=95.), cost_change=dict(total=-5.)),
+                                        dict(proposal_id='llm:1:1', feasible=None),
+                                        dict(proposal_id='llm:1:2', feasible=False, infeasibility_reason='INFEASIBLE')]),
+               rebase=[dict(proposal_id='llm:1:0:rebase:0', rebased_from='llm:1:0', units=[1], raw_u=[[0., 1.]],
+                            outcome='duplicate', hamming_u=0, incumbent_decrease=0.)])
+    record = entry.llm_record(row)
+    assert record['base_u'] == [[1., 1.]] and (record['format_valid'], record['invalid'], record['accepted']) == (2, 1, 1)
+    first, invalid, infeasible = record['candidates']
+    assert first['raw_changes'] == changes and first['costs'] == {'total': 95.} and first['incumbent_decrease'] == 5.
+    assert 'raw_u' not in first and 'repaired_u' not in first
+    assert invalid['outcome'] == 'invalid_candidate' and invalid['invalid_reason'] == 'unit 9 out of range 1..1'
+    assert infeasible['feasible'] is False and infeasible['infeasibility_reason'] == 'INFEASIBLE'
+    assert record['rebase'] == [dict(proposal_id='llm:1:0:rebase:0', rebased_from='llm:1:0', units=[1],
+                                     outcome='duplicate', repair_bits=0, incumbent_decrease=0.)]
+    json.dumps(record)

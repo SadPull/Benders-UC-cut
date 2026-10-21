@@ -92,7 +92,8 @@ def setup_advice(tiny, options, monkeypatch):
         {'upper': whole.result.objective, 'previous_call_feedback': whole.feedback}, [], None))
     monkeypatch.setattr('suc_benders.upper_advisor.llm.request_body',
         lambda d, s, r, o, context, bases, iteration, continuation=False:
-            dict(instructions='' if continuation else 'test', input=json.dumps(dict(context, delta=continuation)),
+            dict(instructions='' if continuation else 'test', input=json.dumps(dict(context, delta=continuation,
+                                     incumbent_u=whole.result.u.tolist())),
                  model=o.llm_model, reasoning={'effort': 'max'}))
     def consume(proposals, info, searches, baseline):
         info['feedback'] = {'measured_upper': whole.result.objective}
@@ -113,6 +114,8 @@ def test_multiple_calls_keep_session_and_send_new_measured_feedback(tiny, option
     whole.advice.begin()
     whole.advice.start_request(); whole.advice.start_request()
     assert len(calls) == 1 and whole.result.llm_calls == 4
+    # 回执记下模型看到的基准方案，增量候选据此还原。
+    assert whole.result.llm_history[-1]['base_u'] == whole.result.u.tolist()
     whole.advice.poll([])
     prior_upper = whole.result.objective
     whole.result.objective -= 1
