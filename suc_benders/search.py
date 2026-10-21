@@ -396,7 +396,8 @@ class WholeDay:
                         projections.append(dict(block=search.index, completed=projection is not None,
                                                 feasible=projection.feasible if projection is not None else None))
                     record["block_projections"] = projections
-                    record["local_dispatch_completed"] = (len(projections) == len(searches)
+                    # 没有块搜索时没有局部调度，局部可行性未知，不能按空集记为可行。
+                    record["local_dispatch_completed"] = (bool(searches) and len(projections) == len(searches)
                         and all(row["completed"] for row in projections))
                     record["local_feasible"] = (all(row["feasible"] for row in projections)
                         if record["local_dispatch_completed"] else None)

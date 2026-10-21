@@ -105,8 +105,8 @@ def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file
         if result.status != "REFERENCE_TARGET_REACHED":
             _finish_advice(run)
     except Exception as error:
-        result.status = ("TIME_LIMIT" if run.remaining() <= 0 or isinstance(error, TimeoutError)
-                         else f"{run.stage}_FAILED")
+        # 只有截止时间信号归为 TIME_LIMIT；截止前后抛出的其他异常都是真实失败，保留阶段名。
+        result.status = "TIME_LIMIT" if isinstance(error, TimeoutError) else f"{run.stage}_FAILED"
         result.message = f"{type(error).__name__}: {error}"
     finally:
         _shutdown(run)

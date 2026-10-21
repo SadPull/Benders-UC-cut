@@ -149,3 +149,19 @@ def test_exhausted_sa_budget_skips_search_without_waiting(tiny, options):
     result = solver.solve(*tiny(2, 6), options)
     assert result.status == 'SEARCH_EXHAUSTED' and result.diagnostics['sa_budget_exhausted']
     assert result.diagnostics['sa_calls'] == 0 and result.validation['feasible']
+
+
+def test_failure_after_deadline_keeps_stage_name(tiny, options, monkeypatch):
+    now = [0.]; options.time_limit = 10
+    monkeypatch.setattr(search_core, "perf_counter", lambda: now[0])
+    monkeypatch.setattr(solver, "perf_counter", lambda: now[0])
+
+    def broken(*args):
+        now[0] = 11.
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(search_core, "anneal", broken)
+    result = solver.solve(*tiny(2, 6), options)
+    # 超过截止时间后抛出的非 TimeoutError 是真实故障，不能被记成 TIME_LIMIT。
+    assert result.status.startswith("BLOCK_") and result.status.endswith("_FAILED")
+    assert result.message == "RuntimeError: boom" and result.validation["feasible"]

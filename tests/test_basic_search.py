@@ -85,6 +85,17 @@ def test_numerical_dispatch_status_rejects_candidate_without_caching(tiny, optio
     assert whole.accept(x, 'sa', {})
 
 
+def test_llm_proposal_without_block_searches_has_unknown_local_feasibility(tiny, options):
+    whole = whole_day(tiny, options)
+    _, _, baseline = whole.upper_context()
+    record = {"proposal_id": "llm:1:0"}
+    info = dict(status="OK", proposals=[record])
+    whole.consume_upper([(np.array([[1, 1, 1], [0, 0, 0]]), record)], info, [], baseline)
+    assert record["outcome"] == "accepted"
+    assert record["local_dispatch_completed"] is False and record["local_feasible"] is None
+    assert whole.feedback["proposals"][0]["local_feasible"] is None
+
+
 def test_reachability_fixed_bits_reach_every_block_master(tiny, options):
     d, scenarios = tiny(1, 6)
     d.ramp_up[:] = 5.; scenarios[0].load[:] = 0.
