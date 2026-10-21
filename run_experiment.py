@@ -335,8 +335,7 @@ def main():
                    note="轻量留证；latest-solution.json 仅保存方案，不是完整搜索检查点。"
                         "续跑不做参考求解或完整审计；没有自动补跑。")
     save(output / "summary.json", summary)
-    status_text = {"CONVERGED": "已达到认证间隙目标", "TIME_LIMIT": "达到时间上限",
-                   "MAX_ITERATIONS": "达到迭代上限"}.get(result.status, "求解未正常完成")
+    status_text = {"CONVERGED": "已达到认证间隙目标", "TIME_LIMIT": "达到时间上限"}.get(result.status, "求解未正常完成")
     print(f"\n主算法状态：{status_text}（{result.status}）", flush=True)
     if result.message:
         print(f"状态详情：{result.message}", flush=True)

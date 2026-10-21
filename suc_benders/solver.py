@@ -14,9 +14,10 @@ from .validation import validate
 
 # 可序列化求解结果：objective 是已验证方案费用，lower_bound 是当前模式认可的全局下界。
 # coordination_upper 属于协调对偶模型；状态、原问题 gap 与诊断记录需分别解释。
+# 求解中 status 为 RUNNING；结束时只会是 CONVERGED、TIME_LIMIT 或 <阶段>_FAILED。
 @dataclass
 class Result:
-    status: str = "MAX_ITERATIONS"
+    status: str = "RUNNING"
     message: str = ""
     objective: float = np.inf
     lower_bound: float = -np.inf
