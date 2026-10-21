@@ -1,3 +1,5 @@
+from types import SimpleNamespace as NS
+
 import numpy as np
 import pytest
 
@@ -138,3 +140,42 @@ def test_failure_after_deadline_keeps_stage_name(tiny, options, monkeypatch):
     # 超过截止时间后抛出的非 TimeoutError 是真实故障，不能被记成 TIME_LIMIT。
     assert result.status == "ROUND_1_BLOCK_1_FAILED"
     assert result.message == "RuntimeError: boom" and result.validation["feasible"]
+
+
+def test_qubo_encodes_only_the_feasibility_cuts_closest_to_the_anchor(tiny, options, monkeypatch):
+    whole = make_whole(*tiny(2, 6), options)
+    search = search_core.BlockSearch(partition(whole.m, 3)[0][1], options, 2, whole)
+    monkeypatch.setattr(search_core, "QUBO_FEASIBILITY_CUTS", 3)
+    nx = len(search.b.binary)
+    anchor = np.ones(nx)
+    optimality = [NS(optimality=True, alpha=-float(k), beta=np.zeros(nx)) for k in range(2)]
+    feasibility = [NS(optimality=False, alpha=-10.+k, beta=np.zeros(nx)) for k in range(6)]
+    for cut in [optimality[0], *feasibility[:3], optimality[1], *feasibility[3:]]:
+        search.add_cut(cut)
+    cuts, stored, encoded = search.qubo_cuts(anchor)
+    # 保留全部最优性割和 alpha+beta·anchor 最大（松弛量最小）的 3 条可行割，顺序不变。
+    assert (stored, encoded) == (6, 3)
+    assert cuts == [optimality[0], optimality[1], *feasibility[3:]]
+
+
+def test_cut_store_is_first_in_first_out_and_totals_keep_counting(tiny, options, monkeypatch):
+    whole = make_whole(*tiny(2, 6), options)
+    search = search_core.BlockSearch(partition(whole.m, 3)[0][0], options, 1, whole)
+    monkeypatch.setattr(search_core, "CUT_LIMIT", 3)
+    cuts = [NS(optimality=k % 2 == 0, alpha=0., beta=np.zeros(1)) for k in range(5)]
+    for cut in cuts:
+        search.add_cut(cut)
+    search.summarize()
+    assert search.cuts == cuts[2:] and search.diagnostic["cuts_dropped"] == 2
+    assert search.cut_totals == dict(optimality=3, feasibility=2)
+    assert search.diagnostic["stored_cuts"] == 3 and search.diagnostic["optimality_cuts"] == 3
+
+
+def test_block_cache_keeps_compact_records_and_best_local_keeps_the_point(tiny, options, monkeypatch):
+    whole = make_whole(*tiny(2, 6), options)
+    search = search_core.BlockSearch(partition(whole.m, 3)[0][0], options, 1, whole)
+    monkeypatch.setattr(search_core, "anneal", lambda *args: ([], {"bits": 1}))
+    search.step([whole.best.point[search.b.cols[search.b.binary]]], 1)
+    record, = search.cache.values()
+    assert set(vars(record)) == {"feasible", "status", "cost"}
+    assert search.best_local.point is not None and search.best_local.cost == record.cost

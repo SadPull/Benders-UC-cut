@@ -217,7 +217,7 @@ def _finish_round(run, k, start, record):
     return run.target_reached()
 
 
-# 一轮开始时的快照：UB、SA 调用数、评估数、LLM 调用数和两类割数量。
+# 一轮开始时的快照：UB、SA 调用数、评估数、LLM 调用数和两类割的累计数量。
 def _round_start(run):
     optimality, feasibility = _cut_counts(run.searches)
     return NS(upper=run.result.objective, sa_calls=run.whole.diagnostics["sa_calls"],
@@ -233,8 +233,8 @@ def _round_progress(run, start):
 
 
 def _cut_counts(searches):
-    return (sum(c.optimality for search in searches for c in search.cuts),
-            sum(not c.optimality for search in searches for c in search.cuts))
+    return (sum(search.cut_totals["optimality"] for search in searches),
+            sum(search.cut_totals["feasibility"] for search in searches))
 
 
 # SA 用尽后只收尾已有批次及其升级请求，没有工作时不空等预算。

@@ -22,6 +22,10 @@ from .validation import fixed_cost, capacity, commitment, commitment_hash, pack,
 
 # LLM 来源的可行方案池保留费用最低的 16 个。
 ADVISOR_POOL_SIZE = 16
+# 块搜索贯穿整个运行：每块至多保存 CUT_LIMIT 条块内割（先进先出），每个搜索 QUBO 只编码
+# anchor 处松弛量最小的 QUBO_FEASIBILITY_CUTS 条可行割，使 QUBO 规模与内存不随轮数增长。
+CUT_LIMIT = 4096
+QUBO_FEASIBILITY_CUTS = 64
 
 
 # 全天 u/v/w 二进制向量的缓存键。
@@ -436,6 +440,7 @@ class BlockSearch:
         self.hard = hard_rows(b, fixed=self.fixed)
         self.best_local = None
         self.cuts, self.cache, self.history = [], {}, []
+        self.cut_totals = dict(optimality=0, feasibility=0)
         # 跨块纯二进制行（relaxed_rows 的补集）：块外列代入当前 incumbent 后成为块内硬约束，只进入搜索 QUBO。
         m = whole.m
         rows = m.A[b.cross].tocsr()
@@ -446,7 +451,7 @@ class BlockSearch:
                            outer=(rows @ sparse.diags((~inside).astype(float))).tocsr(),
                            rhs=m.rhs[b.cross][keep], eq=m.eq[b.cross][keep])
         self.diagnostic = dict(block=index, hours=(b.times + 1).tolist(), visits=0,
-                               sa_calls=0, first_visit_seconds=None)
+                               sa_calls=0, first_visit_seconds=None, cuts_dropped=0)
         whole.diagnostics["blocks"].append(self.diagnostic)
         self.summarize()
 
@@ -458,12 +463,30 @@ class BlockSearch:
                  ring.inner.data[ring.inner.indptr[k]:ring.inner.indptr[k+1]], rhs[k], ring.eq[k])
                 for k in range(len(rhs))]
 
-    # 刷新本块的最好定价费用及两类割数量，供进度与终态诊断读取。
+    # 刷新本块的最好定价费用、累计学到的两类割数、当前保存的割数与缓存规模，供进度与终态诊断读取。
     def summarize(self):
         self.diagnostic.update(
             best_local_cost=self.best_local.cost if self.best_local is not None else None,
-            optimality_cuts=sum(c.optimality for c in self.cuts),
-            feasibility_cuts=sum(not c.optimality for c in self.cuts))
+            optimality_cuts=self.cut_totals["optimality"], feasibility_cuts=self.cut_totals["feasibility"],
+            stored_cuts=len(self.cuts), cache_size=len(self.cache))
+
+    # 收录一条块内割；超过 CUT_LIMIT 时丢弃最早的一条并计数。累计数不因丢弃而减少。
+    def add_cut(self, cut):
+        self.cuts.append(cut)
+        self.cut_totals["optimality" if cut.optimality else "feasibility"] += 1
+        if len(self.cuts) > CUT_LIMIT:
+            del self.cuts[0]
+            self.diagnostic["cuts_dropped"] += 1
+
+    # 交给搜索 QUBO 的割：全部最优性割（QUBO 只取 anchor 处最紧的一条作费用代理），以及 anchor 处
+    # 松弛量最小（alpha + beta·anchor 最大）的至多 QUBO_FEASIBILITY_CUTS 条可行割；保持原有顺序。
+    def qubo_cuts(self, anchor):
+        feasibility = [k for k, c in enumerate(self.cuts) if not c.optimality]
+        chosen = set(feasibility)
+        if len(feasibility) > QUBO_FEASIBILITY_CUTS:
+            values = np.array([self.cuts[k].alpha + self.cuts[k].beta @ anchor for k in feasibility])
+            chosen = {feasibility[k] for k in np.argsort(-values, kind="stable")[:QUBO_FEASIBILITY_CUTS]}
+        return [c for k, c in enumerate(self.cuts) if c.optimality or k in chosen], len(feasibility), len(chosen)
 
     # 在固定价格下评估精确二进制块点（块内约束，跨块行松弛），缓存调度并学习块内割。
     # 超时或数值状态不缓存；定价费用只用于块内比较和 QUBO 代理，不能替代全天原始费用。
@@ -490,14 +513,15 @@ class BlockSearch:
             return
         if whole.remaining() <= 0:
             return
-        self.cache[key] = r
+        # 缓存只保留紧凑记录；完整调度结果只为定价费用最低的块点保留。
+        record = self.cache[key] = NS(feasible=r.feasible, status=r.status, cost=r.cost)
         if r.cut is not None:
-            self.cuts.append(r.cut)
+            self.add_cut(r.cut)
         if r.feasible and (self.best_local is None or r.cost < self.best_local.cost):
             self.best_local = r
         whole.diagnostics["local_evaluations"].append(dict(block=self.index, source=source,
             feasible=r.feasible, cost=r.cost if r.feasible else None))
-        return r
+        return record
 
     # 完成本块的一次访问：先评估种子，再采样一批 SA，评估原始块候选并把修复后的全天方案交给全天校验。
     # 整批候选共享采样前的全天方案快照。
@@ -519,7 +543,9 @@ class BlockSearch:
         phase = perf_counter()
         columns = b.cols[b.binary]
         boundary = self.boundary_rows()
-        q = search_qubo(self.hard, b, self.cuts, whole.best.point[columns], boundary, o)
+        anchor = whole.best.point[columns]
+        cuts, stored, encoded = self.qubo_cuts(anchor)
+        q = search_qubo(self.hard, b, cuts, anchor, boundary, o)
         whole.timings["qubo"] += perf_counter() - phase
         if whole.progress is not None:
             whole.diagnostics["pending_qubo"] = dict(bits=q.Q.shape[0], nonzeros=q.Q.nnz,
@@ -536,8 +562,9 @@ class BlockSearch:
         proposals, sampling = anneal(q, o, whole.remaining(), sample_seeds)
         whole.timings["annealing"] += perf_counter() - phase
         # 采样诊断只保留标量与哈希；anchor 是本批共享的 incumbent 身份。
-        sampling.update(block=self.index, round=k, seed=sample_seeds,
-                        boundary_rows=len(boundary), anchor=anchor_id, anchor_cost=anchor_cost,
+        sampling.update(block=self.index, round=k, seed=sample_seeds, boundary_rows=len(boundary),
+                        feasibility_cuts_stored=stored, feasibility_cuts_encoded=encoded,
+                        anchor=anchor_id, anchor_cost=anchor_cost,
                         raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
                         unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
         whole.diagnostics["sampling"].append(sampling)
@@ -561,9 +588,8 @@ class BlockSearch:
                 whole.accept(repaired, "sa", record)
         if whole.remaining() <= 0:
             return
-        optimality = sum(c.optimality for c in self.cuts)
         self.history.append(dict(block=self.index, round=k, best_local_cost=self.best_local.cost,
-                                 optimality_cuts=optimality, feasibility_cuts=len(self.cuts)-optimality,
-                                 sampling=sampling))
+                                 optimality_cuts=self.cut_totals["optimality"],
+                                 feasibility_cuts=self.cut_totals["feasibility"], sampling=sampling))
         whole.result.history.append(self.history[-1])
         self.summarize()
