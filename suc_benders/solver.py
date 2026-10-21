@@ -7,7 +7,7 @@ from types import SimpleNamespace as NS
 import numpy as np
 
 from .benders import coordinate
-from .model import model, partition
+from .model import model, partition, priced
 from .optimization import optimize
 from .reference import solve_reference
 from .search import BlockSearch, WholeDay, SABudgetExhausted, closed
@@ -140,14 +140,14 @@ def _search(run, m, relaxation):
     o, result, whole = run.o, run.result, run.whole
     prices = relaxation.prices
     with whole.sa_work():
-        blocks, cross = partition(m, o.block_hours, prices) if o.sa_enabled else ([], np.array([], int))
+        blocks, cross = partition(m, o.block_hours) if o.sa_enabled else ([], np.array([], int))
     planes, previous = [[] for _ in blocks], [[] for _ in blocks]
     for outer in (range(1, o.max_outer + 1) if o.sa_enabled and result.status != "REFERENCE_TARGET_REACHED" else []):
         run.require_time()
         with whole.sa_work():
             # 新乘子对应新的块费用与局部割环境，历史二进制种子必须重新调度。
-            blocks, _ = partition(m, o.block_hours, prices)
-            run.searches = [BlockSearch(b, o, outer, j + 1, whole, planes[j]) for j, b in enumerate(blocks)]
+            run.searches = [BlockSearch(priced(b, prices[cross]), o, outer, j + 1, whole, planes[j])
+                            for j, b in enumerate(blocks)]
         # LLM 批次可以跨越协调：新乘子的块建好后先推进在途批次。
         if whole.advice.state["phase"] == "llm":
             run.stage = "ADVISOR_CARRYOVER"
