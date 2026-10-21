@@ -54,6 +54,14 @@ class Options:
     llm_max_calls: int | None = 3
     # True：初始化后立即发首个请求，不等待 SA 停滞；之后仍按 llm_patience 触发。
     llm_first_call_at_start: bool = False
+    # 升级层：常规层一次调用降幅低于 llm_escalation_gain（比例）或失败时，并行发起一次 Codex 请求（隔离用户配置、不续接）；
+    # 模型为空即关闭。剩余预算扣除预留后不足 min_seconds 时不发起，单次最多 timeout 秒且不超过剩余预算。
+    llm_escalation_model: str = ""
+    llm_escalation_command: str = ""
+    llm_escalation_directory: str = ""
+    llm_escalation_timeout: float = 1800
+    llm_escalation_min_seconds: float = 700
+    llm_escalation_gain: float = .005
 
 
 # 按默认值 → 本地配置 → 显式覆盖构造 Options，拒绝未知字段、非法数值和不兼容模式。
@@ -82,9 +90,12 @@ def load_options(overrides=None, config_path=None):
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
     for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
-                 "sa_hard_weight", "sa_capacity_weight"):
+                 "sa_hard_weight", "sa_capacity_weight", "llm_escalation_timeout", "llm_escalation_min_seconds",
+                 "llm_escalation_gain"):
         v = getattr(o, name)
-        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (v == 0 and name not in ("tolerance", "llm_reserve_seconds")):
+        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (
+                v == 0 and name not in ("tolerance", "llm_reserve_seconds", "llm_escalation_min_seconds",
+                                        "llm_escalation_gain")):
             raise ValueError(f"Invalid numeric option: {name}")
     if not 0 < o.sa_cooling < 1 or not o.sa_cutoff < o.sa_temperature:
         raise ValueError("Require 0 < sa_cooling < 1 and sa_cutoff < sa_temperature")
@@ -99,11 +110,14 @@ def load_options(overrides=None, config_path=None):
             raise ValueError('SA budget requires a nonnegative finite value')
     if not o.sa_enabled and o.llm_enabled:
         raise ValueError("Disabling SA requires LLM disabled")
-    for name in ("llm_url", "llm_model", "llm_api_key", "llm_agent_directory", "llm_codex_command"):
+    for name in ("llm_url", "llm_model", "llm_api_key", "llm_agent_directory", "llm_codex_command",
+                 "llm_escalation_model", "llm_escalation_command", "llm_escalation_directory"):
         if not isinstance(getattr(o, name), str):
             raise ValueError(f"{name} must be a string")
     if o.llm_codex_command and not o.llm_agent_directory:
         raise ValueError("Codex tasks require llm_agent_directory for request evidence")
+    if o.llm_enabled and o.llm_escalation_model and not (o.llm_escalation_command and o.llm_escalation_directory):
+        raise ValueError("LLM escalation requires llm_escalation_command and llm_escalation_directory")
     if o.llm_enabled and not o.llm_model:
         raise ValueError("Set llm_model before enabling LLM")
     if o.llm_enabled and not o.llm_agent_directory and not all((o.llm_url, o.llm_api_key)):

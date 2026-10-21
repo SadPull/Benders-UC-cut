@@ -26,6 +26,8 @@ py -3.10 -m pip install -r requirements.txt
 
 LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区间（1 起始、首尾包含，空列表表示全天关机），程序以请求中的 `incumbent_u` 还原完整矩阵；`llm_requests/` 或 `result.json` 同时保留原样改动 `raw_changes` 和还原矩阵 `raw_u`。机组越界、重复、区间越界或重叠的候选单独剔除，记录 `invalid_reason` 并在下一次调用的反馈中告知模型；其余候选照常评估，全部不合格时该次调用记为 `NO_VALID_CANDIDATE`。
 
+**升级层（可选）**：`LLM_ESCALATION_MODEL` 填入模型名（如 `gpt-6-astra`）即开启，常规层须为 `LLM_TRANSPORT="http"`。常规层一次调用使 UB 降幅低于 `LLM_ESCALATION_GAIN`（默认 0.5%）或调用失败时，升级层被武装，并经 Codex CLI 以推理 max 并行发起一次请求；常规层照常继续，两层回复都走同一评估与移植流程。升级层每次发送完整提示、不续接会话；剩余预算扣除预留后不足 `LLM_ESCALATION_MIN_SECONDS`（默认 700 秒）时不发起，单次最多 `LLM_ESCALATION_TIMEOUT_SECONDS` 且不超过剩余预算。升级请求有效改进后清除期间累积的武装，早于该改进发出的常规请求不再触发升级；连续两次失败只停用升级层。每次升级调用在新建的临时 `CODEX_HOME` 中运行，其中只有登录信息副本和去掉 memories、插件、hooks、MCP、桌面与项目设置的配置，不含全局 AGENTS.md，并加 `--ephemeral`；调用结束即删除，删除结果记入回执 `codex_home_cleanup`。`result.json` 的每次调用标明 `tier`（regular／escalation）、`transport`、`triggered_by` 与 `deadline_seconds`，`summary.json` 汇总升级次数、有效改进次数与停用原因。
+
 入口默认从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%。`RESUME_FROM=None` 表示冷启动；续跑时填入从归档解压的完整检查点路径，程序保留已有方案、认证 LB、累计耗时和调用计数，重建局部搜索模型，并把配置预算作为追加时间。续跑跳过参考求解；冷启动另用最多 120 秒求参考解，其结果不回填主算法。
 
 每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`），续跑时选用历史中最后一次成功调用的会话；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
@@ -35,7 +37,7 @@ LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区�
 - `summary.json`：状态、UB/LB/gap、耗时和统计。
 - `result.json`：精简主结果、最终方案、计时与调用摘要（含每次 LLM 调用的 usage 与回复原文）。
 - `reference.json`：仅冷启动运行时生成的独立参考解。
-- `llm_requests/`：Codex 通道实际触发时的请求与回执。
+- `llm_requests/`：Codex 通道或升级层实际触发时的请求、提示、命令行、事件流与回执（不含登录信息）。
 - `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、SHA256、依赖版本和脱敏后的完整有效配置。
 - `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案。最新方案不含完整搜索状态，不能作为 `RESUME_FROM` 的完整检查点。
 
@@ -63,7 +65,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `suc_benders/search.py`：单块搜索及共享的全天候选修复、调度、校验、去重和预算。
 - `suc_benders/benders.py`：连续调度、Benders 割、块主问题和跨块乘子协调。
 - `suc_benders/strengthened_*.py`：独立强化证明模型，只返回认证下界。
-- `suc_benders/upper_advisor.py`：异步 LLM 建议调度；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程。
+- `suc_benders/upper_advisor.py`：异步 LLM 建议调度（常规层批次与并行升级层）；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程与升级层的隔离 `CODEX_HOME`。
 - `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
 - `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20 输入。
 - `tests/`：当前分块主线的必要回归；执行 `py -3.10 -m pytest -q tests`。
@@ -94,7 +96,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - **LLM 延迟**：gpt-6-astra（max）单次 391–900 s，主要是推理 token 以约 28 tok/s 生成；1800 s 内只能完成 2 次调用。同一首调 prompt 下，deepseek-v4.1-flash（max）单次 156–277 s、约 220 tok/s，推理 token 为 gpt 的 3–5 倍，候选质量与 gpt 首调相当。
 - **非流式 HTTP 会在约 300 秒处被中转切断（HTTP 503）**，因此 HTTP 通道改为流式；IEEE118 中 315 秒的调用传输完整。
 - **整矩阵输出不可靠**：IEEE118 的 4 次 DeepSeek 调用中有 2 次在 54×24 矩阵里漏写一行（均位于连续相同的全天开机行中间，其余改动正确），旧解析规则将整个回复作废。v0.35.0 改为增量输出、JSON schema 约束和逐候选校验；同一 IEEE118 首调 prompt 的试探中 4 个候选全部合格且可行，正文输出从约 10,600 token 降到 431 token，单次调用把 UB 从 4,004,999.77 降到 3,847,762.95（+4.760%）。修复后尚未重跑完整求解。
-- **Codex 通道注入用户级配置**：Codex CLI 会带入个人 memory、AGENTS.md 和插件提示（每次多约 2.4 万输入 token），其中 memory 含历史实验信息，包括 RTS-24 参考最优值。gpt 组结果应在此限制下解读；HTTP 通道不受影响。
+- **Codex 通道注入用户级配置**：Codex CLI 会带入个人 memory、AGENTS.md 和插件提示（每次多约 2.4 万输入 token），其中 memory 含历史实验信息，包括 RTS-24 参考最优值。gpt 组结果应在此限制下解读；HTTP 通道不受影响。此后加入的升级层改为在隔离的临时 `CODEX_HOME` 中运行，不再带入这些内容；单独使用的 Codex 通道（`LLM_TRANSPORT="codex"`）仍照旧。
 
 局限：每组只有一个种子、一次运行；gpt 组与 DeepSeek 组的通道、会话方式和输出格式都不同，不能直接比较模型；v0.35.0 改变了提示与输出格式，此后结果不能与整矩阵输出的历史结果直接比较。
 

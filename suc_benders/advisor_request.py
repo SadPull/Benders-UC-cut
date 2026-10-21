@@ -8,8 +8,9 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import tomli
-from time import perf_counter, time
+from time import perf_counter, sleep, time
 from uuid import UUID, uuid4
 from types import SimpleNamespace as NS
 
@@ -36,10 +37,14 @@ def session_file(session_id):
 class AdvisorRequest:
     # Codex 命令优先于手动文件交换；HTTP 与 CLI 都在独立工作进程中执行。
     # 传给子进程的数据只包含请求体和矩阵形状，避免传递求解器对象。
-    def __init__(self, d, o, body, iteration, seconds, *, session_id=None):
+    # isolated=True 时由父进程建立临时 CODEX_HOME（见 isolated_home），关闭请求时删除；只用于不续接的新任务。
+    def __init__(self, d, o, body, iteration, seconds, *, session_id=None, isolated=False):
         self.agent = None
         self.codex_directory = None
+        self.home = None
         self.closed = False
+        if isolated and (not o.llm_codex_command or session_id is not None):
+            raise ValueError('Isolated requests require a fresh Codex CLI task')
         if o.llm_agent_directory and not o.llm_codex_command:
             self.agent = SubagentAdvisor(d, o, body, iteration, seconds)
             self.started, self.deadline, self.receipt = self.agent.started, self.agent.deadline, self.agent.receipt
@@ -57,19 +62,23 @@ class AdvisorRequest:
             self.codex_directory.mkdir(parents=True)
             self.receipt.update(transport='codex_exec', request_directory=str(self.codex_directory),
                                 requested_model=body['model'], reasoning_effort=body['reasoning']['effort'],
-                                requested_session_id=session_id)
+                                requested_session_id=session_id, isolated_codex_home=isolated)
             save_json(self.codex_directory/'request.json', dict(**self.receipt,
                 shape=[d.n_units, d.horizon], created_epoch_seconds=time(), timeout_seconds=seconds))
-            self.process = context.Process(target=_request_codex,
-                args=(sender, o.llm_codex_command, body, shape, iteration,
-                      self.deadline, self.codex_directory, session_id), daemon=True)
+            target, args = _request_codex, (sender, o.llm_codex_command, body, shape, iteration,
+                                            self.deadline, self.codex_directory, session_id)
         else:
-            self.process = context.Process(target=_request,
-                args=(sender, o.llm_url, o.llm_api_key, body, shape, iteration, seconds), daemon=True)
+            target, args = _request, (sender, o.llm_url, o.llm_api_key, body, shape, iteration, seconds)
         try:
+            if isolated:
+                self.home = isolated_home()
+                args += (self.home,)
+            self.process = context.Process(target=target, args=args, daemon=True)
             self.process.start()
         except Exception as error:
             self.connection.close()
+            if self.home is not None:
+                self.receipt['codex_home_cleanup'] = _remove_home(self.home)
             self.save_receipt(dict(status='FAILED', message=f'{type(error).__name__}: {error}',
                 accepted=0, proposals=[], seconds=perf_counter()-self.started, **self.receipt))
             raise
@@ -133,6 +142,11 @@ class AdvisorRequest:
             self.process.kill()
             self.process.join(timeout=1.)
         self.connection.close()
+        # 进程树结束后再删除隔离目录（其中有登录信息副本）；删除结果写入回执，失败不抛出。
+        if self.home is not None:
+            self.receipt['codex_home_cleanup'] = _remove_home(self.home)
+            if info is not None:
+                info['codex_home_cleanup'] = self.receipt['codex_home_cleanup']
         self.save_receipt(info if info is not None else dict(status='CANCELLED', message='RequestClosed',
             accepted=0, proposals=[], exit_code=None, seconds=perf_counter()-self.started, **self.receipt))
 
@@ -141,6 +155,68 @@ def _kill_tree(pid):
     subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                    creationflags=subprocess.CREATE_NO_WINDOW, check=False)
+
+
+# 隔离的升级层调用从临时 CODEX_HOME 去掉这些配置段：记忆、插件、hooks、MCP、桌面与项目设置。
+# 全局 AGENTS.md、memories 和会话记录不复制，只保留登录信息与模型提供方等其余设置。
+ISOLATED_DROP = ('features', 'memories', 'plugins', 'hooks', 'mcp_servers', 'marketplaces', 'desktop',
+                 'projects', 'notify')
+
+
+def _toml_value(value, path):
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list):
+        return '['+', '.join(_toml_value(v, path) for v in value)+']'
+    raise ValueError(f'Unsupported Codex config value at {".".join(path)}: {type(value).__name__}')
+
+
+def _toml_table(table, path, lines):
+    if path:
+        lines.append('['+'.'.join(json.dumps(k, ensure_ascii=False) for k in path)+']')
+    lines += [json.dumps(k, ensure_ascii=False)+' = '+_toml_value(v, (*path, k))
+              for k, v in table.items() if not isinstance(v, dict)]
+    for k, v in table.items():
+        if isinstance(v, dict):
+            _toml_table(v, (*path, k), lines)
+
+
+# 建立临时 CODEX_HOME：过滤后的 config.toml 与 auth.json 副本，返回路径，由调用方负责删除。
+# 写出前回读校验，数组表、日期等无法原样写出的结构直接报错，不生成残缺配置。
+def isolated_home():
+    source = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))
+    path = source/'config.toml'
+    config = tomli.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+    for key in ISOLATED_DROP:
+        config.pop(key, None)
+    lines = []
+    _toml_table(config, (), lines)
+    text = '\n'.join(lines)+'\n'
+    if tomli.loads(text) != config:
+        raise ValueError('Filtered Codex config does not round-trip')
+    home = Path(tempfile.mkdtemp(prefix='suc-codex-'))
+    try:
+        (home/'config.toml').write_text(text, encoding='utf-8')
+        if (source/'auth.json').exists():
+            shutil.copy2(source/'auth.json', home/'auth.json')
+    except BaseException:
+        shutil.rmtree(home, ignore_errors=True)
+        raise
+    return home
+
+
+# Windows 上 CLI 退出后文件句柄可能稍晚释放，重试删除；返回 REMOVED 或残留路径，不抛异常。
+def _remove_home(home):
+    for _ in range(10):
+        shutil.rmtree(home, ignore_errors=True)
+        if not Path(home).exists():
+            return 'REMOVED'
+        sleep(.2)
+    return f'FAILED: {home}'
 
 
 def _codex_https_args(config_path):
@@ -177,8 +253,9 @@ def _codex_event_info(directory):
     return info
 
 
-def _prepare_codex(command, body, shape, directory, session_id=None):
+def _prepare_codex(command, body, shape, directory, session_id=None, home=None):
     """Prepare the same isolated CLI request for production and timing experiments."""
+    # home 为隔离的临时 CODEX_HOME：不落盘会话（--ephemeral），提供方设置读自其中的过滤配置。
     # 续接的增量提示没有 instructions，不能留下空段落。
     prompt = ((body['instructions']+'\n\n' if body['instructions'] else '')+body['input']
                   +'\n\nReturn only the requested JSON. Do not invoke tools, edit files, or spawn agents.\n')
@@ -200,23 +277,27 @@ def _prepare_codex(command, body, shape, directory, session_id=None):
         args += ['resume', session_id]
     args += ['--skip-git-repo-check', '--json', '--output-schema', str(directory/'schema.json'),
              '--output-last-message', str(directory/'reply.json'), '-']
-    config_path = Path(os.environ.get('CODEX_HOME', Path.home()/'.codex'))/'config.toml'
+    config_path = Path(home if home is not None else os.environ.get('CODEX_HOME', Path.home()/'.codex'))/'config.toml'
     args[2:2] = _codex_https_args(config_path)
+    if home is not None:
+        args.insert(2, '--ephemeral')
     save_json(directory/'command.json', dict(argv=args))
     environment = os.environ.copy()
     # codex exec 会优先使用此覆盖值；复用 CLI 已有登录时不能继承父代理的临时密钥。
     environment.pop('CODEX_API_KEY', None)
+    if home is not None:
+        environment['CODEX_HOME'] = str(home)
     return args, environment, prompt_sha256
 
 
-def _request_codex(connection, command, body, shape, iteration, deadline, directory, session_id=None):
+def _request_codex(connection, command, body, shape, iteration, deadline, directory, session_id=None, home=None):
     # Ctrl+C 由主进程统一回收整棵进程树，工作进程不能先于 CLI 退出。
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     started = perf_counter()
     candidates, process = [], None
     info = dict(status='FAILED', message='', accepted=0, format_valid=0, proposals=[], exit_code=None)
     try:
-        args, environment, info['prompt_sha256'] = _prepare_codex(command, body, shape, directory, session_id)
+        args, environment, info['prompt_sha256'] = _prepare_codex(command, body, shape, directory, session_id, home)
         with (directory/'prompt.txt').open('rb') as source, (directory/'events.jsonl').open('wb') as events, \
                 (directory/'stderr.log').open('wb') as errors:
             if perf_counter() >= deadline:

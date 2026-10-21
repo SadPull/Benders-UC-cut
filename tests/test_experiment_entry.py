@@ -196,3 +196,66 @@ def test_llm_record_keeps_base_and_per_candidate_outcomes():
     assert record['rebase'] == [dict(proposal_id='llm:1:0:rebase:0', rebased_from='llm:1:0', units=[1],
                                      outcome='duplicate', repair_bits=0, incumbent_decrease=0.)]
     json.dumps(record)
+
+
+def test_progress_records_the_event_row_not_the_last_history_row(tmp_path):
+    regular = dict(call_id='llm_upper:1', status='OK', tier='regular')
+    history = [regular, dict(call_id='llm_escalation:2', status='RUNNING', tier='escalation')]
+    whole = NS(result=NS(objective=1., lower_bound=0., llm_calls=2, status='RUNNING', llm_history=history,
+                         outer_history=[]),
+               started=0., diagnostics=dict(sa_calls=0), resume_cursor={}, advice=NS(thread_id=None, event_row=regular))
+    progress = entry.ExperimentProgress(tmp_path)
+    progress.last_upper = 1.
+    progress(whole, 'llm_response')
+    row = json.loads((tmp_path/'progress.jsonl').read_text(encoding='utf-8'))
+    assert (row['llm_call_id'], row['llm_tier'], row['llm_status']) == ('llm_upper:1', 'regular', 'OK')
+
+
+def test_escalation_requires_http_regular_tier(tmp_path, monkeypatch):
+    monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')
+    monkeypatch.setattr(entry, 'LLM_ENABLED', True)
+    monkeypatch.setattr(entry, 'LLM_TRANSPORT', 'codex')
+    monkeypatch.setattr(entry, 'LLM_ESCALATION_MODEL', 'gpt-6-astra')
+    monkeypatch.setattr(entry, 'run_suc', lambda *a, **k: pytest.fail('Solver started'))
+    with pytest.raises(ValueError, match='escalation'):
+        entry.main()
+    assert not (tmp_path/'results').exists()
+
+
+def test_escalation_options_and_records_reach_results(tmp_path, monkeypatch):
+    from suc_benders.config import load_options
+    config = tmp_path/'config.json'
+    config.write_text(json.dumps(dict(llm=dict(url='http://relay', api_key='key'))), encoding='utf-8')
+    monkeypatch.setattr(entry, 'load_options', lambda options: load_options(options, config))
+    seen = []
+    rows = [dict(call_id='llm_upper:1', status='OK', tier='regular', transport='http'),
+            dict(call_id='llm_escalation:2', status='OK', tier='escalation', triggered_by='llm_upper:1',
+                 transport='codex_exec', requested_model='gpt-6-astra', deadline_seconds=900., improved=True,
+                 codex_home_cleanup='REMOVED')]
+    def solve(options, *, progress, started_at, resume_state):
+        seen.append(options)
+        return Result(status='TIME_LIMIT', objective=110., lower_bound=100., relative_gap=10./110.,
+                      validation={'feasible': True}, llm_calls=2, llm_history=rows,
+                      diagnostics={'sa_calls': 2, 'block_sa_calls': 2, 'sa_backend': SA_BACKEND,
+                                   'sa_initialization': SA_INITIALIZATION})
+    monkeypatch.setattr(entry, 'run_suc', solve)
+    monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')
+    monkeypatch.setattr(entry, 'LLM_ENABLED', True)
+    monkeypatch.setattr(entry, 'LLM_TRANSPORT', 'http')
+    monkeypatch.setattr(entry, 'LLM_ESCALATION_MODEL', 'gpt-6-astra')
+    monkeypatch.setattr(entry, 'solve_reference', lambda *a:
+        dict(status='OPTIMAL', objective=105., lower=105., validation={'feasible': True},
+             gap_percent=0., elapsed_seconds=0.))
+    assert entry.main() == 0
+    output, = (tmp_path/'results').iterdir()
+    assert seen[0]['llm_escalation_command'] == 'codex'
+    assert seen[0]['llm_escalation_directory'] == str(output/'llm_requests')
+    assert not seen[0]['llm_codex_command'] and not seen[0]['llm_agent_directory']
+    summary = json.loads((output/'summary.json').read_text(encoding='utf-8'))
+    assert (summary['llm_escalation_model'], summary['llm_escalation_calls'], summary['llm_escalation_improved']) == (
+        'gpt-6-astra', 1, 1)
+    result = json.loads((output/'result.json').read_text(encoding='utf-8'))
+    escalation = result['llm_history'][1]
+    assert (escalation['tier'], escalation['triggered_by'], escalation['transport'], escalation['requested_model'],
+            escalation['codex_home_cleanup']) == ('escalation', 'llm_upper:1', 'codex_exec', 'gpt-6-astra', 'REMOVED')
+    assert '"key"' not in (output/'effective-options.json').read_text(encoding='utf-8')

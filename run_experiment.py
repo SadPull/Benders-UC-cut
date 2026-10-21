@@ -38,6 +38,10 @@ LLM_TRANSPORT = "codex"  # "codex"：Codex 独立任务；"http"：流式 Respon
 LLM_TIMEOUT_SECONDS = 1800  # 剩余时间不足完整请求窗口加预留时，不启动新请求
 LLM_RESERVE_SECONDS = 60  # 不用于等待 LLM，留给后续调度、校验和数值搜索
 LLM_MAX_CALLS = None     # 全程调用上限；None：在预算内按停滞规则继续，保留累计调用计数
+LLM_ESCALATION_MODEL = ""  # 升级层模型（经 Codex CLI，隔离用户配置、不续接）；"" 关闭。需 LLM_TRANSPORT="http"
+LLM_ESCALATION_GAIN = 0.005  # 常规层一次调用降幅低于此比例（0.005 即 0.5%）或调用失败时，并行发起一次升级请求
+LLM_ESCALATION_MIN_SECONDS = 700  # 剩余预算扣除预留后不足此秒数时不发起升级请求
+LLM_ESCALATION_TIMEOUT_SECONDS = 1800  # 升级层单次上限；实际还不超过剩余预算扣除预留
 BLOCK_HOURS = 12         # 分块小时数；RCUC20 调参：3 h 块被长最小停机时间锁在块坐标局部最优
 SA_SWEEPS = 16           # 每个温度对全部位的扫描次数；12 h 块下 16 优于默认 4
 DATA_DIR = "data"        # 算例目录（相对项目根）；其他算例在 instances/<名称>
@@ -110,7 +114,9 @@ def llm_record(row):
     record = {key: row.get(key) for key in (
         "call_id", "status", "thread_id", "requested_session_id", "request_directory", "background_seconds",
         "request_upper", "upper_before_probes", "upper_after_probes", "prompt_mode", "usage", "message",
-        "accepted", "format_valid", "invalid", "base_u", "response_model", "response_output")}
+        "accepted", "format_valid", "invalid", "base_u", "response_model", "response_output",
+        "tier", "triggered_by", "transport", "requested_model", "deadline_seconds", "improved",
+        "codex_home_cleanup")}
     measured = {r["proposal_id"]: r for r in (row.get("feedback") or {}).get("proposals", [])}
     record["candidates"] = []
     for p in row.get("proposals") or []:
@@ -150,8 +156,11 @@ class ExperimentProgress:
                    sa_calls=whole.diagnostics["sa_calls"], llm_calls=result.llm_calls,
                    resume_cursor=whole.resume_cursor, status=result.status,
                    segment_elapsed_seconds=elapsed-self.prior, session_id=self.session_id)
-        if event.startswith("llm") and result.llm_history:
-            row["llm_status"] = result.llm_history[-1]["status"]
+        # 两层并行时，事件对应的调用不一定是 llm_history 的最后一行，取顾问记下的事件行。
+        llm_row = whole.advice.event_row if event.startswith("llm") else None
+        if llm_row is not None:
+            row.update(llm_call_id=llm_row.get("call_id"), llm_tier=llm_row.get("tier"),
+                       llm_status=llm_row.get("status"))
         if event == "coordination" and result.outer_history:
             row["coordination"] = result.outer_history[-1]["coordination"]
         with (self.output / "progress.jsonl").open("a", encoding="utf-8") as stream:
@@ -189,6 +198,9 @@ def main():
     if LLM_TRANSPORT not in ("codex", "http"):
         raise ValueError("LLM_TRANSPORT must be 'codex' or 'http'")
     codex = LLM_ENABLED and LLM_TRANSPORT == "codex"
+    escalation = LLM_ENABLED and bool(LLM_ESCALATION_MODEL)
+    if escalation and LLM_TRANSPORT != "http":
+        raise ValueError("LLM escalation requires LLM_TRANSPORT='http' for the regular tier")
     options = dict(data_file=str(folder / "units.json"), scenario_file=str(folder / "stochastic.json"),
                    seed=SEED, time_limit=TIME_LIMIT_SECONDS,
                    tolerance=TARGET_GAP_PERCENT / 100, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS, max_outer=1000000,
@@ -196,7 +208,12 @@ def main():
                    llm_max_calls=LLM_MAX_CALLS, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
                    llm_timeout=LLM_TIMEOUT_SECONDS, llm_reserve_seconds=LLM_RESERVE_SECONDS,
                    llm_codex_command="codex" if codex else "",
-                   llm_agent_directory=str(output / "llm_requests") if codex else "")
+                   llm_agent_directory=str(output / "llm_requests") if codex else "",
+                   llm_escalation_model=LLM_ESCALATION_MODEL if escalation else "",
+                   llm_escalation_command="codex" if escalation else "",
+                   llm_escalation_directory=str(output / "llm_requests") if escalation else "",
+                   llm_escalation_gain=LLM_ESCALATION_GAIN, llm_escalation_min_seconds=LLM_ESCALATION_MIN_SECONDS,
+                   llm_escalation_timeout=LLM_ESCALATION_TIMEOUT_SECONDS)
     checked = load_options(options)
     data, scenarios = load_data(checked.data_file, checked.scenario_file)
     dimensions = dict(units=data.n_units, hours=data.horizon, scenarios=len(scenarios))
@@ -227,7 +244,8 @@ def main():
             raise ValueError("Invalid cumulative elapsed time")
         prior_calls = resume_state["llm_calls"]
         session_id = next((row["thread_id"] for row in reversed(resume_state["llm_history"])
-                           if row["status"] == "OK" and row.get("thread_id")), None)
+                           if row["status"] == "OK" and row.get("thread_id")
+                           and row.get("tier", "regular") == "regular"), None)
         if LLM_ENABLED and prior_calls:
             try:
                 session_file(session_id)
@@ -257,6 +275,13 @@ def main():
             print(f"URL 与密钥取自 config.local.json；每次发送完整提示，用量和回复保存到 result.json；"
                   f"单次最多等待 {checked.llm_timeout:g} 秒，保留 {checked.llm_reserve_seconds:g} 秒给后续数值处理。",
                   flush=True)
+        if escalation:
+            print(f"升级层：{checked.llm_escalation_model}（Codex 独立任务，推理 max），与常规层并行；"
+                  f"常规层一次调用降幅低于 {100*checked.llm_escalation_gain:g}% 或失败时发起，"
+                  f"剩余预算扣除预留不足 {checked.llm_escalation_min_seconds:g} 秒时不发起，"
+                  f"单次最多 {checked.llm_escalation_timeout:g} 秒。", flush=True)
+            print("升级层每次发送完整提示、不续接会话，在只含登录信息与过滤配置的临时 CODEX_HOME 中运行，"
+                  "调用结束即删除；请求与日志保存到 llm_requests。", flush=True)
     print("指标说明：UB 是通过全天物理校验的可行方案成本；LB 是认证下界；"
           "认证间隙 = (UB - LB) / max(1, |UB|)。", flush=True)
     print("块内上下界用于分块搜索，不等于全天原问题的上下界。", flush=True)
@@ -299,6 +324,11 @@ def main():
                    block_sa_calls=result.diagnostics.get('block_sa_calls', 0),
                    llm_patience=LLM_PATIENCE, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
                    llm_disabled=result.diagnostics.get('llm_disabled'),
+                   llm_escalation_model=checked.llm_escalation_model or None,
+                   llm_escalation_calls=sum(row.get("tier") == "escalation" for row in result.llm_history),
+                   llm_escalation_improved=sum(bool(row.get("improved")) for row in result.llm_history
+                                               if row.get("tier") == "escalation"),
+                   llm_escalation_disabled=result.diagnostics.get('llm_escalation_disabled'),
                    data_dir=DATA_DIR, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS,
                    dispatch_failures=result.diagnostics.get('dispatch_failures', 0),
                    search_statistics=result.diagnostics.get('search_statistics', {}),
