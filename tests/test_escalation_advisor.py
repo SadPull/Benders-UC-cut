@@ -158,10 +158,10 @@ def test_window_call_limit_and_convergence_block_escalation(lanes, monkeypatch):
     advice.advance_escalation([])
     assert not lanes.workers
     lanes.o.llm_max_calls = None
-    monkeypatch.setattr(lanes.whole.certifier, 'converged', lambda: True)
+    monkeypatch.setattr(lanes.whole.result, 'reference_target_reached', lambda tolerance: True)
     advice.advance_escalation([])
     assert not lanes.workers
-    monkeypatch.setattr(lanes.whole.certifier, 'converged', lambda: False)
+    monkeypatch.setattr(lanes.whole.result, 'reference_target_reached', lambda tolerance: False)
     lanes.whole.deadline = perf_counter()+1000
     advice.advance_escalation([])
     worker, = lanes.workers

@@ -1,8 +1,8 @@
 # LLM Benders SUC
 
-Python 机组组合求解器：时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步上界候选，独立数值进程认证下界。
+Python 机组组合求解器：先用 Gurobi 求完整模型的参考方案，再由时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步候选。全局评价采用相对参考成本的差距。
 
-v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**，原始候选评价／割学习、全天修复与物理校验、独立下界认证继续使用原有流程。
+v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
 
 当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
 
@@ -28,20 +28,24 @@ LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区�
 
 **升级层（可选）**：`LLM_ESCALATION_MODEL` 填入模型名（如 `gpt-6-astra`）即开启，常规层须为 `LLM_TRANSPORT="http"`。常规层一次调用使 UB 降幅低于 `LLM_ESCALATION_GAIN`（默认 0.5%）或调用失败时，升级层被武装，并经 Codex CLI 以推理 max 并行发起一次请求；常规层照常继续，两层回复都走同一评估与移植流程。升级层每次发送完整提示、不续接会话；剩余预算扣除预留后不足 `LLM_ESCALATION_MIN_SECONDS`（默认 700 秒）时不发起，单次最多 `LLM_ESCALATION_TIMEOUT_SECONDS` 且不超过剩余预算。升级请求有效改进后清除期间累积的武装，早于该改进发出的常规请求不再触发升级；连续两次失败只停用升级层。每次升级调用在新建的临时 `CODEX_HOME` 中运行，其中只有登录信息副本和去掉 memories、插件、hooks、MCP、桌面与项目设置的配置，不含全局 AGENTS.md，并加 `--ephemeral`；调用结束即删除，删除结果记入回执 `codex_home_cleanup`。`result.json` 的每次调用标明 `tier`（regular／escalation）、`transport`、`triggered_by` 与 `deadline_seconds`，`summary.json` 汇总升级次数、有效改进次数与停用原因。
 
-入口每次从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%；另用最多 120 秒求参考解，其结果不回填主算法。v0.36.0 起删除了续跑（`RESUME_FROM`）：v0.33.0 起不再写全量检查点，而现存检查点都不满足当前 SA 标识，续跑旧实验请使用对应的归档版本。
+入口每次从零开始，先用最多 120 秒独立预算求参考解，再给搜索完整的 7200 秒预算，seed 17、目标参考成本差距 0.1%。参考方案经过独立物理与费用校验；只有状态为 `OPTIMAL` 的有效参考才允许提前停止。仅有未证最优的可行参考时只比较、不据此提前停止；参考失败或没有有效方案时仍继续搜索，参考成本和差距为空。参考方案不用于初始化、候选注入，参考成本不加入 LLM 提示。v0.36.0 起删除了续跑（`RESUME_FROM`），续跑旧实验请使用对应归档版本。
+
+参考差距为 `100 × (UB - reference_cost) / abs(reference_cost)`，允许负数；参考成本为零时百分比为空。停止要求有效 `OPTIMAL` 参考，且 `UB - reference_cost <= 1e-5 + tolerance × abs(reference_cost)`；零参考成本只用绝对容差。达到目标记为 `REFERENCE_TARGET_REACHED`，搜索轮次或 SA 配额耗尽并收尾当前 LLM 工作后记为 `SEARCH_EXHAUSTED`，搜索预算耗尽为 `TIME_LIMIT`。没有待处理工作时不空等剩余预算。
 
 每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`）；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
 
 结果自动写入新建的 `results/manual-seed.../`：
 
-- `summary.json`：状态、UB/LB/gap、耗时和统计。
+- `summary.json`：状态、UB、参考元数据、`reference_gap_percent`、耗时和统计。
 - `result.json`：精简主结果、最终方案、计时与调用摘要（含每次 LLM 调用的 usage 与回复原文）。
-- `reference.json`：仅冷启动运行时生成的独立参考解。
+- `reference.json`：先行参考求解的状态、完整方案、校验和独立耗时；失败时保留原因。`gurobi_bound`／`gurobi_gap_percent` 是 Gurobi 自身的界与间隙，只说明参考离最优多远，不参与停止判断。
 - `llm_requests/`：Codex 通道或升级层实际触发时的请求、提示、命令行、事件流与回执（不含登录信息）。
 - `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、SHA256、依赖版本和脱敏后的完整有效配置。
 - `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案；最新方案不含搜索状态。
 
 不保存全量检查点，也不序列化全部历史采样；记录开销与最终保存耗时单列。
+
+当前主结果删除全局 `lower_bound`／`lower`、`relative_gap`／`gap_percent` 和 `certification_history`。`Result.reference` 保留完整参考记录，`reference_cost` 与 `reference_gap_percent` 是随当前已验证方案计算的只读属性。进度和最新方案同时带有 `reference_status`。`elapsed_seconds`／`solver_elapsed_seconds` 只计搜索，`reference_elapsed_seconds` 单列参考耗时，`total_elapsed_seconds` 计两段总耗时。历史 `results/`、`archives/` 和源码快照不迁移，旧分析脚本需适配新字段与状态。
 
 manifest、精简结果及运行诊断记录 `sa_backend` 与 `sa_initialization`（当前为 `random_sa_repair_v1`）。采样诊断包含 beta 序列，以及每条链的原始／实际种子、退火终态与 QUBO 能量；全天提议记录只保存原始方案的 SHA256 与固定位违例数，只有 LLM 提议另存 `raw_u`／`repaired_u` 以生成反馈。这些诊断可经 `run_suc` 返回对象读取，不自动全量落盘。
 
@@ -53,23 +57,23 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
     result = json.load(f)
 ```
 
-直接运行 `run_experiment.py`；`run_suc.py` 仅提供 `from run_suc import run_suc` 的 Python 接口。旧命令行参数及 `--output` JSON 输出入口已删除。
+直接运行 `run_experiment.py`；`run_suc.py` 提供 `from run_suc import run_suc` 的 Python 接口，同样只计算一次先行参考。配置 `reference_time_limit` 默认 120 秒，对应入口顶部 `REFERENCE_TIME_LIMIT_SECONDS`；`time_limit` 为独立搜索预算。可选关键字 `reference_log_file` 指定参考日志；`started_at` 是整体调用的计时起点，不扣减参考结束后新建的搜索预算。旧命令行参数及 `--output` JSON 输出入口已删除。
 
 机组输入必须明确提供 `initial_output`。运行环境固定为上述 Windows／Python 3.10，TOML 解析直接使用已声明的 `tomli` 依赖。
 
 ## 核心文件
 
-- `suc_benders/solver.py`：结果类型与主循环，只安排初始化、分块轮询、协调、建议和认证。
+- `suc_benders/solver.py`：结果类型与主循环，安排参考、初始化、分块轮询、协调和建议。
 - `suc_benders/search.py`：单块搜索及共享的全天候选修复、调度、校验、去重和预算。
 - `suc_benders/benders.py`：连续调度、Benders 割、块主问题和跨块乘子协调。
-- `suc_benders/strengthened_*.py`：独立强化证明模型，只返回认证下界。
+- `suc_benders/reference.py`：Gurobi 完整模型参考求解及独立方案校验。
 - `suc_benders/upper_advisor.py`：异步 LLM 建议调度（常规层批次与并行升级层）；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程与升级层的隔离 `CODEX_HOME`。
 - `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
 - `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20 输入。
 - `tests/`：当前分块主线的必要回归；执行 `py -3.10 -m pytest -q tests`。
 - `config.local.json`、`.local/*.lic`：仅本地保留的授权配置。
 
-主线顺序：输入建模 → 连续松弛与初始可行解 → 固定乘子的分块 SA 轮询 → 全天修复/调度/校验 → 跨块协调。LLM 异步提供候选，独立认证进程提供 LB；仅全天验证通过的方案能更新 UB，最终用 UB/LB 的认证间隙停止。
+主线顺序：输入建模 → 独立参考求解 → 连续松弛与初始可行解 → 固定乘子的分块 SA 轮询 → 全天修复/调度/校验 → 跨块协调。LLM 异步提供候选；仅全天验证通过的方案能更新 UB。分块局部界和协调对偶界仍用于内部搜索，不作为全局停止证书。
 
 块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取 incumbent 处最紧最优性割的线性代理，不含 theta 与最优性割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。LLM 回复返回时若 incumbent 已变化，其相对请求快照改动的机组行会先整体、再逐台移植到当前 incumbent（来源 `llm_rebase`）。协调 LP 被 incumbent 截顶或失败时保留原乘子，L1 选择失败时回退主问题乘子，不再中止运行；状态见 `outer_history[*].coordination`。
 

@@ -23,6 +23,7 @@ class Options:
     max_inner: int = 20
     tolerance: float = 1e-4
     time_limit: float = 600
+    reference_time_limit: float = 120
     seed: int = 7
     verbose: bool = True
     # 搜索 QUBO 以"单个位的最大归一化成本"为能量单位；以下权重、温度均以该单位计。
@@ -31,7 +32,7 @@ class Options:
     sa_capacity_weight: float = 4
     sa_reads: int = 8
     sa_enabled: bool = True
-    # 辅助工作配额独立于总 time_limit；耗尽后可继续整数认证，None 表示不另设此配额。
+    # 辅助工作配额独立于搜索 time_limit；耗尽后只收尾已有 LLM 工作，None 表示不另设此配额。
     sa_budget_seconds: float | None = None
     sa_sweeps: int = 4
     sa_temperature: float = 4
@@ -65,7 +66,7 @@ INTEGER_OPTIONS = ("block_hours", "max_outer", "max_inner", "sa_reads", "sa_swee
                    "llm_max_calls")
 NONNEGATIVE_INTEGERS = ("seed", "llm_max_calls")
 # 数值参数须有限且为正，ZERO_ALLOWED 中的参数还可为 0。
-NUMERIC_OPTIONS = ("time_limit", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
+NUMERIC_OPTIONS = ("time_limit", "reference_time_limit", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
                    "sa_hard_weight", "sa_capacity_weight", "llm_escalation_timeout", "llm_escalation_min_seconds",
                    "llm_escalation_gain")
 ZERO_ALLOWED = ("tolerance", "llm_reserve_seconds", "llm_escalation_min_seconds", "llm_escalation_gain")

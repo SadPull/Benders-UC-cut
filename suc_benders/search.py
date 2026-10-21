@@ -14,7 +14,6 @@ from .benders import discrete_feasible, dispatch, master
 from .context import CandidateEvaluation, LLMContextInput, build_llm_context
 from .llm import MAX_CANDIDATES
 from .upper_advisor import UpperAdvisor, summarize
-from .strengthened_certification import StrengthenedCertification
 from .model import fingerprint
 from .optimization import optimize
 from .qubo import search_qubo, fixed_binary
@@ -46,16 +45,16 @@ def closed(lower, upper, tolerance, reference=None):
             and upper - lower <= 1e-5 + tolerance * max(1, abs(reference)))
 
 
-# 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，以便继续数值认证。
+# 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，以便收尾已有 LLM 工作。
 class SABudgetExhausted(Exception):
     pass
 
 
-# 各块共用的全天方案、调度缓存、数值反馈、预算和认证/LLM 管理状态。
+# 各块共用的全天方案、调度缓存、数值反馈、预算和 LLM 管理状态。
 class WholeDay:
     """Shared incumbent, measured feedback and deadline across all time blocks."""
 
-    # 绑定输入模型与全局截止时间，建立按来源统计的诊断和计时器，建立强化认证器。
+    # 绑定输入模型与搜索截止时间，建立按来源统计的诊断和计时器。
     def __init__(self, m, full, o, deadline, result, started, progress=None):
         self.m, self.full, self.o, self.deadline = m, full, o, deadline
         self.d, self.scenarios, self.result, self.started = m.d, m.scenarios, result, started
@@ -70,7 +69,6 @@ class WholeDay:
                                     "local_dispatch", "subproblems", "validation", "context", "llm", "coordination")})
         self.timings = self.diagnostics["timings"]
         self.progress = progress
-        self.certifier = StrengthenedCertification(self)
         self.diagnostics["model_fingerprint"] = fingerprint(m)
         self.advice = UpperAdvisor(self)
         self.sa_started = None
@@ -94,7 +92,7 @@ class WholeDay:
             0. if self.sa_started is None else perf_counter()-self.sa_started)
 
     # 将建模、采样、修复、调度或协调整段工作记入 SA 配额，并临时收紧数值调用截止时间。
-    # 退出时恢复全局 deadline；配额耗尽转为 SABudgetExhausted，而不是结束后续认证。
+    # 退出时恢复搜索 deadline；配额耗尽转为 SABudgetExhausted，以便收尾在途请求。
     @contextmanager
     def sa_work(self):
         """Charge the complete auxiliary search operation and cap its numeric calls."""

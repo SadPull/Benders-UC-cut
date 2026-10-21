@@ -20,7 +20,7 @@ def transport(o):
 
 class UpperAdvisor:
     def __init__(self, whole):
-        self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
+        self.whole, self.o, self.result = whole, whole.o, whole.result
         # 常规层与升级层各有一条通道：在途请求、它的调用行和调用前快照；两层并行、互不阻塞。
         self.regular = NS(worker=None, pending=None, baseline=None)
         self.escalation = NS(worker=None, pending=None, baseline=None)
@@ -55,7 +55,7 @@ class UpperAdvisor:
     # 冷启动初始化后立即开一批；请求由后续 advance 异步发出，不阻塞 SA。
     def kickoff(self):
         if (self.o.llm_first_call_at_start and self.state["batch"] is None
-                and self.available() and not self.cert.converged()):
+                and self.available() and not self.result.reference_target_reached(self.o.tolerance)):
             self.begin(trigger="start")
 
     def improved(self, upper):
@@ -68,8 +68,8 @@ class UpperAdvisor:
         self.state["stalled"] = 0 if self.improved(upper) else self.state["stalled"]+1
         self.whole.diagnostics["advisor_rounds"].append(dict(
             outer=outer, round=inner, sa_round=self.state["sa_rounds"], upper_before=upper,
-            upper=self.result.objective, lower=self.result.lower_bound, stalled=self.state["stalled"]))
-        if (allow and self.state['batch'] is None and self.available() and not self.cert.converged()
+            upper=self.result.objective, reference_cost=self.result.reference_cost, stalled=self.state["stalled"]))
+        if (allow and self.state['batch'] is None and self.available() and not self.result.reference_target_reached(self.o.tolerance)
                 and self.state["stalled"] >= self.o.llm_patience):
             self.begin(outer=outer, inner=inner)
         self.advance(searches)
@@ -79,7 +79,7 @@ class UpperAdvisor:
             raise RuntimeError("An advice batch is already active")
         self.state["batch_id"] += 1
         batch = dict(batch_id=self.state["batch_id"], trigger=trigger, calls=0,
-            upper_before=self.result.objective, lower_before=self.result.lower_bound,
+            upper_before=self.result.objective, reference_cost=self.result.reference_cost,
             trigger_stalled=self.state["stalled"], trigger_sa_round=self.state["sa_rounds"],
             sa_calls_at_start=self.whole.diagnostics["sa_calls"], outer=outer, round=inner,
             status="RUNNING", started_seconds=perf_counter()-self.whole.started)
@@ -113,7 +113,7 @@ class UpperAdvisor:
             status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
             base_u=llm.prompt_incumbent(body), prompt_mode="delta" if continuation else "full",
             trigger_stalled=batch["trigger_stalled"],
-            request_upper=self.result.objective, request_lower=self.result.lower_bound,
+            request_upper=self.result.objective, reference_cost=self.result.reference_cost,
             started_seconds=perf_counter()-self.whole.started)
         if not self._launch(self.regular, row, self.o, body, iteration, self.o.llm_timeout, session_id=self.thread_id):
             self.record_failure()
@@ -229,14 +229,16 @@ class UpperAdvisor:
         if batch is None:
             return
         batch['status'] = 'RUNNING'
-        if self.cert.converged():
-            reason = 'CONVERGED'
+        if self.result.reference_target_reached(self.o.tolerance):
+            reason = 'REFERENCE_TARGET_REACHED'
         elif self.whole.remaining() <= 0:
             reason = "TIME_LIMIT"
         else:
             if self.regular.worker is not None and not self.poll(searches):
                 return
-            if self.whole.remaining() <= 0:
+            if self.result.reference_target_reached(self.o.tolerance):
+                reason = 'REFERENCE_TARGET_REACHED'
+            elif self.whole.remaining() <= 0:
                 reason = 'TIME_LIMIT'
             elif not self.available():
                 reason = ('LLM_DISABLED' if self.state['disabled'] else
@@ -250,7 +252,7 @@ class UpperAdvisor:
                 self.start_request()
                 return
         self._end_batch()
-        batch.update(status=reason, upper_after=self.result.objective, lower_after=self.result.lower_bound,
+        batch.update(status=reason, upper_after=self.result.objective, reference_gap_percent=self.result.reference_gap_percent,
                      sa_calls_at_end=self.whole.diagnostics["sa_calls"],
                      ended_seconds=perf_counter()-self.whole.started)
         self.state.update(phase="sa", batch=None, stalled=0)
@@ -268,12 +270,12 @@ class UpperAdvisor:
     def escalation_ready(self):
         s = self.state['escalation']
         return (s['armed'] and not s['disabled'] and self.escalation.worker is None
-                and not self.cert.converged() and self.escalation_window() is not None
+                and not self.result.reference_target_reached(self.o.tolerance) and self.escalation_window() is not None
                 and (self.o.llm_max_calls is None or self.result.llm_calls < self.o.llm_max_calls))
 
     # 每步先收升级层回复，再按武装状态发起新请求；与常规批次无关，收敛或超时后的在途请求由 close 取消。
     def advance_escalation(self, searches):
-        if not self.escalation_enabled() or self.cert.converged() or self.whole.remaining() <= 0:
+        if not self.escalation_enabled() or self.result.reference_target_reached(self.o.tolerance) or self.whole.remaining() <= 0:
             return
         if self.escalation.worker is not None:
             self.poll_escalation(searches)
@@ -304,7 +306,7 @@ class UpperAdvisor:
             triggered_by=triggered_by, requested_model=o.llm_model, transport=transport(o),
             deadline_seconds=seconds, status="RUNNING", accepted=0, proposals=[],
             base_u=llm.prompt_incumbent(body), prompt_mode="full",
-            request_upper=self.result.objective, request_lower=self.result.lower_bound,
+            request_upper=self.result.objective, reference_cost=self.result.reference_cost,
             started_seconds=perf_counter()-self.whole.started)
         if not self._launch(lane, row, o, body, iteration, seconds, session_id=None, isolated=True):
             self.escalation_failure()
@@ -355,7 +357,7 @@ class UpperAdvisor:
         batch = self.state['batch']
         if batch is not None and batch['status'] == 'RUNNING':
             batch.update(status='CANCELLED', upper_after=self.result.objective,
-                lower_after=self.result.lower_bound, sa_calls_at_end=self.whole.diagnostics['sa_calls'],
+                reference_gap_percent=self.result.reference_gap_percent, sa_calls_at_end=self.whole.diagnostics['sa_calls'],
                 ended_seconds=perf_counter()-self.whole.started)
         self.whole.diagnostics["upper_advice_feedback"] = self.whole.feedback
 

@@ -8,14 +8,9 @@ from conftest import make_whole
 
 
 @pytest.fixture(autouse=True)
-def proof_after_upper_search(monkeypatch):
-    backend = search_core.StrengthenedCertification
-    monkeypatch.setattr(backend, 'start', lambda self: None)
-    monkeypatch.setattr(backend, 'close', lambda self: None)
-    def step(cert):
-        if cert.whole.diagnostics['coordination_count'] >= cert.o.max_outer:
-            cert.update_bound(cert.result.objective)
-    monkeypatch.setattr(backend, 'step', step)
+def unavailable_reference(monkeypatch):
+    monkeypatch.setattr(solver, 'solve_reference', lambda *a:
+                        dict(status='TIME_LIMIT', objective=None, validation=None, elapsed_seconds=0.))
 
 
 def search_block(b, seeds, options, deadline, outer, index, whole):
@@ -89,14 +84,14 @@ def test_unconverged_blocks_rotate_and_coordinate(tiny, options, monkeypatch):
 
     monkeypatch.setattr(solver, "coordinate", inspect)
     r = solver.solve(d, s, options)
-    assert r.status == "CONVERGED", r.message
+    assert r.status == "SEARCH_EXHAUSTED", r.message
     assert [entry["block"] for entry in r.history] == list(range(1, 9))*4
     assert r.diagnostics["complete_rounds"] == 4 and r.diagnostics["coordination_count"] == 2
     assert len(groups) == 2 and all(len(group) == 8 and all(group) for group in groups)
     assert all(row["unconverged_blocks"] == list(range(1, 9)) for row in r.outer_history)
     assert all(row["visits"] == row["sa_calls"] == 2 for row in r.diagnostics["blocks"])
-    assert r.validation["feasible"] and r.lower_bound <= r.objective + 1e-5
-    assert all(a["lower"] <= b["lower"] for a, b in zip(r.outer_history, r.outer_history[1:]))
+    assert r.validation["feasible"] and r.reference_cost is None
+    assert all('lower' not in row for row in r.outer_history)
 
 
 def test_round_rotation_retains_local_cuts_and_cache(tiny, options, monkeypatch):
@@ -146,13 +141,11 @@ def test_coordination_failure_keeps_existing_failure_status(tiny, options, monke
     result = solver.solve(*tiny(2, 6), options)
     assert result.status == 'COORDINATION_FAILED'
     assert 'Multiplier selection LP failed' in result.message
-    assert result.validation['feasible'] and result.lower_bound <= result.objective
+    assert result.validation['feasible'] and result.reference_cost is None
 
 
-def test_exhausted_sa_budget_skips_search_and_keeps_certifying(tiny, options, monkeypatch):
-    monkeypatch.setattr(search_core.StrengthenedCertification, 'step',
-                        lambda cert: cert.update_bound(cert.result.objective))
+def test_exhausted_sa_budget_skips_search_without_waiting(tiny, options):
     options.sa_budget_seconds = 0.
     result = solver.solve(*tiny(2, 6), options)
-    assert result.status == 'CONVERGED' and result.diagnostics['sa_budget_exhausted']
+    assert result.status == 'SEARCH_EXHAUSTED' and result.diagnostics['sa_budget_exhausted']
     assert result.diagnostics['sa_calls'] == 0 and result.validation['feasible']

@@ -1,7 +1,7 @@
-"""Coordinate time-block search, upper advice and independent certification."""
+"""Compute a reference, then coordinate time-block search and upper advice."""
 # 主循环只安排各阶段的执行顺序、预算与结束状态；候选处理在 search 中。
 from dataclasses import dataclass, field
-from time import perf_counter
+from time import perf_counter, sleep
 from types import SimpleNamespace as NS
 
 import numpy as np
@@ -9,6 +9,7 @@ import numpy as np
 from .benders import coordinate
 from .model import model, partition
 from .optimization import optimize
+from .reference import solve_reference
 from .search import BlockSearch, WholeDay, SABudgetExhausted, closed
 from .validation import validate
 
@@ -16,16 +17,14 @@ from .validation import validate
 DEADLINE_MARGIN_SECONDS = 5.
 
 
-# 可序列化求解结果：objective 是已验证方案费用，lower_bound 是当前模式认可的全局下界。
-# coordination_upper 属于协调对偶模型；状态、原问题 gap 与诊断记录需分别解释。
-# 求解中 status 为 RUNNING；结束时只会是 CONVERGED、TIME_LIMIT 或 <阶段>_FAILED。
+# objective 是已验证方案费用；reference 是独立参考记录，不用于生成候选。
+# coordination_upper 仅属于内部协调对偶模型。
 @dataclass
 class Result:
     status: str = "RUNNING"
     message: str = ""
     objective: float = np.inf
-    lower_bound: float = -np.inf
-    relative_gap: float = np.inf
+    reference: dict = field(default_factory=dict)
     coordination_upper: float = np.inf
     u: np.ndarray | None = None
     v: np.ndarray | None = None
@@ -36,17 +35,38 @@ class Result:
     outer_history: list = field(default_factory=list)
     llm_calls: int = 0
     llm_history: list = field(default_factory=list)
-    certification_history: list = field(default_factory=list)
     diagnostics: dict = field(default_factory=dict)
     elapsed_seconds: float = 0.
+    total_elapsed_seconds: float = 0.
+
+    @property
+    def reference_cost(self):
+        cost = self.reference.get("objective")
+        if cost is not None and np.isfinite(cost) and (self.reference.get("validation") or {}).get("feasible"):
+            return float(cost)
+        return None
+
+    @property
+    def reference_gap_percent(self):
+        cost = self.reference_cost
+        if cost is not None and cost != 0. and np.isfinite(self.objective) and (self.validation or {}).get("feasible"):
+            return 100*(self.objective-cost)/abs(cost)
+        return None
+
+    def reference_target_reached(self, tolerance):
+        cost = self.reference_cost
+        return (self.reference.get("status") == "OPTIMAL" and cost is not None
+                and np.isfinite(self.objective) and (self.validation or {}).get("feasible", False)
+                and self.objective-cost <= 1e-5 + tolerance*abs(cost))
 
 
 # 一次 solve 调用的共享状态。stage 只在进入新阶段时改写、此后保持不变，失败时报告为 <stage>_FAILED。
 class _Run:
-    def __init__(self, o, started):
+    def __init__(self, o, started, reference, total_started):
         self.o, self.started = o, started
+        self.total_started = total_started
         self.deadline = started + o.time_limit - DEADLINE_MARGIN_SECONDS
-        self.result, self.whole, self.searches, self.stage = Result(), None, [], "INITIALIZATION"
+        self.result, self.whole, self.searches, self.stage = Result(reference=reference), None, [], "INITIALIZATION"
 
     # WholeDay 尚未构造时使用本地 deadline，构造后转用当前工作配额调整后的 deadline。
     def remaining(self):
@@ -56,18 +76,24 @@ class _Run:
         if self.remaining() <= 0:
             raise TimeoutError
 
-    # 认证间隙已闭合时把状态记为 CONVERGED 并返回 True。
-    def certified(self):
-        if self.whole.certifier.converged():
-            self.result.status = "CONVERGED"
+    def target_reached(self):
+        if self.result.reference_target_reached(self.o.tolerance):
+            self.result.status = "REFERENCE_TARGET_REACHED"
             return True
         return False
 
 
-# 主流程：初始化 → 固定价格轮询所有块 → 轮末建议/认证 → 协调更新价格 → 整理结果。
+# 主流程：独立参考 → 初始化 → 分块搜索/建议 → 协调更新价格 → 整理结果。
 # 保留阶段名定位失败，并在最终返回前独立复核全天方案。
-def solve(d, scenarios, o, *, progress=None, started_at=None):
-    run = _Run(o, perf_counter() if started_at is None else started_at)
+def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file=None):
+    # started_at 是整体调用起点；搜索预算在参考结束后重新起计。
+    total_started = perf_counter() if started_at is None else started_at
+    if o.verbose:
+        print(f"[参考求解] Gurobi 完整模型，独立预算 {o.reference_time_limit:g} 秒。", flush=True)
+    reference = solve_reference(d, scenarios, o.reference_time_limit, reference_log_file)
+    if o.verbose:
+        print(f"[参考完成] 状态={reference['status']} 成本={reference['objective']}；开始独立搜索预算。", flush=True)
+    run = _Run(o, perf_counter(), reference, total_started)
     result = run.result
     try:
         m, relaxation = _initialize(run, d, scenarios, progress)
@@ -76,8 +102,8 @@ def solve(d, scenarios, o, *, progress=None, started_at=None):
         except SABudgetExhausted:
             run.whole.diagnostics['sa_budget_exhausted'] = True
             run.whole.emit('sa_budget_exhausted')
-        if result.status != "CONVERGED":
-            _certify_remaining(run)
+        if result.status != "REFERENCE_TARGET_REACHED":
+            _finish_advice(run)
     except Exception as error:
         result.status = ("TIME_LIMIT" if run.remaining() <= 0 or isinstance(error, TimeoutError)
                          else f"{run.stage}_FAILED")
@@ -88,7 +114,7 @@ def solve(d, scenarios, o, *, progress=None, started_at=None):
     return result
 
 
-# 建立模型与 WholeDay，求连续松弛下界和初始可行方案，然后启动证明进程与首个 LLM 批次。
+# 连续松弛只用于初始化与内部协调；初始方案不使用参考解。
 def _initialize(run, d, scenarios, progress):
     o, result = run.o, run.result
     m = model(d, scenarios)
@@ -100,17 +126,12 @@ def _initialize(run, d, scenarios, progress):
     run.require_time()
     if relaxation.status != "OPTIMAL":
         raise RuntimeError(f"Continuous relaxation failed: {relaxation.status}")
-    result.lower_bound = relaxation.lower
-    if not np.isfinite(result.lower_bound):
-        raise RuntimeError("Continuous relaxation has no finite certified lower bound")
     whole.initialize(relaxation)
     if whole.best is None:
         raise RuntimeError("No validated initial schedule")
     whole.emit("initialization")
-    whole.certifier.start()
-    whole.advice.kickoff()
-    if not o.sa_enabled and whole.certifier.converged():
-        result.status = "CONVERGED"
+    if not run.target_reached():
+        whole.advice.kickoff()
     return m, relaxation
 
 
@@ -121,7 +142,7 @@ def _search(run, m, relaxation):
     with whole.sa_work():
         blocks, cross = partition(m, o.block_hours, prices) if o.sa_enabled else ([], np.array([], int))
     planes, previous = [[] for _ in blocks], [[] for _ in blocks]
-    for outer in (range(1, o.max_outer + 1) if o.sa_enabled and result.status != "CONVERGED" else []):
+    for outer in (range(1, o.max_outer + 1) if o.sa_enabled and result.status != "REFERENCE_TARGET_REACHED" else []):
         run.require_time()
         with whole.sa_work():
             # 新乘子对应新的块费用与局部割环境，历史二进制种子必须重新调度。
@@ -131,12 +152,14 @@ def _search(run, m, relaxation):
         if whole.advice.state["phase"] == "llm":
             run.stage = "ADVISOR_CARRYOVER"
             whole.advice.advance(run.searches)
-            if run.certified():
+            if run.target_reached():
                 break
         rounds = _run_rounds(run, outer, previous)
-        if result.status == "CONVERGED":
+        if result.status == "REFERENCE_TARGET_REACHED":
             break
         whole.advice.advance(run.searches)
+        if run.target_reached():
+            break
         prices, previous = _coordinate(run, m, outer, rounds, prices, planes, cross, relaxation.lower)
 
 
@@ -158,8 +181,7 @@ def _run_round(run, outer, inner, previous):
     whole.diagnostics["rounds"].append(record)
     for j, search in enumerate(searches):
         whole.advice.advance(searches)
-        whole.certifier.step()
-        if run.certified():
+        if run.target_reached():
             break
         run.require_time()
         if closed(search.lower, search.upper, o.tolerance):
@@ -167,9 +189,9 @@ def _run_round(run, outer, inner, previous):
         else:
             _visit_block(run, j, search, outer, inner, previous, record)
         whole.advice.advance(searches)
-    if result.status == 'CONVERGED':
-        record.update(ended_seconds=perf_counter()-run.started, stop_reason='CONVERGED')
-        whole.emit('convergence')
+    if result.status == 'REFERENCE_TARGET_REACHED':
+        record.update(ended_seconds=perf_counter()-run.started, stop_reason='REFERENCE_TARGET_REACHED')
+        whole.emit('reference_target_reached')
         return True
     return _finish_round(run, outer, inner, start, record)
 
@@ -194,11 +216,11 @@ def _visit_block(run, j, search, outer, inner, previous, record):
             print(f"[分块进度] 外层={outer} 内层轮次={inner} 时间块={j + 1}/{len(run.searches)} "
                   f"块内[下界, 上界]=[{search.lower:.6f}, {search.upper:.6f}] "
                   f"全天可行成本(UB)={result.objective:.6f} "
-                  f"认证下界(LB)={result.lower_bound:.6f}", flush=True)
+                  f"参考成本={result.reference_cost}", flush=True)
         run.require_time()
 
 
-# 完整遍历之后：更新 SA 轮计数，再依次做数值认证和上界建议，最后刷新轮记录。
+# 完整遍历之后：更新 SA 轮计数、处理上界建议，最后刷新轮记录。
 # 迭代记录须在 after_round 之前写入（它会进入 LLM 提示）；建议阶段可能新增割和评估，因此轮末再统计一次。
 def _finish_round(run, outer, inner, start, record):
     o, result, whole, searches = run.o, run.result, run.whole, run.searches
@@ -209,8 +231,6 @@ def _finish_round(run, outer, inner, start, record):
                      **_round_progress(run, start), llm_failed=False)
     whole.diagnostics["iterations"].append(iteration)
     all_closed = all(closed(x.lower, x.upper, o.tolerance) for x in searches)
-    run.stage = "CERTIFICATION"
-    whole.certifier.step()
     run.stage = "ADVISOR"
     whole.advice.after_round(start.upper, start.sa_calls, searches, outer, inner,
                              not (outer == o.max_outer and inner == o.max_inner))
@@ -223,7 +243,7 @@ def _finish_round(run, outer, inner, start, record):
     for search in searches:
         search.summarize()
     run.require_time()
-    return run.certified() or all_closed
+    return run.target_reached() or all_closed
 
 
 # 一轮开始时的快照：UB、SA 调用数、评估数、LLM 调用数和两类割数量。
@@ -257,7 +277,7 @@ def _coordinate(run, m, outer, rounds, prices, planes, cross, relaxation_lower):
         whole.timings["coordination"] += perf_counter() - phase
         run.require_time()
         result.coordination_upper = min(result.coordination_upper, upper)
-        result.outer_history.append({"outer": outer, "lower": result.lower_bound, "coordination_upper": upper,
+        result.outer_history.append({"outer": outer, "reference_cost": result.reference_cost, "coordination_upper": upper,
                                      "coordination": info, "complete_rounds": rounds,
                                      "unconverged_blocks": [x.index for x in searches
                                                             if not closed(x.lower, x.upper, o.tolerance)]})
@@ -270,44 +290,41 @@ def _coordinate(run, m, outer, rounds, prices, planes, cross, relaxation_lower):
     return prices, previous
 
 
-# SA 达到迭代或配额上限后，保留已有方案与割，继续使用剩余总预算进行数值认证。
-def _certify_remaining(run):
-    run.stage = "CERTIFICATION"
-    while run.remaining() > 0 and not run.whole.certifier.converged():
-        run.whole.certifier.step()
-        run.whole.advice.advance(run.searches)
-    run.require_time()
-    run.result.status = "CONVERGED"
+# SA 用尽后只收尾已有批次及其升级请求，没有工作时不空等预算。
+def _finish_advice(run):
+    run.stage = "ADVISOR"
+    advice = run.whole.advice
+    while not run.target_reached():
+        run.require_time()
+        if (advice.state['batch'] is None and advice.regular.worker is None
+                and advice.escalation.worker is None and not advice.escalation_ready()):
+            run.result.status = "SEARCH_EXHAUSTED"
+            return
+        advice.advance(run.searches)
+        sleep(min(.05, max(0., run.remaining())))
 
 
-# 取消在途 LLM 请求并关闭证明进程；关闭失败记为认证失败。
+# 取消在途 LLM 请求。
 def _shutdown(run):
     whole = run.whole
     if whole is None:
         return
     whole.advice.close()
-    try:
-        whole.certifier.close()
-    except Exception as error:
-        whole.diagnostics['proof_shutdown_error'] = type(error).__name__
-        run.result.status, run.result.message = 'CERTIFICATION_FAILED', str(error)
 
 
-# 独立复核最终方案、计算认证间隙并汇总统计与计时。
+# 独立复核最终方案，参考差距由 Result 随当前方案计算。
 def _finalize(run, d, scenarios):
     o, result, whole = run.o, run.result, run.whole
     for search in run.searches:
         search.summarize()
     if np.isfinite(result.objective):
         result.validation = validate(d, scenarios, result)
-        if result.lower_bound > result.objective + 1e-5:
-            result.status, result.message = "CERTIFICATION_FAILED", "Lower bound exceeds validated cost"
-            result.relative_gap = (result.objective - result.lower_bound) / max(1., abs(result.objective))
-        else:
-            result.relative_gap = max(0., result.objective - result.lower_bound) / max(1., abs(result.objective))
+        if not result.validation['feasible']:
+            result.status, result.message = "VALIDATION_FAILED", "Final schedule failed validation"
     if whole is not None:
         whole.diagnostics['search_statistics'] = whole.search_statistics()
     result.elapsed_seconds = perf_counter() - run.started
+    result.total_elapsed_seconds = perf_counter() - run.total_started
     if whole is not None:
         whole.diagnostics['search_statistics']['new_feasible_per_second'] = (
             whole.diagnostics['search_statistics']['new_feasible']/max(result.elapsed_seconds, 1e-9))
@@ -317,5 +334,5 @@ def _finalize(run, d, scenarios):
         whole.emit("final")
     if o.verbose:
         print(f"[主算法结束] 状态={result.status} 可行成本(UB)={result.objective:.6f}, "
-              f"认证下界(LB)={result.lower_bound:.6f}, "
-              f"认证间隙={100 * result.relative_gap:.4f}%, 耗时={result.elapsed_seconds:.2f}秒", flush=True)
+              f"参考成本={result.reference_cost}, "
+              f"参考差距(%)={result.reference_gap_percent}, 搜索耗时={result.elapsed_seconds:.2f}秒", flush=True)

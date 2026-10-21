@@ -13,31 +13,35 @@ from suc_benders.solver import Result
 
 def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monkeypatch):
     seen = []
-    def solve(options, *, progress, started_at):
+    def solve(options, *, progress, started_at, reference_log_file):
         seen.append(options)
         assert isinstance(progress, entry.ExperimentProgress)
         assert started_at > 0
-        return Result(status='TIME_LIMIT', objective=110., lower_bound=100., relative_gap=10./110.,
+        assert reference_log_file.name == 'reference-gurobi.log'
+        return Result(status='TIME_LIMIT', objective=110.,
+                      reference=dict(status='OPTIMAL', objective=105., validation={'feasible': True}, elapsed_seconds=0.),
                       validation={'feasible': True}, diagnostics={'sa_calls': 2,
                       'sa_backend': SA_BACKEND, 'sa_initialization': SA_INITIALIZATION})
     monkeypatch.setattr(entry, 'run_suc', solve)
     monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')
     monkeypatch.setattr(entry, 'LLM_ENABLED', False)
-    monkeypatch.setattr(entry, 'solve_reference', lambda *a:
-        dict(status='OPTIMAL', objective=105., lower=105., validation={'feasible': True},
-             gap_percent=0., elapsed_seconds=0.))
     monkeypatch.chdir(tmp_path)
     assert entry.main() == 0
     assert len(seen) == 1
     assert seen[0]['seed'] == entry.SEED and seen[0]['block_hours'] == entry.BLOCK_HOURS == 12
     assert seen[0]['sa_sweeps'] == entry.SA_SWEEPS == 16
+    assert seen[0]['reference_time_limit'] == entry.REFERENCE_TIME_LIMIT_SECONDS == 120
     output, = (tmp_path/'results').iterdir()
     summary = json.loads((output/'summary.json').read_text(encoding='utf-8'))
     assert summary['sa_calls'] == 2
     assert summary['reference_gap_percent'] == pytest.approx(100*5./105.)
     with (output/'result.json').open(encoding='utf-8') as stream:
         result = json.load(stream)
-    assert result['objective'] == 110. and result['lower_bound'] == 100.
+    assert result['objective'] == 110. and result['reference_cost'] == 105.
+    for record in (summary, result):
+        assert not {'lower', 'lower_bound', 'relative_gap', 'gap_percent', 'certification_history'} & record.keys()
+    reference = json.loads((output/'reference.json').read_text(encoding='utf-8'))
+    assert reference['objective'] == 105.
     for record in (summary, result):
         assert record['sa_backend'] == SA_BACKEND and record['sa_initialization'] == SA_INITIALIZATION
     effective = json.loads((output/'effective-options.json').read_text(encoding='utf-8'))
@@ -49,7 +53,7 @@ def test_check_only_never_starts_solver_or_creates_results(tmp_path, monkeypatch
     monkeypatch.setattr(entry, 'CHECK_ONLY', True)
     monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')
     monkeypatch.setattr(entry, 'run_suc', lambda *a: pytest.fail('Solver started'))
-    monkeypatch.setattr(entry, 'solve_reference', lambda *a: pytest.fail('Reference started'))
+    monkeypatch.setattr('suc_benders.solver.solve_reference', lambda *a: pytest.fail('Reference started'))
     assert entry.main() == 0
     assert not (tmp_path/'results').exists()
 
@@ -158,8 +162,7 @@ def test_llm_record_keeps_base_and_per_candidate_outcomes():
 def test_progress_records_the_event_row_not_the_last_history_row(tmp_path):
     regular = dict(call_id='llm_upper:1', status='OK', tier='regular')
     history = [regular, dict(call_id='llm_escalation:2', status='RUNNING', tier='escalation')]
-    whole = NS(result=NS(objective=1., lower_bound=0., llm_calls=2, status='RUNNING', llm_history=history,
-                         outer_history=[]),
+    whole = NS(result=Result(objective=1., llm_calls=2, status='RUNNING', llm_history=history),
                started=0., diagnostics=dict(sa_calls=0), advice=NS(thread_id=None, event_row=regular))
     progress = entry.ExperimentProgress(tmp_path)
     progress.last_upper = 1.
@@ -189,9 +192,10 @@ def test_escalation_options_and_records_reach_results(tmp_path, monkeypatch):
             dict(call_id='llm_escalation:2', status='OK', tier='escalation', triggered_by='llm_upper:1',
                  transport='codex_exec', requested_model='gpt-6-astra', deadline_seconds=900., improved=True,
                  codex_home_cleanup='REMOVED')]
-    def solve(options, *, progress, started_at):
+    def solve(options, *, progress, started_at, reference_log_file):
         seen.append(options)
-        return Result(status='TIME_LIMIT', objective=110., lower_bound=100., relative_gap=10./110.,
+        return Result(status='TIME_LIMIT', objective=110.,
+                      reference=dict(status='OPTIMAL', objective=105., validation={'feasible': True}, elapsed_seconds=0.),
                       validation={'feasible': True}, llm_calls=2, llm_history=rows,
                       diagnostics={'sa_calls': 2, 'sa_backend': SA_BACKEND,
                                    'sa_initialization': SA_INITIALIZATION})
@@ -200,9 +204,6 @@ def test_escalation_options_and_records_reach_results(tmp_path, monkeypatch):
     monkeypatch.setattr(entry, 'LLM_ENABLED', True)
     monkeypatch.setattr(entry, 'LLM_TRANSPORT', 'http')
     monkeypatch.setattr(entry, 'LLM_ESCALATION_MODEL', 'gpt-6-astra')
-    monkeypatch.setattr(entry, 'solve_reference', lambda *a:
-        dict(status='OPTIMAL', objective=105., lower=105., validation={'feasible': True},
-             gap_percent=0., elapsed_seconds=0.))
     assert entry.main() == 0
     output, = (tmp_path/'results').iterdir()
     assert seen[0]['llm_escalation_command'] == 'codex'

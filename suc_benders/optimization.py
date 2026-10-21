@@ -9,8 +9,8 @@ from scipy import sparse
 
 
 # 输入稀疏模型与秒预算，返回状态、原始点/目标、对偶价格和下界。
-# 整数模式取 ObjBound；连续最优时按有界拉格朗日重新计算下界，不把候选 ObjVal 当作整数证明。
-def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, callback=None, solution_limit=None):
+# 连续最优时按有界拉格朗日重新计算内部下界；整数模式另返回 Gurobi 的 ObjBound，仅作记录。
+def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, solution_limit=None):
     if seconds <= 0:
         raise TimeoutError("No time remaining for optimization")
     if not integral and any(value is not None for value in (mip_focus, solution_limit)):
@@ -42,10 +42,7 @@ def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, callb
             g.setObjective(m.obj @ x + x @ sparse.diags(m.q) @ x)
             constraints = g.addMConstr(m.A, x, np.where(m.eq, "=", "<"), m.rhs)
             g.update()
-            if callback is None:
-                g.optimize()
-            else:
-                g.optimize(callback)
+            g.optimize()
             statuses = {2: "OPTIMAL", 3: "INFEASIBLE", 4: "INF_OR_UNBD", 5: "UNBOUNDED",
                         9: "TIME_LIMIT", 10: "SOLUTION_LIMIT", 11: "INTERRUPTED", 12: "NUMERIC", 13: "SUBOPTIMAL", 15: "USER_OBJ_LIMIT"}
             result = NS(status=statuses.get(g.Status, f"STATUS_{g.Status}"), lower=-np.inf,

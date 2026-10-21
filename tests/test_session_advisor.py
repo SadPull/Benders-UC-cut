@@ -145,9 +145,29 @@ def test_inflight_call_keeps_polling_and_convergence_cancels_it(tiny, options, m
     whole.deadline = perf_counter()+50
     whole.advice.advance([])
     assert not closed and whole.advice.regular.worker is not None
-    monkeypatch.setattr(whole.certifier, 'converged', lambda: True)
+    monkeypatch.setattr(whole.result, 'reference_target_reached', lambda tolerance: True)
     whole.advice.advance([])
     assert closed == [True] and whole.advice.regular.worker is None
+
+
+def test_reply_reaching_reference_target_does_not_launch_another_call(tiny, options, monkeypatch):
+    whole = setup_advice(tiny, options, monkeypatch)
+    before = whole.result.objective
+    whole.result.reference = dict(status='OPTIMAL', objective=before/1.00015, validation={'feasible': True})
+    calls = []
+    class Worker:
+        def __init__(self, *args, **kwargs):
+            calls.append(True)
+        def poll(self):
+            return [], dict(status='OK', thread_id=SESSION, background_seconds=1., proposals=[])
+    monkeypatch.setattr(transport, 'AdvisorRequest', Worker)
+    monkeypatch.setattr(whole, 'consume_upper', lambda *a: setattr(whole.result, 'objective', before*.9999))
+    whole.advice.begin()
+    batch = whole.advice.state['batch']
+    whole.advice.advance([])
+    whole.advice.advance([])
+    assert calls == [True] and batch['status'] == 'REFERENCE_TARGET_REACHED'
+    assert whole.advice.state['batch'] is None
 
 
 def test_session_mismatch_resets_session_without_evaluating_candidates(tiny, options, monkeypatch):
