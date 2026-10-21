@@ -1,4 +1,3 @@
-from copy import deepcopy
 import json
 from pathlib import Path
 import sys
@@ -10,7 +9,6 @@ import pytest
 from conftest import whole_day
 from suc_benders import advisor_request as transport
 from suc_benders.config import load_options
-from suc_benders.upper_advisor import escalation_state
 
 SESSION = '01a15229-5327-7e13-af26-d1281e24d0bb'
 
@@ -194,18 +192,6 @@ def test_two_escalation_failures_disable_only_escalation(lanes, monkeypatch):
     assert row['status'] == 'FAILED' and 'Unsupported Codex config' in row['message']
     assert state['consecutive_failures'] == 1 and advice.escalation.worker is None
     assert lanes.whole.result.llm_calls == 3
-
-
-def test_restore_fills_escalation_defaults_and_ignores_its_sessions(lanes):
-    saved = deepcopy(lanes.whole.diagnostics)
-    del saved['advisor_state']['escalation']
-    lanes.whole.result.llm_history = [dict(status='OK', thread_id=SESSION, tier='escalation'),
-                                      dict(status='RUNNING', tier='escalation', call_id='llm_escalation:2')]
-    state = lanes.advice.state
-    lanes.advice.restore(saved)
-    assert lanes.advice.state is state and lanes.whole.diagnostics['advisor_state'] is state
-    assert state['escalation'] == escalation_state() and lanes.advice.thread_id is None
-    assert lanes.whole.result.llm_history[1]['status'] == 'CANCELLED'
 
 
 def test_escalation_options_are_validated(tmp_path):

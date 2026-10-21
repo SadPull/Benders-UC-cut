@@ -28,20 +28,20 @@ LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区�
 
 **升级层（可选）**：`LLM_ESCALATION_MODEL` 填入模型名（如 `gpt-6-astra`）即开启，常规层须为 `LLM_TRANSPORT="http"`。常规层一次调用使 UB 降幅低于 `LLM_ESCALATION_GAIN`（默认 0.5%）或调用失败时，升级层被武装，并经 Codex CLI 以推理 max 并行发起一次请求；常规层照常继续，两层回复都走同一评估与移植流程。升级层每次发送完整提示、不续接会话；剩余预算扣除预留后不足 `LLM_ESCALATION_MIN_SECONDS`（默认 700 秒）时不发起，单次最多 `LLM_ESCALATION_TIMEOUT_SECONDS` 且不超过剩余预算。升级请求有效改进后清除期间累积的武装，早于该改进发出的常规请求不再触发升级；连续两次失败只停用升级层。每次升级调用在新建的临时 `CODEX_HOME` 中运行，其中只有登录信息副本和去掉 memories、插件、hooks、MCP、桌面与项目设置的配置，不含全局 AGENTS.md，并加 `--ephemeral`；调用结束即删除，删除结果记入回执 `codex_home_cleanup`。`result.json` 的每次调用标明 `tier`（regular／escalation）、`transport`、`triggered_by` 与 `deadline_seconds`，`summary.json` 汇总升级次数、有效改进次数与停用原因。
 
-入口默认从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%。`RESUME_FROM=None` 表示冷启动；续跑时填入从归档解压的完整检查点路径，程序保留已有方案、认证 LB、累计耗时和调用计数，重建局部搜索模型，并把配置预算作为追加时间。续跑跳过参考求解；冷启动另用最多 120 秒求参考解，其结果不回填主算法。
+入口每次从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%；另用最多 120 秒求参考解，其结果不回填主算法。当前主线已删除续跑（`RESUME_FROM`）：v0.33.0 起不再写全量检查点，而现存检查点都不满足当前 SA 标识，续跑旧实验请使用对应的归档版本。
 
-每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`），续跑时选用历史中最后一次成功调用的会话；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
+每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`）；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
 
-结果自动写入新建的 `results/manual-seed.../` 或 `results/resume-seed.../`：
+结果自动写入新建的 `results/manual-seed.../`：
 
 - `summary.json`：状态、UB/LB/gap、耗时和统计。
 - `result.json`：精简主结果、最终方案、计时与调用摘要（含每次 LLM 调用的 usage 与回复原文）。
 - `reference.json`：仅冷启动运行时生成的独立参考解。
 - `llm_requests/`：Codex 通道或升级层实际触发时的请求、提示、命令行、事件流与回执（不含登录信息）。
 - `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、SHA256、依赖版本和脱敏后的完整有效配置。
-- `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案。最新方案不含完整搜索状态，不能作为 `RESUME_FROM` 的完整检查点。
+- `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案；最新方案不含搜索状态。
 
-默认不再保存周期或终态的全量检查点，也不序列化全部历史采样；记录开销与最终保存耗时单列。旧实验的完整检查点保留原样。
+不保存全量检查点，也不序列化全部历史采样；记录开销与最终保存耗时单列。
 
 manifest、精简结果及运行诊断记录 `sa_backend` 与 `sa_initialization`（当前为 `random_sa_repair_v1`）。采样诊断包含 beta 序列，以及每条链的原始／实际种子、退火终态与 QUBO 能量；这些诊断可经 `run_suc` 返回对象读取，不自动全量落盘。
 
@@ -55,9 +55,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 直接运行 `run_experiment.py`；`run_suc.py` 仅提供 `from run_suc import run_suc` 的 Python 接口。旧命令行参数及 `--output` JSON 输出入口已删除。
 
-全天联合 SA 已删除，`enhanced_search` 和 `block_sa_period` 参数不再接受，结果也不再输出联合搜索统计。新主线保留恢复接口；含联合 SA 调用、批次或采样记录的旧检查点返回 `RESUME_FAILED`，请使用归档版本读取和继续旧实验。入口只恢复显式指定的完整检查点，不自动补跑；恢复时继续累计已用预算。
-
-只接受当前完整的分块检查点、匹配的 D-Wave SA／随机初始化标识和 v2 LLM 调度状态。Kaiwu、含锚点或额外下降、以及缺少 SA 标识的旧检查点返回 `RESUME_FAILED`，使用其归档版本继续；不迁移旧状态、补齐缺失历史或重建旧统计。机组输入必须明确提供 `initial_output`。运行环境固定为上述 Windows／Python 3.10，TOML 解析直接使用已声明的 `tomli` 依赖。
+机组输入必须明确提供 `initial_output`。运行环境固定为上述 Windows／Python 3.10，TOML 解析直接使用已声明的 `tomli` 依赖。
 
 ## 核心文件
 

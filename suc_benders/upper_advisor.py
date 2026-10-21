@@ -17,12 +17,6 @@ def transport(o):
     return "codex_exec" if o.llm_codex_command else "http"
 
 
-# 升级层随检查点保存的状态：是否武装及触发调用、连续失败、停用原因、调用次数和最近一次有效改进的时刻。
-def escalation_state():
-    return dict(armed=False, armed_by=None, consecutive_failures=0, disabled=None, calls=0,
-                last_improved_seconds=None)
-
-
 class UpperAdvisor:
     def __init__(self, whole):
         self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
@@ -30,10 +24,12 @@ class UpperAdvisor:
         self.worker, self.pending, self.baseline = None, None, None
         self.escalation = NS(worker=None, pending=None, baseline=None)
         self.event_row = None
-        # 会话身份、重置次数和停用原因都放在 state 中，随检查点保存。
-        self.state = dict(version=2, phase="sa", stalled=dict(upper=0), sa_rounds=0,
-                          batch_id=0, batch=None, consecutive_failures=0,
-                          thread_id=None, session_resets=0, disabled=None, escalation=escalation_state())
+        # 调度状态：所处阶段、连续停滞的完整 SA 轮数、当前批次、会话身份与停用原因。
+        # escalation 记录升级层是否武装及触发调用、连续失败、停用原因、调用次数和最近一次有效改进的时刻。
+        self.state = dict(phase="sa", stalled=0, sa_rounds=0, batch_id=0, batch=None, consecutive_failures=0,
+                          thread_id=None, session_resets=0, disabled=None,
+                          escalation=dict(armed=False, armed_by=None, consecutive_failures=0, disabled=None,
+                                          calls=0, last_improved_seconds=None))
         whole.diagnostics.update(advisor_state=self.state, advisor_rounds=[], llm_batches=[],
                                  upper_advice_feedback=None)
 
@@ -57,7 +53,7 @@ class UpperAdvisor:
 
     # 冷启动初始化后立即开一批；请求由后续 advance 异步发出，不阻塞 SA。
     def kickoff(self):
-        if (self.o.llm_first_call_at_start and self.result.llm_calls == 0 and self.state["batch"] is None
+        if (self.o.llm_first_call_at_start and self.state["batch"] is None
                 and self.available() and not self.cert.converged()):
             self.begin(trigger="start")
 
@@ -68,13 +64,12 @@ class UpperAdvisor:
         if self.whole.diagnostics["sa_calls"] <= sa_before:
             return
         self.state["sa_rounds"] += 1
-        self.state["stalled"]["upper"] = (0 if self.improved(upper) else self.state["stalled"]["upper"]+1)
+        self.state["stalled"] = 0 if self.improved(upper) else self.state["stalled"]+1
         self.whole.diagnostics["advisor_rounds"].append(dict(
             outer=outer, round=inner, sa_round=self.state["sa_rounds"], upper_before=upper,
-            upper=self.result.objective, lower=self.result.lower_bound,
-            stalled=self.state["stalled"].copy()))
+            upper=self.result.objective, lower=self.result.lower_bound, stalled=self.state["stalled"]))
         if (allow and self.state['batch'] is None and self.available() and not self.cert.converged()
-                and self.state["stalled"]["upper"] >= self.o.llm_patience):
+                and self.state["stalled"] >= self.o.llm_patience):
             self.begin(outer=outer, inner=inner)
         self.advance(searches)
 
@@ -82,22 +77,21 @@ class UpperAdvisor:
         if self.state["phase"] != "sa" or self.worker is not None:
             raise RuntimeError("An advice batch is already active")
         self.state["batch_id"] += 1
-        batch = dict(batch_id=self.state["batch_id"], channels=["upper"], trigger=trigger,
-            counts=dict(upper=0),
+        batch = dict(batch_id=self.state["batch_id"], trigger=trigger, calls=0,
             upper_before=self.result.objective, lower_before=self.result.lower_bound,
-            trigger_stalled=self.state["stalled"].copy(), trigger_sa_round=self.state["sa_rounds"],
+            trigger_stalled=self.state["stalled"], trigger_sa_round=self.state["sa_rounds"],
             sa_calls_at_start=self.whole.diagnostics["sa_calls"], outer=outer, round=inner,
             status="RUNNING", started_seconds=perf_counter()-self.whole.started)
         self.state.update(phase="llm", batch=batch)
         self.whole.diagnostics["llm_batches"].append(batch)
         if self.o.verbose:
             reason = ("初始化完成" if trigger == "start" else
-                      f"连续 {batch['trigger_stalled']['upper']} 个完整 SA 轮次改善不足")
+                      f"连续 {batch['trigger_stalled']} 个完整 SA 轮次改善不足")
             print(f"[LLM 触发] {reason}，开始第 {batch['batch_id']} 批上界建议。", flush=True)
 
     def start_request(self):
         batch = self.state["batch"]
-        if self.worker is not None or not self.available() or batch["counts"]["upper"] >= 3:
+        if self.worker is not None or not self.available() or batch["calls"] >= 3:
             return
         iteration = self.result.llm_calls+1
         context, bases, self.baseline = self.whole.upper_context()
@@ -109,11 +103,9 @@ class UpperAdvisor:
                                 self.o, context, bases, iteration, continuation)
         if not self.available():
             return
-        batch["counts"]["upper"] += 1
+        batch["calls"] += 1
         self.result.llm_calls = iteration
-        routing = dict(channel="upper", batch_id=batch["batch_id"],
-                       batch_call=batch["counts"]["upper"],
-                       phase="resume" if self.whole.diagnostics.get('resume') else "formal")
+        routing = dict(channel="upper", batch_id=batch["batch_id"], batch_call=batch["calls"])
         prompt = json.loads(body["input"])
         prompt["advice_routing"] = routing
         body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
@@ -123,7 +115,7 @@ class UpperAdvisor:
             deadline_seconds=self.o.llm_timeout,
             status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
             base_u=llm.prompt_base(body), prompt_mode="delta" if continuation else "full",
-            trigger_stalled=batch["trigger_stalled"].copy(),
+            trigger_stalled=batch["trigger_stalled"],
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
         self.result.llm_history.append(self.pending)
@@ -138,7 +130,7 @@ class UpperAdvisor:
         if self.o.verbose:
             print(f"[LLM 请求] 常规层 方式={TRANSPORT[transport(self.o)]} 模型={self.o.llm_model} 推理=max "
                   f"批次={batch['batch_id']} 调用次数={iteration} "
-                  f"本批次数={batch['counts']['upper']} 状态={self.pending['status']}", flush=True)
+                  f"本批次数={batch['calls']} 状态={self.pending['status']}", flush=True)
 
     def poll(self, searches):
         if self.worker is None:
@@ -248,7 +240,7 @@ class UpperAdvisor:
                           and self.result.llm_calls >= self.o.llm_max_calls else 'LLM_WINDOW_TOO_SHORT')
             elif self.improved(batch['upper_before']):
                 reason = 'RETURN_TO_SA'
-            elif batch['counts']['upper'] >= 3:
+            elif batch['calls'] >= 3:
                 reason = 'BATCH_LIMIT'
             else:
                 self.start_request()
@@ -257,7 +249,7 @@ class UpperAdvisor:
         batch.update(status=reason, upper_after=self.result.objective, lower_after=self.result.lower_bound,
                      sa_calls_at_end=self.whole.diagnostics["sa_calls"],
                      ended_seconds=perf_counter()-self.whole.started)
-        self.state.update(phase="sa", batch=None, stalled=dict(upper=0))
+        self.state.update(phase="sa", batch=None, stalled=0)
 
     def escalation_enabled(self):
         return self.o.llm_enabled and bool(self.o.llm_escalation_model)
@@ -303,8 +295,7 @@ class UpperAdvisor:
         triggered_by = s['armed_by']
         s.update(armed=False, armed_by=None, calls=s['calls']+1)
         self.result.llm_calls = iteration
-        routing = dict(channel="upper", tier="escalation",
-                       phase="resume" if self.whole.diagnostics.get('resume') else "formal")
+        routing = dict(channel="upper", tier="escalation")
         prompt = json.loads(body["input"])
         prompt["advice_routing"] = routing
         body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
@@ -352,34 +343,6 @@ class UpperAdvisor:
                 reason=s['disabled'], seconds=perf_counter()-self.whole.started)
             if self.o.verbose:
                 print(f"[LLM 停用] 升级层：{s['disabled']}；常规层照常。", flush=True)
-
-    def restore(self, diagnostic):
-        saved = diagnostic["advisor_state"]
-        if saved["version"] != 2:
-            raise ValueError("Only the current advice scheduling state is supported")
-        self.state.clear()
-        self.state.update(deepcopy(saved))
-        self.state.setdefault('thread_id', None)
-        self.state.setdefault('session_resets', 0)
-        self.state.setdefault('disabled', None)
-        self.state['escalation'] = dict(escalation_state(), **self.state.get('escalation', {}))
-        for name in ("advisor_rounds", "llm_batches"):
-            self.whole.diagnostics[name] = deepcopy(diagnostic[name])
-        if self.state["batch"] is not None:
-            batch = next(b for b in self.whole.diagnostics["llm_batches"]
-                         if b["batch_id"] == self.state["batch_id"])
-            if batch['channels'] != ['upper'] or batch.get('validation', False):
-                raise ValueError('Recovered advice must be an upper search batch')
-            self.state["batch"] = batch
-        for row in self.result.llm_history:
-            if row["status"] == "RUNNING":
-                row.update(status="CANCELLED", message="ResumeWorkerUnavailable", accepted=0)
-        self.whole.feedback = deepcopy(diagnostic["upper_advice_feedback"])
-        # 没有会话身份且未主动重置过时，取常规层最后一次成功会话；升级层的临时会话不可续接。
-        if self.thread_id is None and not self.state['session_resets']:
-            self.thread_id = next((row['thread_id'] for row in reversed(self.result.llm_history)
-                                   if row['status'] == 'OK' and row.get('thread_id')
-                                   and row.get('tier', 'regular') == 'regular'), None)
 
     def _cancel(self, worker, row):
         elapsed = perf_counter()-worker.started

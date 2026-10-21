@@ -11,19 +11,14 @@ from suc_benders.config import Options
 from suc_benders.solver import Result
 
 
-@pytest.fixture(autouse=True)
-def cold_entry(monkeypatch):
-    monkeypatch.setattr(entry, 'RESUME_FROM', None)
-
-
 def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monkeypatch):
     seen = []
-    def solve(options, *, progress, started_at, resume_state):
+    def solve(options, *, progress, started_at):
         seen.append(options)
         assert isinstance(progress, entry.ExperimentProgress)
-        assert started_at > 0 and resume_state is None
+        assert started_at > 0
         return Result(status='TIME_LIMIT', objective=110., lower_bound=100., relative_gap=10./110.,
-                      validation={'feasible': True}, diagnostics={'sa_calls': 2, 'block_sa_calls': 2,
+                      validation={'feasible': True}, diagnostics={'sa_calls': 2,
                       'sa_backend': SA_BACKEND, 'sa_initialization': SA_INITIALIZATION})
     monkeypatch.setattr(entry, 'run_suc', solve)
     monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')
@@ -39,7 +34,7 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
     assert seen[0]['sa_sweeps'] == entry.SA_SWEEPS == 16
     output, = (tmp_path/'results').iterdir()
     summary = json.loads((output/'summary.json').read_text(encoding='utf-8'))
-    assert summary['sa_calls'] == summary['block_sa_calls'] == 2
+    assert summary['sa_calls'] == 2
     assert not {'joint_sa_calls', 'enhanced_search', 'block_sa_period'} & summary.keys()
     assert summary['reference_gap_percent'] == pytest.approx(100*5./105.)
     with (output/'result.json').open(encoding='utf-8') as stream:
@@ -47,7 +42,6 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
     assert result['objective'] == 110. and result['lower_bound'] == 100.
     for record in (summary, result):
         assert record['sa_backend'] == SA_BACKEND and record['sa_initialization'] == SA_INITIALIZATION
-    assert summary['audit_status'] == 'NOT_REQUESTED'
     effective = json.loads((output/'effective-options.json').read_text(encoding='utf-8'))
     assert effective['sa_reads'] == 8 and effective['llm_max_calls'] is None
     assert effective['time_limit'] == seen[0]['time_limit']
@@ -118,7 +112,6 @@ def test_progress_solution_size_is_independent_of_history(tmp_path, tiny, option
     progress(whole, 'final')
     assert path.read_bytes() == first
     assert len(first) < 10000
-    assert not (tmp_path/'checkpoint.json.gz').exists()
     assert not (tmp_path/'latest-solution.tmp.json').exists()
 
 
@@ -134,38 +127,6 @@ def test_solution_write_failure_preserves_previous_file(tmp_path, tiny, options,
     with pytest.raises(OSError, match='disk write failed'):
         progress(whole, 'final')
     assert (tmp_path/'latest-solution.json').read_bytes() == before
-
-
-def test_resume_entry_adds_budget_preserves_state_and_skips_reference(tmp_path, tiny, options, monkeypatch):
-    from test_basic_search import checkpoint
-    original = whole_day(tiny, options)
-    state = checkpoint(original)
-    state['llm_calls'] = 3
-    state['llm_history'] = [dict(status='OK', thread_id='prior-session')]
-    source = tmp_path/'source'; source.mkdir()
-    entry.save(source/'checkpoint.json.gz', state)
-    entry.save(source/'manifest.json', dict(files={'data/'+name: hashlib.sha256(
-        (entry.PROJECT/'data'/name).read_bytes()).hexdigest() for name in ('units.json', 'stochastic.json')}))
-    monkeypatch.setattr(entry, 'RESUME_FROM', str(source/'checkpoint.json.gz'))
-    monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')
-    monkeypatch.setattr(entry, 'LLM_ENABLED', False)
-    monkeypatch.setattr(entry, 'solve_reference', lambda *a: pytest.fail('Reference rerun'))
-    def solve(o, *, resume_state, progress, started_at):
-        assert o['time_limit'] == state['charged_elapsed_seconds'] + entry.TIME_LIMIT_SECONDS
-        assert resume_state == state and progress.prior == state['charged_elapsed_seconds']
-        result = original.result
-        result.status = 'TIME_LIMIT'; result.elapsed_seconds = progress.prior + 10
-        result.llm_calls = 4; progress.session_id = 'prior-session'
-        return result
-    monkeypatch.setattr(entry, 'run_suc', solve)
-    assert entry.main() == 0
-    output, = (tmp_path/'results').iterdir()
-    summary = json.loads((output/'summary.json').read_text(encoding='utf-8'))
-    assert summary['scope'] == 'RESUMED_CONVERGENCE_CHECK'
-    assert summary['new_llm_calls'] == 1 and summary['segment_solver_elapsed_seconds'] == 10
-    assert not (output/'reference.json').exists()
-    manifest = json.loads((output/'manifest.json').read_text(encoding='utf-8'))
-    assert manifest['inherited_evidence'] and not manifest['cold_start']
 
 
 def test_llm_record_keeps_base_and_per_candidate_outcomes():
@@ -202,7 +163,7 @@ def test_progress_records_the_event_row_not_the_last_history_row(tmp_path):
     history = [regular, dict(call_id='llm_escalation:2', status='RUNNING', tier='escalation')]
     whole = NS(result=NS(objective=1., lower_bound=0., llm_calls=2, status='RUNNING', llm_history=history,
                          outer_history=[]),
-               started=0., diagnostics=dict(sa_calls=0), resume_cursor={}, advice=NS(thread_id=None, event_row=regular))
+               started=0., diagnostics=dict(sa_calls=0), advice=NS(thread_id=None, event_row=regular))
     progress = entry.ExperimentProgress(tmp_path)
     progress.last_upper = 1.
     progress(whole, 'llm_response')
@@ -231,11 +192,11 @@ def test_escalation_options_and_records_reach_results(tmp_path, monkeypatch):
             dict(call_id='llm_escalation:2', status='OK', tier='escalation', triggered_by='llm_upper:1',
                  transport='codex_exec', requested_model='gpt-6-astra', deadline_seconds=900., improved=True,
                  codex_home_cleanup='REMOVED')]
-    def solve(options, *, progress, started_at, resume_state):
+    def solve(options, *, progress, started_at):
         seen.append(options)
         return Result(status='TIME_LIMIT', objective=110., lower_bound=100., relative_gap=10./110.,
                       validation={'feasible': True}, llm_calls=2, llm_history=rows,
-                      diagnostics={'sa_calls': 2, 'block_sa_calls': 2, 'sa_backend': SA_BACKEND,
+                      diagnostics={'sa_calls': 2, 'sa_backend': SA_BACKEND,
                                    'sa_initialization': SA_INITIALIZATION})
     monkeypatch.setattr(entry, 'run_suc', solve)
     monkeypatch.setattr(entry, 'RESULTS', tmp_path/'results')

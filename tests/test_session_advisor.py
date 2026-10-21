@@ -1,4 +1,3 @@
-from copy import deepcopy
 import json
 from pathlib import Path
 import subprocess
@@ -85,9 +84,8 @@ def setup_advice(tiny, options, monkeypatch):
     whole.result.llm_calls = 3
     whole.result.llm_history = [dict(status='OK', thread_id=SESSION, feedback={'previous': 2}),
                                 dict(status='TIME_LIMIT', thread_id=OTHER)]
-    whole.diagnostics['resume'] = {'source': 'test'}
-    whole.diagnostics['upper_advice_feedback'] = {'previous': 2}
-    whole.advice.restore(deepcopy(whole.diagnostics))
+    whole.feedback = {'previous': 2}
+    whole.advice.thread_id = SESSION
     monkeypatch.setattr(whole, 'upper_context', lambda: (
         {'upper': whole.result.objective, 'previous_call_feedback': whole.feedback}, [], None))
     monkeypatch.setattr('suc_benders.upper_advisor.llm.request_body',
@@ -125,7 +123,7 @@ def test_multiple_calls_keep_session_and_send_new_measured_feedback(tiny, option
     assert calls[1][3]['previous_call_feedback'] == {'measured_upper': prior_upper}
     assert 'last_successful_call_feedback' not in calls[1][3]
     assert calls[1][3]['upper'] == prior_upper-1
-    assert calls[1][3]['advice_routing']['phase'] == 'resume'
+    assert calls[1][3]['advice_routing']['batch_call'] == 2
 
 
 def test_short_window_never_starts_or_charges_a_call(tiny, options, monkeypatch):
@@ -189,15 +187,6 @@ def test_failure_after_session_reset_disables_llm_and_keeps_searching(tiny, opti
     assert whole.advice.state['disabled'] and whole.diagnostics['llm_disabled']['reason']
     assert whole.advice.state['batch'] is None and not whole.advice.available()
     assert whole.result.llm_calls == 7
-
-
-def test_restore_without_successful_session_starts_fresh(tiny, options, monkeypatch):
-    whole = whole_day(tiny, options)
-    options.llm_enabled = True; options.llm_model = 'gpt-6-astra'; options.llm_codex_command = 'codex'
-    whole.result.llm_calls = 1
-    whole.result.llm_history = [dict(status='TIME_LIMIT', thread_id=OTHER)]
-    whole.advice.restore(deepcopy(whole.diagnostics))
-    assert whole.advice.thread_id is None
 
 
 @pytest.mark.parametrize('enabled', [True, False])

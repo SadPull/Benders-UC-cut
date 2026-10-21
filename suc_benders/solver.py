@@ -37,14 +37,11 @@ class Result:
     elapsed_seconds: float = 0.
 
 
-# 主流程：初始化/恢复 → 固定价格轮询所有块 → 轮末建议/认证 → 协调更新价格 → 整理结果。
-# 累计历史执行时间计入预算；保留阶段名定位失败，并在最终返回前独立复核全天方案。
-def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None):
-    prior = resume_state["charged_elapsed_seconds"] if resume_state is not None else 0.
-    if not np.isfinite(prior) or prior < 0 or prior >= o.time_limit:
-        raise ValueError("Invalid or exhausted cumulative resume budget")
-    started = (perf_counter() if started_at is None else started_at)-prior; deadline = started + o.time_limit
-    deadline -= 5.
+# 主流程：初始化 → 固定价格轮询所有块 → 轮末建议/认证 → 协调更新价格 → 整理结果。
+# 保留阶段名定位失败，并在最终返回前独立复核全天方案。
+def solve(d, scenarios, o, *, progress=None, started_at=None):
+    started = perf_counter() if started_at is None else started_at
+    deadline = started + o.time_limit - 5.  # 留 5 秒给收尾、最终校验和保存
     result, whole = Result(), None
     searches = []
     stage = "INITIALIZATION"
@@ -68,39 +65,34 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
         if not np.isfinite(result.lower_bound):
             raise RuntimeError("Continuous relaxation has no finite certified lower bound")
         prices = relaxation.prices
-        if resume_state is not None:
-            stage = "RESUME"
-            whole.restore(resume_state)
-        else:
-            whole.initialize(relaxation)
+        whole.initialize(relaxation)
         if whole.best is None:
             raise RuntimeError("No validated initial schedule")
         whole.emit("initialization")
         whole.certifier.start()
-        if resume_state is None:
-            whole.advice.kickoff()
+        whole.advice.kickoff()
         if not o.sa_enabled and whole.certifier.converged():
             result.status = "CONVERGED"
         try:
             with whole.sa_work():
                 blocks, cross = partition(m, o.block_hours, prices) if o.sa_enabled else ([], np.array([], int))
             planes, previous = [[] for _ in blocks], [[] for _ in blocks]
-            first_outer, first_round = whole.resume_cursor["outer"], whole.resume_cursor["round"]
-            for outer in (range(first_outer, o.max_outer + 1) if o.sa_enabled and result.status != "CONVERGED" else []):
+            for outer in (range(1, o.max_outer + 1) if o.sa_enabled and result.status != "CONVERGED" else []):
                 if remaining() <= 0:
                     raise TimeoutError
                 with whole.sa_work():
                     # 新乘子对应新的块费用与局部割环境，历史二进制种子必须重新调度。
                     blocks, _ = partition(m, o.block_hours, prices)
                     searches = [BlockSearch(b, o, outer, j + 1, whole, planes[j]) for j, b in enumerate(blocks)]
+                # LLM 批次可以跨越协调：新乘子的块建好后先推进在途批次。
                 if whole.advice.state["phase"] == "llm":
-                    stage = "ADVISOR_RESUME"
+                    stage = "ADVISOR_CARRYOVER"
                     whole.advice.advance(searches)
                     if whole.certifier.converged():
                         result.status = "CONVERGED"
                         break
                 # 每个 inner 是完整遍历轮；尚未闭合的块各最多采样一批，已闭合块跳过采样。
-                for inner in range(first_round if outer == first_outer else 1, o.max_inner + 1):
+                for inner in range(1, o.max_inner + 1):
                     before = result.objective
                     sa_before = whole.diagnostics["sa_calls"]
                     before_count, before_calls = len(whole.diagnostics["evaluations"]), result.llm_calls
@@ -160,8 +152,6 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
                         new_candidates=len(whole.diagnostics["evaluations"])-before_count, llm_failed=False)
                     whole.diagnostics["iterations"].append(iteration)
                     all_closed = all(closed(x.lower, x.upper, o.tolerance) for x in searches)
-                    whole.resume_cursor = (dict(outer=outer+1, round=1) if all_closed or inner == o.max_inner
-                                           else dict(outer=outer, round=inner+1))
                     # 数值认证与上界建议都位于完整 SA 轮之后。
                     stage = "CERTIFICATION"
                     whole.certifier.step()
@@ -249,8 +239,7 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
             whole.diagnostics['search_statistics']['new_feasible']/max(result.elapsed_seconds, 1e-9))
         whole.timings["other"] = max(0., result.elapsed_seconds - sum(whole.timings.values()))
         result.diagnostics.update(evaluation_count=len(whole.cache), llm_call_count=result.llm_calls,
-                                  time_limit_overshoot=max(0., result.elapsed_seconds-o.time_limit),
-                                  resume_cursor=whole.resume_cursor)
+                                  time_limit_overshoot=max(0., result.elapsed_seconds-o.time_limit))
         whole.emit("final")
     if o.verbose:
         print(f"[主算法结束] 状态={result.status} 可行成本(UB)={result.objective:.6f}, "

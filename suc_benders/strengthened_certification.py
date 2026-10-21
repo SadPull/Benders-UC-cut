@@ -115,14 +115,6 @@ class StrengthenedCertification:
         finally:
             sender.close()
 
-    def restore(self, diagnostic):
-        if any(diagnostic.get(name) for name in ('certificate_cuts', 'hourly_certificate_cuts',
-                                                'scenario_certificate_cuts', 'inherited_evidence')):
-            raise ValueError('Strengthened proof cannot import Benders cuts')
-        if 'strengthened_proof' not in diagnostic:
-            raise ValueError('Recovered state is not a strengthened proof run')
-        self.whole.diagnostics['strengthened_proof']['prior_proof'] = diagnostic['strengthened_proof']
-
     def poll(self):
         if self.connection is None or self.finished:
             return

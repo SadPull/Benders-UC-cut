@@ -1,5 +1,5 @@
-from copy import deepcopy
-from dataclasses import asdict
+import json
+from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace as NS
 
@@ -8,10 +8,10 @@ import pytest
 from scipy import sparse
 
 from conftest import whole_day
-from run_suc import _serializable
 from suc_benders import search, solver
 from suc_benders.benders import master
 from suc_benders.config import load_options
+from suc_benders.data import load_data
 from suc_benders.model import model, partition
 from suc_benders.qubo import fixed_binary
 
@@ -50,7 +50,7 @@ def test_each_block_sample_uses_derived_chain_seeds_and_current_incumbent(tiny, 
     assert len({seed for s in seeds for seed in s}) == 2 * options.sa_reads
     assert seeds[0] == [int(np.random.SeedSequence([options.seed, 1, k]).generate_state(1)[0])
                         for k in range(options.sa_reads)]
-    assert whole.diagnostics['sa_calls'] == whole.diagnostics['block_sa_calls'] == 2
+    assert whole.diagnostics['sa_calls'] == 2
     assert all(row['kind'] == 'block' and row['baseline_u'] == whole.result.u.tolist()
                for row in whole.diagnostics['sampling'])
     assert not any(key.startswith('joint_') for key in whole.diagnostics)
@@ -102,74 +102,6 @@ def test_reachability_survives_without_joint_master(tiny, options):
     assert (master(full, [])[0].A != before).nnz == 0
 
 
-def checkpoint(whole):
-    state = _serializable(asdict(whole.result))
-    state.update(charged_elapsed_seconds=2., resume_cursor=dict(outer=1, round=2),
-                 resume=dict(source='test', block_state_rebuilt=True))
-    return state
-
-
-def test_basic_checkpoint_preserves_candidate_and_spent_budgets(tiny, options):
-    original = whole_day(tiny, options)
-    original.diagnostics['sa_budget_seconds_used'] = 3.
-    original.result.llm_calls = 2
-    original.advice.state['consecutive_failures'] = 1
-    state = checkpoint(original); saved = deepcopy(state)
-    restored = whole_day(tiny, options)
-    restored.restore(state)
-    assert restored.result.validation['feasible']
-    assert restored.result.objective == original.result.objective
-    assert restored.diagnostics['sa_budget_seconds_used'] == 3.
-    assert restored.result.llm_calls == 2
-    assert restored.advice.state['consecutive_failures'] == 1
-    assert state == saved
-
-
-def test_solver_resume_does_not_cold_initialize(tiny, options, monkeypatch):
-    original = whole_day(tiny, options)
-    state = checkpoint(original)
-    state['llm_calls'] = 3
-    monkeypatch.setattr(search.WholeDay, 'initialize', lambda *a: pytest.fail('Cold initialization'))
-    backend = search.StrengthenedCertification
-    monkeypatch.setattr(backend, 'start', lambda self: None)
-    monkeypatch.setattr(backend, 'close', lambda self: None)
-    monkeypatch.setattr(backend, 'step', lambda self: self.update_bound(self.result.objective))
-    options.sa_enabled = False
-    result = solver.solve(*tiny(), options, resume_state=state)
-    assert result.status == 'CONVERGED' and result.validation['feasible']
-    assert result.objective == pytest.approx(state['objective']) and result.llm_calls == 3
-    assert result.elapsed_seconds >= state['charged_elapsed_seconds']
-
-
-@pytest.mark.parametrize('legacy', [
-    {'joint_sa_calls': 1}, {'joint_batches': [{'status': 'COMPLETE'}]},
-    {'sampling': [{'kind': 'joint'}]},
-])
-def test_joint_checkpoint_is_rejected_before_reusing_evidence(tiny, options, monkeypatch, legacy):
-    whole = whole_day(tiny, options)
-    state = checkpoint(whole); state['diagnostics'].update(legacy)
-    monkeypatch.setattr(search, 'dispatch', lambda *a, **k: pytest.fail('Old candidate reused'))
-    with pytest.raises(ValueError, match='Joint-SA checkpoints are unsupported'):
-        whole.restore(state)
-
-
-@pytest.mark.parametrize('key,value', [
-    ('sa_backend', None), ('sa_backend', 'kaiwu'),
-    ('sa_initialization', None), ('sa_initialization', 'anchor_slack_nearest_v1'),
-    ('sa_initialization', 'random_sa_descent_repair_v1'),
-])
-def test_old_sa_checkpoint_is_rejected_before_reusing_evidence(tiny, options, monkeypatch, key, value):
-    whole = whole_day(tiny, options)
-    state = checkpoint(whole)
-    if value is None:
-        del state['diagnostics'][key]
-    else:
-        state['diagnostics'][key] = value
-    monkeypatch.setattr(search, 'dispatch', lambda *a, **k: pytest.fail('Old candidate reused'))
-    with pytest.raises(ValueError, match='archived version'):
-        whole.restore(state)
-
-
 @pytest.mark.parametrize('name,value', [('enhanced_search', False), ('block_sa_period', 3), ('sa_proximity', .3)])
 def test_removed_search_options_are_rejected(tmp_path, name, value):
     with pytest.raises(ValueError, match='Unknown option'):
@@ -190,3 +122,13 @@ def test_http_channel_requires_url_and_key_without_codex(tmp_path):
     with pytest.raises(ValueError, match='URL and API key'):
         load_options(options, config_path=tmp_path/'absent.json')
     assert load_options(dict(options, llm_url='http://x', llm_api_key='k'), config_path=tmp_path/'absent.json').llm_enabled
+
+
+def test_initial_output_must_be_explicit(tmp_path):
+    data = Path(__file__).resolve().parents[1]/'data'
+    units = json.loads((data/'units.json').read_text(encoding='utf-8'))
+    del units['initial_output']
+    path = tmp_path/'units.json'
+    path.write_text(json.dumps(units), encoding='utf-8')
+    with pytest.raises(ValueError, match='initial_output is required'):
+        load_data(path, data/'stochastic.json')

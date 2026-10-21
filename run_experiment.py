@@ -1,7 +1,6 @@
 """输入固定读取 data 中的 JSON；在 VS Code 中点击“运行 Python 文件”。"""
 from datetime import datetime, timedelta, timezone
 from dataclasses import fields
-import gzip
 import hashlib
 from importlib.metadata import version
 import json
@@ -18,15 +17,13 @@ from suc_benders.anneal import SA_BACKEND, SA_INITIALIZATION
 from suc_benders.config import load_options
 from suc_benders.data import load_data
 from suc_benders.model import model
-from suc_benders.advisor_request import SessionUnavailable, session_file
 from suc_benders.optimization import optimize
 from suc_benders.validation import unpack, validate
 
 
 # 默认算例为 data/；切换算例改 DATA_DIR。以下只设置运行参数。
 SEED = 17                # SA 随机种子
-TIME_LIMIT_SECONDS = 7200  # 本次运行预算；续跑时额外增加这些秒，包含恢复、LLM 和记录开销
-RESUME_FROM = None       # 从零开始；续跑时填入解压后的完整 checkpoint.json.gz 路径
+TIME_LIMIT_SECONDS = 7200  # 本次运行预算，包含 LLM 和记录开销
 REFERENCE_TIME_LIMIT_SECONDS = 120  # 完整问题参考求解的独立预算，单位：秒
 TARGET_GAP_PERCENT = 0.1  # 认证间隙目标，单位：%；0.1 就是 0.1%
 CHECK_ONLY = False       # True：只检查输入；False：实际求解
@@ -52,14 +49,12 @@ RESULTS = PROJECT / "results"
 
 
 def save(path, value):
-    compressed = path.suffix == ".gz"
-    with (gzip.open(path, "wt", encoding="utf-8") if compressed else path.open("w", encoding="utf-8")) as stream:
-        stream.write(json.dumps(_serializable(value), ensure_ascii=False,
-                                indent=None if compressed else 2, allow_nan=False))
+    with path.open("w", encoding="utf-8") as stream:
+        stream.write(json.dumps(_serializable(value), ensure_ascii=False, indent=2, allow_nan=False))
         stream.write("\n")
 
 
-def freeze_experiment(output, options, resume_source=None):
+def freeze_experiment(output, options):
     paths = [PROJECT / name for name in ("run_experiment.py", "run_suc.py", "requirements.txt", "README.md")]
     paths += sorted((PROJECT / "suc_benders").glob("*.py"))
     paths += sorted((PROJECT / "tests").glob("*.py"))
@@ -89,12 +84,11 @@ def freeze_experiment(output, options, resume_source=None):
                       ("numpy", "scipy", "gurobipy", "dwave-samplers", "dimod", "networkx", "tomli")},
         files=hashes, effective_options_sha256=hashlib.sha256(
             (output / "effective-options.json").read_bytes()).hexdigest(),
-        cold_start=resume_source is None, inherited_evidence=resume_source is not None,
-        resume_source=resume_source, reference_feedback=False))
+        reference_feedback=False))
 
 
-def solution_snapshot(result, elapsed, prior=0., session_id=None):
-    # shortcut: this saves the feasible solution, not a resumable search state; add recovery only when requested.
+# 当前最好可行方案的快照，不是可恢复的搜索状态。
+def solution_snapshot(result, elapsed, session_id=None):
     values = {name: getattr(result, name) for name in
               ("status", "message", "objective", "lower_bound", "u", "v", "w", "scenarios", "validation", "llm_calls")}
     gap = max(0., result.objective-result.lower_bound)/max(1., abs(result.objective)) if np.isfinite(
@@ -102,7 +96,7 @@ def solution_snapshot(result, elapsed, prior=0., session_id=None):
     return dict(values, format="SOLUTION_SNAPSHOT_NOT_CHECKPOINT", relative_gap=gap,
                 sa_backend=result.diagnostics.get("sa_backend"),
                 sa_initialization=result.diagnostics.get("sa_initialization"),
-                elapsed_seconds=elapsed, segment_elapsed_seconds=elapsed-prior, session_id=session_id,
+                elapsed_seconds=elapsed, session_id=session_id,
                 model_fingerprint=result.diagnostics.get("model_fingerprint"),
                 sa_calls=result.diagnostics.get("sa_calls", 0))
 
@@ -136,9 +130,8 @@ def llm_record(row):
 
 
 class ExperimentProgress:
-    def __init__(self, output, prior=0.):
+    def __init__(self, output):
         self.output = output
-        self.prior = prior
         self.last_upper = np.inf
         self.session_id = None
         self.recording_seconds = 0.
@@ -154,8 +147,7 @@ class ExperimentProgress:
         self.session_id = whole.advice.thread_id
         row = dict(event=event, elapsed_seconds=elapsed, upper=result.objective, lower=result.lower_bound,
                    sa_calls=whole.diagnostics["sa_calls"], llm_calls=result.llm_calls,
-                   resume_cursor=whole.resume_cursor, status=result.status,
-                   segment_elapsed_seconds=elapsed-self.prior, session_id=self.session_id)
+                   status=result.status, session_id=self.session_id)
         # 两层并行时，事件对应的调用不一定是 llm_history 的最后一行，取顾问记下的事件行。
         llm_row = whole.advice.event_row if event.startswith("llm") else None
         if llm_row is not None:
@@ -167,7 +159,7 @@ class ExperimentProgress:
             stream.write(json.dumps(_serializable(row), ensure_ascii=False, allow_nan=False) + "\n")
         if improved or event in ("initialization", "final"):
             temporary = self.output / "latest-solution.tmp.json"
-            save(temporary, solution_snapshot(result, elapsed, self.prior, self.session_id))
+            save(temporary, solution_snapshot(result, elapsed, self.session_id))
             temporary.replace(self.output / "latest-solution.json")
         self.recording_seconds += perf_counter() - phase
 
@@ -193,7 +185,7 @@ def solve_reference(data, scenarios, seconds, log_file):
 
 def main():
     stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
-    output = RESULTS / f"{'resume' if RESUME_FROM else 'manual'}-seed{SEED}-{stamp}-{uuid4().hex[:8]}"
+    output = RESULTS / f"manual-seed{SEED}-{stamp}-{uuid4().hex[:8]}"
     folder = PROJECT / DATA_DIR
     if LLM_TRANSPORT not in ("codex", "http"):
         raise ValueError("LLM_TRANSPORT must be 'codex' or 'http'")
@@ -224,41 +216,10 @@ def main():
         print("输入检查通过；本次没有执行求解或检查授权。")
         return 0
 
-    resume_state, resume_source, prior, prior_calls = None, None, 0., 0
-    if RESUME_FROM:
-        source = (PROJECT / RESUME_FROM).resolve()
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
-        audit_file = source.parent / "audit.json"
-        if audit_file.exists():
-            audit = json.loads(audit_file.read_text(encoding="utf-8"))
-            if audit["status"] != "PASS" or audit["artifact_sha256"][source.name] != digest:
-                raise ValueError("Source checkpoint audit/hash mismatch")
-        manifest = json.loads((source.parent / "manifest.json").read_text(encoding="utf-8"))
-        for name in ("units.json", "stochastic.json"):
-            if hashlib.sha256((folder/name).read_bytes()).hexdigest() != manifest["files"][(folder/name).relative_to(PROJECT).as_posix()]:
-                raise ValueError("Resume inputs differ from the source experiment")
-        with gzip.open(source, "rt", encoding="utf-8") as stream:
-            resume_state = json.load(stream)
-        prior = resume_state["charged_elapsed_seconds"]
-        if not np.isfinite(prior) or prior < 0:
-            raise ValueError("Invalid cumulative elapsed time")
-        prior_calls = resume_state["llm_calls"]
-        session_id = next((row["thread_id"] for row in reversed(resume_state["llm_history"])
-                           if row["status"] == "OK" and row.get("thread_id")
-                           and row.get("tier", "regular") == "regular"), None)
-        if LLM_ENABLED and prior_calls:
-            try:
-                session_file(session_id)
-            except SessionUnavailable as error:
-                print(f"续跑会话不可用（{error}）；首次请求失败后将新开会话。", flush=True)
-        resume_source = dict(path=str(source), sha256=digest, charged_elapsed_seconds=prior,
-                             initial_upper=resume_state["objective"], initial_lower=resume_state["lower_bound"],
-                             prior_llm_calls=prior_calls, session_id=session_id)
-        checked.time_limit = options["time_limit"] = prior + TIME_LIMIT_SECONDS
     output.mkdir(parents=True, exist_ok=False)
     save(output / "options.json", options)
-    freeze_experiment(output, checked, resume_source)
-    progress = ExperimentProgress(output, prior)
+    freeze_experiment(output, checked)
+    progress = ExperimentProgress(output)
     print(f"结果目录：{output}", flush=True)
     print(f"随机种子：{SEED}；主算法预算：{TIME_LIMIT_SECONDS} 秒；"
           f"认证间隙目标：{TARGET_GAP_PERCENT}%；LLM：{'开启' if LLM_ENABLED else '关闭'}", flush=True)
@@ -285,43 +246,35 @@ def main():
     print("指标说明：UB 是通过全天物理校验的可行方案成本；LB 是认证下界；"
           "认证间隙 = (UB - LB) / max(1, |UB|)。", flush=True)
     print("块内上下界用于分块搜索，不等于全天原问题的上下界。", flush=True)
-    if resume_source:
-        print(f"续跑来源：{resume_source['path']}；继承 UB={resume_source['initial_upper']:.6f}；"
-              f"LB={resume_source['initial_lower']:.6f}；已用 {prior:.2f} 秒；会话={resume_source['session_id']}", flush=True)
-    print("开始主算法：恢复已有方案或初始化、分块 SA 搜索和独立强化下界认证。", flush=True)
+    print("开始主算法：初始化、分块 SA 搜索和独立强化下界认证。", flush=True)
     started = perf_counter()
     try:
-        result = run_suc(vars(checked), resume_state=resume_state, progress=progress, started_at=started)
+        result = run_suc(vars(checked), progress=progress, started_at=started)
     except Exception as error:
         save(output / "failure.json", dict(status="INCOMPLETE", error_type=type(error).__name__,
                                           elapsed_seconds=perf_counter() - started))
         raise
     solver_wall = perf_counter() - started
     final_save_started = perf_counter()
-    compact = solution_snapshot(result, result.elapsed_seconds, prior, progress.session_id)
+    compact = solution_snapshot(result, result.elapsed_seconds, progress.session_id)
     compact.update(timings=result.diagnostics.get("timings", {}),
                    search_statistics=result.diagnostics.get("search_statistics", {}),
                    certification_history=result.certification_history,
                    llm_history=[llm_record(row) for row in result.llm_history])
     save(output / "result.json", compact)
     final_save_seconds = perf_counter() - final_save_started
-    summary = dict(scope="RESUMED_CONVERGENCE_CHECK" if resume_state is not None else "COLD_START_EXPLORATORY",
-                   audit_status="NOT_REQUESTED", **dimensions, resume_source=resume_source,
-                   seed=SEED, status=result.status, message=result.message,
+    summary = dict(**dimensions, seed=SEED, status=result.status, message=result.message,
                    sa_backend=result.diagnostics.get("sa_backend"),
                    sa_initialization=result.diagnostics.get("sa_initialization"),
                    upper=result.objective, lower=result.lower_bound,
                    gap_percent=100 * result.relative_gap, reference_gap_percent=None,
                    validation=result.validation,
-                   solver_elapsed_seconds=result.elapsed_seconds,
-                   segment_solver_elapsed_seconds=result.elapsed_seconds-prior,
-                   segment_wall_seconds=solver_wall,
+                   solver_elapsed_seconds=result.elapsed_seconds, solver_wall_seconds=solver_wall,
                    recording_seconds=progress.recording_seconds, final_save_seconds=final_save_seconds,
-                   session_id=progress.session_id, new_llm_calls=result.llm_calls-prior_calls,
+                   session_id=progress.session_id,
                    time_limit_overshoot_seconds=result.diagnostics.get("time_limit_overshoot", 0.),
                    wall_to_result_saved_seconds=perf_counter() - started,
                    sa_calls=result.diagnostics.get("sa_calls", 0), llm_calls=result.llm_calls,
-                   block_sa_calls=result.diagnostics.get('block_sa_calls', 0),
                    llm_patience=LLM_PATIENCE, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
                    llm_disabled=result.diagnostics.get('llm_disabled'),
                    llm_escalation_model=checked.llm_escalation_model or None,
@@ -332,8 +285,7 @@ def main():
                    data_dir=DATA_DIR, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS,
                    dispatch_failures=result.diagnostics.get('dispatch_failures', 0),
                    search_statistics=result.diagnostics.get('search_statistics', {}),
-                   note="轻量留证；latest-solution.json 仅保存方案，不是完整搜索检查点。"
-                        "续跑不做参考求解或完整审计；没有自动补跑。")
+                   note="轻量留证；latest-solution.json 仅保存方案，不是可恢复的搜索状态。")
     save(output / "summary.json", summary)
     status_text = {"CONVERGED": "已达到认证间隙目标", "TIME_LIMIT": "达到时间上限"}.get(result.status, "求解未正常完成")
     print(f"\n主算法状态：{status_text}（{result.status}）", flush=True)
@@ -347,12 +299,6 @@ def main():
           f"认证间隙：{100 * result.relative_gap:.4f}%", flush=True)
     print(f"主算法耗时：{result.elapsed_seconds:.2f} 秒；"
           f"SA 调用：{summary['sa_calls']} 次；LLM 调用：{result.llm_calls} 次", flush=True)
-
-    if resume_state is not None:
-        print(f"本段运行 {solver_wall:.2f} 秒；累计调用 {result.llm_calls} 次，其中新增 {result.llm_calls-prior_calls} 次；"
-              f"记录开销 {progress.recording_seconds:.3f} 秒；最终保存 {final_save_seconds:.3f} 秒。", flush=True)
-        print(f"续跑结果已保存：{output}；本次不再求参考解或执行完整审计。", flush=True)
-        return int(result.status.endswith("FAILED") or result.validation is None)
 
     print(f"\n[2/2] Gurobi 直接求解同一完整问题（保留全部整数变量、时段和场景），"
           f"另用最多 {REFERENCE_TIME_LIMIT_SECONDS} 秒。", flush=True)

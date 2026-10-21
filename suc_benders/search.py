@@ -61,12 +61,10 @@ class WholeDay:
         self.progress = progress
         self.certifier = StrengthenedCertification(self)
         self.diagnostics["model_fingerprint"] = fingerprint(m)
-        self.resume_cursor = dict(outer=1, round=1)
         self.advice = UpperAdvisor(self)
         self.sa_started = None
         self.diagnostics['sa_budget_seconds_used'] = 0.
-        self.diagnostics.update(block_sa_calls=0, search_mode='time_blocks',
-                                sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION)
+        self.diagnostics.update(search_mode='time_blocks', sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION)
         phase = perf_counter()
         reachable, _ = master(full, [], search_reachability=True)
         self.fixed = fixed_binary(reachable)[:len(full.binary)]
@@ -339,71 +337,6 @@ class WholeDay:
         self.emit("evaluation")
         return r.feasible
 
-    # 恢复匹配模型的历史证据、调用额度和 SA 配额，并重新调度/校验保存的全天方案。
-    # 块缓存与乘子重新构建，Gurobi 内部搜索树及在途工作进程不随检查点恢复。
-    def restore(self, state):
-        """Revalidate an incumbent and continue this strengthened run's charged budget."""
-        saved = deepcopy(state)
-        diagnostic = saved["diagnostics"]
-        if diagnostic.get("model_fingerprint") != self.diagnostics["model_fingerprint"]:
-            raise ValueError("Recovered model fingerprint does not match the current inputs")
-        if np.asarray(saved["u"]).shape != (self.d.n_units, self.d.horizon):
-            raise ValueError("Recovered commitment dimensions do not match the current case")
-        if diagnostic.get('search_mode') != 'time_blocks':
-            raise ValueError('Checkpoint must use the current time-block format')
-        if (diagnostic.get('joint_sa_calls', 0) or diagnostic.get('joint_batches')
-                or any(row.get('kind') == 'joint' for row in diagnostic.get('sampling', []))):
-            raise ValueError('Joint-SA checkpoints are unsupported; start a new time-block run')
-        if (diagnostic.get('sa_backend') != SA_BACKEND
-                or diagnostic.get('sa_initialization') != SA_INITIALIZATION):
-            raise ValueError('Checkpoint SA backend/initialization mismatch; use the archived version for old runs')
-        self.certifier.restore(diagnostic)
-        self.result.certification_history = saved["certification_history"]
-        self.result.llm_history, self.result.llm_calls = saved["llm_history"], saved["llm_calls"]
-        for name in ("evaluations", "proposals", "sampling", "rounds", "iterations", "blocks", "local_evaluations"):
-            self.diagnostics[name] = diagnostic[name]
-        self.result.history = saved['history']
-        self.result.outer_history = saved['outer_history']
-        self.diagnostics["llm_background_seconds"] = diagnostic["llm_background_seconds"]
-        self.resume_cursor = saved["resume_cursor"]
-        for name in ("sa_calls", "complete_rounds", "coordination_count"):
-            self.diagnostics[name] = diagnostic[name]
-        self.diagnostics['block_sa_calls'] = diagnostic['block_sa_calls']
-        self.timings["prior_execution"] = saved["charged_elapsed_seconds"]
-        self.diagnostics['sa_budget_seconds_used'] = diagnostic['sa_budget_seconds_used']
-        self.diagnostics["resume"] = saved["resume"]
-        x = pack(self.d, np.asarray(saved["u"]))
-        phase = perf_counter()
-        checked = dispatch(self.full, x, self.remaining(), certified=True)
-        self.timings["subproblems"] += perf_counter()-phase
-        if self.remaining() <= 0 or checked.status == 'TIME_LIMIT':
-            raise TimeoutError
-        if not checked.feasible:
-            raise RuntimeError("Recovered incumbent failed continuous dispatch")
-        point = unpack(self.m, checked.point)
-        report = validate(self.d, self.scenarios, point)
-        if abs(point.objective-saved["objective"]) > 1e-4:
-            raise RuntimeError("Recovered incumbent cost does not match saved evidence")
-        self.best = checked
-        for name in ("objective", "u", "v", "w", "scenarios"):
-            setattr(self.result, name, getattr(point, name))
-        self.result.validation = report
-        labels = np.asarray(self.full.labels)
-        balance = checked.prices[labels == "balance"].reshape((-1, len(self.scenarios)))
-        reserve = checked.prices[labels == "reserve"].reshape((-1, len(self.scenarios)))
-        self.dispatches = [NS(**vars(point.scenarios[k]), balance_dual=-balance[:, k]/s.probability,
-                              reserve_dual=reserve[:, k]/s.probability)
-                           for k, s in enumerate(self.scenarios)]
-        self.certifier.update_bound(saved["lower_bound"])
-        for row in self.diagnostics["evaluations"]:
-            x = pack(self.d, np.asarray(row["u"]))
-            self.cache[x.astype(np.uint8).tobytes()] = row
-            if row["feasible"] and row["source"] in ("llm", "llm_rebase"):
-                self.advisor_pool.append((row["objective"], x.copy()))
-        self.advisor_pool.sort(key=lambda item: item[0])
-        del self.advisor_pool[16:]
-        self.advice.restore(diagnostic)
-
     # 按当前最好方案刷新费用、场景价格和上一轮反馈，返回 (上下文, 基础方案, 调用前快照)。
     # 快照含 u、费用及已评估身份，用于区分本次候选的实测收益和历史缓存结果。
     def upper_context(self):
@@ -621,7 +554,6 @@ class BlockSearch:
                 return
             phase = perf_counter()
             whole.diagnostics["sa_calls"] += 1
-            whole.diagnostics["block_sa_calls"] += 1
             self.diagnostic["sa_calls"] += 1
             # 每条链的种子由配置种子、全局调用序号和链号派生：可复现且互不相同。
             sample_seeds = [int(np.random.SeedSequence([o.seed, whole.diagnostics["sa_calls"], k]).generate_state(1)[0])
