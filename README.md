@@ -43,7 +43,7 @@ LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区�
 
 不保存全量检查点，也不序列化全部历史采样；记录开销与最终保存耗时单列。
 
-manifest、精简结果及运行诊断记录 `sa_backend` 与 `sa_initialization`（当前为 `random_sa_repair_v1`）。采样诊断包含 beta 序列，以及每条链的原始／实际种子、退火终态与 QUBO 能量；这些诊断可经 `run_suc` 返回对象读取，不自动全量落盘。
+manifest、精简结果及运行诊断记录 `sa_backend` 与 `sa_initialization`（当前为 `random_sa_repair_v1`）。采样诊断包含 beta 序列，以及每条链的原始／实际种子、退火终态与 QUBO 能量；全天提议记录只保存原始方案的 SHA256 与固定位违例数，只有 LLM 提议另存 `raw_u`／`repaired_u` 以生成反馈。这些诊断可经 `run_suc` 返回对象读取，不自动全量落盘。
 
 读取精简结果：
 
@@ -77,6 +77,15 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
 
+## 当前主线：代码清理（未发布）
+
+删除了不可达或无读者的代码，并拆分了最难读的函数；回归脚本逐字比对 UB 轨迹、搜索统计、故障注入下的状态与 LLM 请求体，数值行为不变。对外可见的变化：
+
+- 删除续跑（`RESUME_FROM`、`run_suc(resume_state=)`）、手动文件交换 LLM 通道（`agent_bridge.py`）、归档的整割 `qubo()` 编码及其选项 `theta_step`／`penalty`／`reserve_scale`，以及从未启用的审计落盘钩子。
+- `summary.json` 去掉 `scope`、`audit_status`、`resume_source`、`segment_*`、`new_llm_calls`、`block_sa_calls`（恒等于 `sa_calls`），`segment_wall_seconds` 改名 `solver_wall_seconds`；`manifest.json` 去掉 `cold_start`、`inherited_evidence`、`resume_source`；`progress.jsonl` 与 `latest-solution.json` 去掉 `resume_cursor`、`segment_elapsed_seconds`，运行中的状态显示 `RUNNING`。
+- LLM 提示去掉恒为 0／null／空的 `optimality_cuts`、`hamming_to_incumbent`、`infeasible_diagnostics` 和 `advice_routing`（每次约少 190 个字符），此后结果不能与 v0.35.0 的提示逐字比较。
+- 证明进程每轮透视割分离只计算一次模型指纹（IEEE118 派生算例首轮从 0.83 秒降到 0.01 秒）；块 SA 诊断在内存中只保留标量与哈希（classic10 上 8 次调用后从 0.65 MB 降到 0.09 MB）。
+
 ## v0.35.0 LLM 通道、多算例实验与归档
 
 2026-10-20 在 seed 17、单次运行条件下完成以下实验，均与同条件纯 SA 成对比较。参考成本为 Gurobi 完整问题最优值，只用于事后比较，不回填主算法。机器可读汇总见 [archives/v0.35.0.json](archives/v0.35.0.json)。
@@ -98,7 +107,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 局限：每组只有一个种子、一次运行；gpt 组与 DeepSeek 组的通道、会话方式和输出格式都不同，不能直接比较模型；v0.35.0 改变了提示与输出格式，此后结果不能与整矩阵输出的历史结果直接比较。
 
-[v0.35.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.35.0) 提供发布提交对应的 `core-source-v0.35.0.zip`、全部 34 项实验目录与驱动／分析脚本 `experiment-archive-v0.35.0.zip`、逐文件 SHA256 清单和上传／清理验证记录。本地 `results/` 只保留 DeepSeek 相关的五项：`deepseek-flash-pilot-20261020`、`ieee118-deepseek-20261020`、`manual-seed17-20261020-224136-14459f84`、`manual-seed17-20261020-224136-7326d548`、`schema-probe-20261020`。
+[v0.35.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.35.0) 提供发布提交对应的 `core-source-v0.35.0.zip`、全部 34 项实验目录与驱动／分析脚本 `experiment-archive-v0.35.0.zip`、逐文件 SHA256 清单和上传／清理验证记录。本地 `results/` 现保留 12 项：8 个分析／探针目录（`deepseek-flash-pilot-20261020`、`ieee118-deepseek-20261020`、`ieee118-deepseek-fix-20261021`、`-fix2-`、`-fix3-`、`ieee118-hybrid-20261021`、`astra-stall-probe-20261021`、`schema-probe-20261020`），以及 fix3 与 hybrid 两组对照的原始运行（`manual-seed17-20261021-104528-*`、`manual-seed17-20261021-142727-*`）。其余 6 个原始运行（10-20 首轮对照与 fix、fix2 两轮）打包在仓库外的 `LLM-benders-SUC-archives/results-pruned-20261021.zip`，附逐文件 SHA256 与清单；其中 10-20 的两项也在本 Release 的实验归档中。
 
 ## v0.34.0 方法选择与归档
 
