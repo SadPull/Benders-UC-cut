@@ -1,5 +1,4 @@
 """Upper-bound advice bursts and measured candidate feedback."""
-from copy import deepcopy
 from dataclasses import replace
 from time import perf_counter
 from types import SimpleNamespace as NS
@@ -9,6 +8,9 @@ import numpy as np
 from . import advisor_request, llm
 
 TIER = dict(regular="常规层", escalation="升级层")
+# 一个常规批次内至多调用的次数；一次调用使 UB 相对下降至少该比例即视为改进（同时用于 SA 停滞判断）。
+BATCH_CALL_LIMIT = 3
+IMPROVEMENT_FRACTION = .0005
 TRANSPORT = dict(codex_exec="Codex 独立任务", http="HTTP")
 
 
@@ -19,8 +21,8 @@ def transport(o):
 class UpperAdvisor:
     def __init__(self, whole):
         self.whole, self.cert, self.o, self.result = whole, whole.certifier, whole.o, whole.result
-        # worker/pending/baseline 属于常规层；升级层的在途请求另放在 escalation，两层并行、互不阻塞。
-        self.worker, self.pending, self.baseline = None, None, None
+        # 常规层与升级层各有一条通道：在途请求、它的调用行和调用前快照；两层并行、互不阻塞。
+        self.regular = NS(worker=None, pending=None, baseline=None)
         self.escalation = NS(worker=None, pending=None, baseline=None)
         self.event_row = None
         # 调度状态：所处阶段、连续停滞的完整 SA 轮数、当前批次、会话身份与停用原因。
@@ -57,7 +59,7 @@ class UpperAdvisor:
             self.begin(trigger="start")
 
     def improved(self, upper):
-        return upper-self.result.objective >= .0005*max(1., abs(upper))
+        return upper-self.result.objective >= IMPROVEMENT_FRACTION*max(1., abs(upper))
 
     def after_round(self, upper, sa_before, searches, outer, inner, allow=True):
         if self.whole.diagnostics["sa_calls"] <= sa_before:
@@ -73,7 +75,7 @@ class UpperAdvisor:
         self.advance(searches)
 
     def begin(self, *, outer=None, inner=None, trigger="stall"):
-        if self.state["phase"] != "sa" or self.worker is not None:
+        if self.state["phase"] != "sa" or self.regular.worker is not None:
             raise RuntimeError("An advice batch is already active")
         self.state["batch_id"] += 1
         batch = dict(batch_id=self.state["batch_id"], trigger=trigger, calls=0,
@@ -90,11 +92,10 @@ class UpperAdvisor:
 
     def start_request(self):
         batch = self.state["batch"]
-        if self.worker is not None or not self.available() or batch["calls"] >= 3:
+        if self.regular.worker is not None or not self.available() or batch["calls"] >= BATCH_CALL_LIMIT:
             return
         iteration = self.result.llm_calls+1
-        context, bases, self.baseline = self.whole.upper_context()
-        self.baseline = deepcopy(self.baseline)
+        context, bases, self.regular.baseline = self.whole.upper_context()
         context['continuation'] = dict(session_id=self.thread_id, completed_calls=self.result.llm_calls,
                                        latest_snapshot_authoritative=True)
         continuation = self.thread_id is not None
@@ -106,7 +107,7 @@ class UpperAdvisor:
         self.result.llm_calls = iteration
         routing = dict(channel="upper", batch_id=batch["batch_id"], batch_call=batch["calls"])
         # base_u 是提示中模型看到的 incumbent_u；增量候选只有配合它才能还原成完整方案，随回执落盘。
-        self.pending = dict(call_id=f"llm_upper:{iteration}", stage="advice_batch", **routing,
+        row = dict(call_id=f"llm_upper:{iteration}", stage="advice_batch", **routing,
             tier="regular", requested_model=self.o.llm_model, transport=transport(self.o),
             deadline_seconds=self.o.llm_timeout,
             status="RUNNING", outer=batch["outer"], round=batch["round"], accepted=0, proposals=[],
@@ -114,27 +115,34 @@ class UpperAdvisor:
             trigger_stalled=batch["trigger_stalled"],
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
-        self.result.llm_history.append(self.pending)
-        try:
-            self.worker = advisor_request.AdvisorRequest(self.whole.d, self.o, body, iteration,
-                self.o.llm_timeout, session_id=self.thread_id)
-        except Exception as error:
-            self.pending.update(status="FAILED", message=type(error).__name__)
+        if not self._launch(self.regular, row, self.o, body, iteration, self.o.llm_timeout, session_id=self.thread_id):
             self.record_failure()
-            self.arm(self.pending)
-        self.emit("llm_request", self.pending)
+            self.arm(row)
+        self.emit("llm_request", row)
         if self.o.verbose:
             print(f"[LLM 请求] 常规层 方式={TRANSPORT[transport(self.o)]} 模型={self.o.llm_model} 推理=max "
                   f"批次={batch['batch_id']} 调用次数={iteration} "
-                  f"本批次数={batch['calls']} 状态={self.pending['status']}", flush=True)
+                  f"本批次数={batch['calls']} 状态={row['status']}", flush=True)
+
+    # 登记调用行并启动请求进程；启动失败时把该行记为 FAILED 并返回 False，由调用方做各层的失败处理。
+    def _launch(self, lane, row, o, body, iteration, seconds, **request):
+        lane.pending = row
+        self.result.llm_history.append(row)
+        try:
+            lane.worker = advisor_request.AdvisorRequest(self.whole.d, o, body, iteration, seconds, **request)
+        except Exception as error:
+            row.update(status="FAILED", message=f"{type(error).__name__}: {error}")
+            return False
+        return True
 
     def poll(self, searches):
-        if self.worker is None:
+        lane = self.regular
+        if lane.worker is None:
             return False
-        reply = self.worker.poll()
+        reply = lane.worker.poll()
         if reply is None:
             return False
-        self.worker = None
+        lane.worker = None
         proposals, info = reply
         if self.o.llm_codex_command and info['status'] == 'OK':
             if not info.get('thread_id') or (self.thread_id is not None and info['thread_id'] != self.thread_id):
@@ -142,8 +150,8 @@ class UpperAdvisor:
                 info.update(status='SESSION_FAILED', message='Codex session identity mismatch', accepted=0)
             else:
                 self.thread_id = info['thread_id']
-        if self.consume(self.pending, proposals, info, self.baseline, searches, self.record_failure):
-            self.arm(self.pending)
+        if self.consume(lane.pending, proposals, info, lane.baseline, searches, self.record_failure):
+            self.arm(lane.pending)
         return True
 
     # 两层共用的回复处理：落回执、累计后台时长、更新失败计数、评估候选并记下前后 UB。
@@ -171,11 +179,11 @@ class UpperAdvisor:
 
     # 会话失效或连续两次失败时，先丢弃会话身份新开一次；再失败就停用 LLM，主算法继续 SA。
     def record_failure(self):
-        failed = self.pending['status'] != 'OK'
-        self.state['consecutive_failures'] = self.state['consecutive_failures']+1 if failed else 0
-        self.emit('llm_call_status', self.pending)
-        if self.pending['status'] == 'SESSION_FAILED':
-            reason = self.pending.get('message') or 'Codex session unavailable'
+        row = self.regular.pending
+        self.state['consecutive_failures'] = self.state['consecutive_failures']+1 if row['status'] != 'OK' else 0
+        self.emit('llm_call_status', row)
+        if row['status'] == 'SESSION_FAILED':
+            reason = row.get('message') or 'Codex session unavailable'
         elif self.state['consecutive_failures'] >= 2:
             reason = 'Two consecutive upper calls failed'
         else:
@@ -226,7 +234,7 @@ class UpperAdvisor:
         elif self.whole.remaining() <= 0:
             reason = "TIME_LIMIT"
         else:
-            if self.worker is not None and not self.poll(searches):
+            if self.regular.worker is not None and not self.poll(searches):
                 return
             if self.whole.remaining() <= 0:
                 reason = 'TIME_LIMIT'
@@ -236,7 +244,7 @@ class UpperAdvisor:
                           and self.result.llm_calls >= self.o.llm_max_calls else 'LLM_WINDOW_TOO_SHORT')
             elif self.improved(batch['upper_before']):
                 reason = 'RETURN_TO_SA'
-            elif batch['calls'] >= 3:
+            elif batch['calls'] >= BATCH_CALL_LIMIT:
                 reason = 'BATCH_LIMIT'
             else:
                 self.start_request()
@@ -287,23 +295,18 @@ class UpperAdvisor:
         if seconds is None:
             return
         o.llm_timeout = seconds
-        lane.baseline = deepcopy(baseline)
+        lane.baseline = baseline
         triggered_by = s['armed_by']
         s.update(armed=False, armed_by=None, calls=s['calls']+1)
         self.result.llm_calls = iteration
         routing = dict(channel="upper", tier="escalation")
-        lane.pending = row = dict(call_id=f"llm_escalation:{iteration}", stage="escalation", **routing,
+        row = dict(call_id=f"llm_escalation:{iteration}", stage="escalation", **routing,
             triggered_by=triggered_by, requested_model=o.llm_model, transport=transport(o),
             deadline_seconds=seconds, status="RUNNING", accepted=0, proposals=[],
             base_u=llm.prompt_incumbent(body), prompt_mode="full",
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
-        self.result.llm_history.append(row)
-        try:
-            lane.worker = advisor_request.AdvisorRequest(self.whole.d, o, body, iteration, seconds,
-                                                         session_id=None, isolated=True)
-        except Exception as error:
-            row.update(status="FAILED", message=f"{type(error).__name__}: {error}")
+        if not self._launch(lane, row, o, body, iteration, seconds, session_id=None, isolated=True):
             self.escalation_failure()
         self.emit("llm_request", row)
         if self.o.verbose:
@@ -346,9 +349,9 @@ class UpperAdvisor:
 
     # 常规批次收尾：只取消常规层在途请求，升级层不受影响。
     def _end_batch(self):
-        if self.worker is not None:
-            self._cancel(self.worker, self.pending)
-            self.worker = None
+        if self.regular.worker is not None:
+            self._cancel(self.regular.worker, self.regular.pending)
+            self.regular.worker = None
         batch = self.state['batch']
         if batch is not None and batch['status'] == 'RUNNING':
             batch.update(status='CANCELLED', upper_after=self.result.objective,
@@ -368,10 +371,10 @@ class UpperAdvisor:
 # 没有实际调度结果时不编造费用；历史或重复方案不记为本次刷新 incumbent。
 # shortfall 给定时，对调度不可行的候选附上可达出力低于负荷的小时及缺口（MW），供模型修正；
 # 按模型原样提出的 raw_u 计算。
-def summarize(advice, baseline_u, baseline, evaluations, previous_ids, shortfall=None):
+def summarize(info, baseline_u, baseline, evaluations, previous_ids, shortfall=None):
     measured = {r["commitment_hash"]: r for r in evaluations}
     rows = []
-    for p in advice.diagnostics.get("proposals", []):
+    for p in info.get("proposals", []):
         identity = p.get("commitment_id")
         r = measured.get(identity)
         cached = identity in previous_ids or p.get("outcome") == "duplicate"
@@ -399,8 +402,8 @@ def summarize(advice, baseline_u, baseline, evaluations, previous_ids, shortfall
             if baseline is not None:
                 row["cost_change"] = {k: costs[k]-baseline[k] for k in costs}
         rows.append(row)
-    return dict(call_id=advice.diagnostics.get("call_id"), failed=advice.failed,
-                message=advice.message, proposals=rows)
+    return dict(call_id=info.get("call_id"), failed=info["status"] != "OK",
+                message=info.get("message", ""), proposals=rows)
 
 
 # 把两张机组 × 小时矩阵的差异合并成连续区间；缺失、形状不符或非有限值不计入变化。

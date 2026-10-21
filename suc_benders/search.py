@@ -409,9 +409,7 @@ class WholeDay:
                    if self.remaining() > 0 and not np.array_equal(self.result.u, baseline_u) else [])
         info["rebase"] = rebased
         info["accepted"] = sum(p.get("outcome") == "accepted" for p in info.get("proposals", []))
-        self.feedback = summarize(NS(diagnostics=info, failed=info["status"] != "OK",
-                                     message=info.get("message", "")),
-                                  baseline_u, costs, self.diagnostics["evaluations"], prior_ids,
+        self.feedback = summarize(info, baseline_u, costs, self.diagnostics["evaluations"], prior_ids,
                                   shortfall=lambda u: reachable_shortfall(self.d, self.scenarios, u))
         self.feedback["rebase"] = dict(attempts=len(rebased),
             improved=sum(r.get("incumbent_decrease", 0.) > 0 for r in rebased),

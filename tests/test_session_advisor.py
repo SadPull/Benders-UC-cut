@@ -141,24 +141,24 @@ def test_inflight_call_keeps_polling_and_convergence_cancels_it(tiny, options, m
     whole = setup_advice(tiny, options, monkeypatch)
     closed = []
     whole.advice.begin()
-    whole.advice.pending = {'status': 'RUNNING'}
-    whole.advice.worker = NS(poll=lambda: None, close=lambda: closed.append(True), started=perf_counter(), receipt={})
+    whole.advice.regular.pending = {'status': 'RUNNING'}
+    whole.advice.regular.worker = NS(poll=lambda: None, close=lambda: closed.append(True), started=perf_counter(), receipt={})
     whole.deadline = perf_counter()+50
     whole.advice.advance([])
-    assert not closed and whole.advice.worker is not None
+    assert not closed and whole.advice.regular.worker is not None
     monkeypatch.setattr(whole.certifier, 'converged', lambda: True)
     whole.advice.advance([])
-    assert closed == [True] and whole.advice.worker is None
+    assert closed == [True] and whole.advice.regular.worker is None
 
 
 def test_session_mismatch_resets_session_without_evaluating_candidates(tiny, options, monkeypatch):
     whole = setup_advice(tiny, options, monkeypatch)
-    whole.advice.begin(); whole.advice.pending = {'status': 'RUNNING'}
-    whole.advice.worker = NS(poll=lambda: ([object()], dict(status='OK', thread_id=OTHER,
+    whole.advice.begin(); whole.advice.regular.pending = {'status': 'RUNNING'}
+    whole.advice.regular.worker = NS(poll=lambda: ([object()], dict(status='OK', thread_id=OTHER,
                                                           background_seconds=1., proposals=[])))
     monkeypatch.setattr(whole, 'consume_upper', lambda *a: pytest.fail('Wrong-session candidate evaluated'))
     whole.advice.poll([])
-    assert whole.advice.pending['status'] == 'SESSION_FAILED'
+    assert whole.advice.regular.pending['status'] == 'SESSION_FAILED'
     assert whole.advice.thread_id is None and whole.advice.state['session_resets'] == 1
     assert not whole.advice.state['disabled']
 

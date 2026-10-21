@@ -63,7 +63,7 @@ def start_parallel(lanes):
 def test_regular_stall_starts_isolated_escalation_in_parallel(lanes):
     regular1, regular2, escalation = start_parallel(lanes)
     advice = lanes.advice
-    assert advice.worker is regular2 and advice.escalation.worker is escalation
+    assert advice.regular.worker is regular2 and advice.escalation.worker is escalation
     assert regular2.call['iteration'] == 2 and escalation.call['iteration'] == 3
     assert escalation.call == dict(escalation.call, model='gpt-6-astra', command='codex',
         directory=lanes.o.llm_escalation_directory, session_id=None, isolated=True)
@@ -142,7 +142,7 @@ def test_reply_consumed_after_deadline_and_start_failure(lanes, monkeypatch):
         raise OSError('spawn failed')
     monkeypatch.setattr(transport, 'AdvisorRequest', broken)
     lanes.advice.state.update(phase='sa', batch=None)
-    lanes.advice.worker = None
+    lanes.advice.regular.worker = None
     lanes.advice.begin(); lanes.advice.advance_batch([])
     assert lanes.whole.result.llm_history[-1]['status'] == 'FAILED'
     assert lanes.advice.state['escalation']['armed_by'] == lanes.whole.result.llm_history[-1]['call_id']

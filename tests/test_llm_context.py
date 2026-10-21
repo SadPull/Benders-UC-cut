@@ -182,18 +182,17 @@ def test_feedback_attaches_reachable_shortfall_only_to_infeasible_candidates():
     from suc_benders.upper_advisor import summarize
     from suc_benders.validation import reachable_shortfall
     d, scenarios, u = ramp_case()
-    advice = NS(diagnostics=dict(call_id='llm_upper:1', proposals=[
+    info = dict(call_id='llm_upper:1', status='OK', proposals=[
         dict(proposal_id='llm:1:0', commitment_id='bad', raw_u=np.ones((2, 3)).tolist(), outcome='infeasible'),
         dict(proposal_id='llm:1:1', commitment_id='good', raw_u=u.tolist(), outcome='accepted'),
-        dict(proposal_id='llm:1:2', commitment_id='bad', outcome='duplicate')]),
-        failed=False, message='')
+        dict(proposal_id='llm:1:2', commitment_id='bad', outcome='duplicate')])
     evaluations = [dict(commitment_hash='bad', feasible=False, dispatch_status='INFEASIBLE', improved=False),
                    dict(commitment_hash='good', feasible=True, dispatch_status='OPTIMAL', improved=True,
                         objective=1., fixed_cost=0., expected_fuel_cost=1.)]
-    rows = summarize(advice, u, None, evaluations, set(),
+    rows = summarize(info, u, None, evaluations, set(),
                      shortfall=lambda x: reachable_shortfall(d, scenarios, x))['proposals']
     # 按模型原样方案计算（全开只缺第 1 小时）；没有原样方案的记录不附缺口。
     assert [r['hour'] for r in rows[0]['reachable_shortfall']] == [1]
     assert rows[2]['reachable_shortfall'] is None
     assert rows[0]['infeasibility_reason'] == 'INFEASIBLE' and rows[1]['reachable_shortfall'] is None
-    assert summarize(advice, u, None, evaluations, set())['proposals'][0]['reachable_shortfall'] is None
+    assert summarize(info, u, None, evaluations, set())['proposals'][0]['reachable_shortfall'] is None
