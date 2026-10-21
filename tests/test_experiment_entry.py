@@ -1,4 +1,3 @@
-import gzip
 import hashlib
 import json
 from types import SimpleNamespace as NS

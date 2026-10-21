@@ -283,5 +283,5 @@ def search_qubo(m, b, cuts, point, boundary, o):
     Q = sparse.coo_matrix((qv, (qi, qj)), shape=(nv, nv)).tocsr()
     Q = Q + A.T @ A + sparse.diags(2 * (A.T @ c) + linear)
     Q.eliminate_zeros()
-    return NS(Q=Q.tocsr(), cost=cost, cost_unit=unit, offset=0.,
+    return NS(Q=Q.tocsr(), cost=cost, cost_unit=unit,
               fixed=fixed, free=free, nx=nx, energy_unit=1.)

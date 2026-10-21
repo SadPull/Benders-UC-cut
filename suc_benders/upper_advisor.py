@@ -83,7 +83,7 @@ class UpperAdvisor:
             raise RuntimeError("An advice batch is already active")
         self.state["batch_id"] += 1
         batch = dict(batch_id=self.state["batch_id"], channels=["upper"], trigger=trigger,
-            counts=dict(upper=0), done=dict(upper=False),
+            counts=dict(upper=0),
             upper_before=self.result.objective, lower_before=self.result.lower_bound,
             trigger_stalled=self.state["stalled"].copy(), trigger_sa_round=self.state["sa_rounds"],
             sa_calls_at_start=self.whole.diagnostics["sa_calls"], outer=outer, round=inner,
@@ -127,8 +127,6 @@ class UpperAdvisor:
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
         self.result.llm_history.append(self.pending)
-        if self.whole.diagnostics["llm_calls"] is not self.result.llm_history:
-            self.whole.diagnostics["llm_calls"].append(self.pending)
         try:
             self.worker = advisor_request.AdvisorRequest(self.whole.d, self.o, body, iteration,
                 self.o.llm_timeout, session_id=self.thread_id)
@@ -249,7 +247,6 @@ class UpperAdvisor:
                           'CALL_LIMIT' if self.o.llm_max_calls is not None
                           and self.result.llm_calls >= self.o.llm_max_calls else 'LLM_WINDOW_TOO_SHORT')
             elif self.improved(batch['upper_before']):
-                batch['done']['upper'] = True
                 reason = 'RETURN_TO_SA'
             elif batch['counts']['upper'] >= 3:
                 reason = 'BATCH_LIMIT'
@@ -318,8 +315,6 @@ class UpperAdvisor:
             request_upper=self.result.objective, request_lower=self.result.lower_bound,
             started_seconds=perf_counter()-self.whole.started)
         self.result.llm_history.append(row)
-        if self.whole.diagnostics["llm_calls"] is not self.result.llm_history:
-            self.whole.diagnostics["llm_calls"].append(row)
         try:
             lane.worker = advisor_request.AdvisorRequest(self.whole.d, o, body, iteration, seconds,
                                                          session_id=None, isolated=True)

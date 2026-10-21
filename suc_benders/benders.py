@@ -31,7 +31,7 @@ def dispatch(b, x, seconds, *, certified=False):
     if x.shape != (len(X),) or not np.isin(x, [0, 1]).all():
         raise ValueError("Dispatch requires an exact binary vector")
     result = NS(feasible=False, status="DISCRETE_INFEASIBLE", cost=np.inf,
-                point=None, cut=None, recourse=np.inf, prices=None)
+                point=None, cut=None, prices=None)
     keep_proof = certified and getattr(b, "audit_cuts", False)
     hard = b.A[:, Y].getnnz(axis=1) == 0
     if not discrete_feasible(b, x, hard):
@@ -56,7 +56,6 @@ def dispatch(b, x, seconds, *, certified=False):
             result.cut.proof = dict(kind="bounded_lagrangian", indices=active.tolist(),
                                     prices=raw.prices[active].tolist())
         result.point = np.zeros(len(b.obj)); result.point[X] = x; result.point[Y] = raw.x
-        result.recourse = raw.objval
         result.cost = raw.objval + b.obj[X] @ x + b.constant
         result.feasible = True
         result.prices = np.zeros(len(b.rhs)); result.prices[rows] = raw.prices
@@ -94,7 +93,7 @@ def dispatch(b, x, seconds, *, certified=False):
                 active = np.flatnonzero(prices)
                 result.cut.proof = dict(kind="bounded_farkas", indices=active.tolist(),
                                        prices=prices[active].tolist())
-            result.recourse, result.status = raw.objval, "INFEASIBLE"
+            result.status = "INFEASIBLE"
     return result
 
 

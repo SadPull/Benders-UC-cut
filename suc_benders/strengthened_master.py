@@ -149,7 +149,7 @@ def proof_model(m):
     pmin/midpoint/pmax supports. This is an integer-valid underestimator; its
     value is not assumed to dominate the original continuous QP.
     """
-    if (getattr(m.d, 'model_profile', '') or np.any(m.q < 0)
+    if (np.any(m.q < 0)
             or not np.isfinite(m.lb).all() or not np.isfinite(m.ub).all()):
         raise ValueError('Proof model requires the bounded convex SUC model')
     out = copy(m)

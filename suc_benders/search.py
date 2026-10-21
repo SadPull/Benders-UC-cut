@@ -53,14 +53,13 @@ class WholeDay:
         self.feedback = None
         self.diagnostics = result.diagnostics
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
-                                local_evaluations=[], llm_calls=[], llm_background_seconds=0., blocks=[], rounds=[],
+                                local_evaluations=[], llm_background_seconds=0., blocks=[], rounds=[],
                                 complete_rounds=0, coordination_count=0, timings={name: 0. for name in (
                                     "initialization", "relaxation", "qubo", "annealing", "repair",
                                     "local_dispatch", "subproblems", "validation", "context", "llm", "coordination")})
         self.timings = self.diagnostics["timings"]
         self.progress = progress
         self.certifier = StrengthenedCertification(self)
-        self.diagnostics["bound_mode"] = 'strengthened'
         self.diagnostics["model_fingerprint"] = fingerprint(m)
         self.resume_cursor = dict(outer=1, round=1)
         self.advice = UpperAdvisor(self)
@@ -314,12 +313,6 @@ class WholeDay:
             entry["proposal_id"] = record.get("proposal_id")
             record["incumbent_decrease"] = float(before-z.objective) if improved and np.isfinite(before) else 0.
         self.cache[key] = entry
-        if r.feasible:
-            entry["hourly_recourse_costs"] = [float(
-                self.full.obj[indices] @ r.point[indices]
-                + self.full.q[indices] @ r.point[indices]**2)
-                for hour in self.full.times
-                for indices in [self.full.continuous[self.full.time[self.full.continuous] == hour]]]
         entry["u"] = z.u.tolist()
         self.diagnostics["evaluations"].append(entry)
         if record is not None:
@@ -371,7 +364,6 @@ class WholeDay:
             self.diagnostics[name] = diagnostic[name]
         self.result.history = saved['history']
         self.result.outer_history = saved['outer_history']
-        self.diagnostics["llm_calls"] = self.result.llm_history
         self.diagnostics["llm_background_seconds"] = diagnostic["llm_background_seconds"]
         self.resume_cursor = saved["resume_cursor"]
         for name in ("sa_calls", "complete_rounds", "coordination_count"):

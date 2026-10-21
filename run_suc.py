@@ -9,11 +9,7 @@ from suc_benders.solver import solve
 def run_suc(options=None, *, resume_state=None, progress=None, started_at=None):
     o = load_options(options)
     d, scenarios = load_data(o.data_file, o.scenario_file)
-    state = np.random.get_state()
-    try:
-        return solve(d, scenarios, o, resume_state=resume_state, progress=progress, started_at=started_at)
-    finally:
-        np.random.set_state(state)
+    return solve(d, scenarios, o, resume_state=resume_state, progress=progress, started_at=started_at)
 
 
 def _serializable(value):
