@@ -161,7 +161,7 @@ class WholeDay:
                 info.update(status="TIME_LIMIT", outcome="projection_deadline")
                 raise RuntimeError("Initialization repair: TIME_LIMIT while constructing the projection")
             raw = optimize(projection, seconds, integral=True,
-                           mip_focus=1, solution_limit=1)
+                           mip_focus=1, solution_limit=1, int_feas_tol=1e-9)
             info["status"] = raw.status
             if self.remaining() <= 0:
                 info["outcome"] = "deadline"

@@ -10,14 +10,18 @@ from scipy import sparse
 
 # 输入稀疏模型与秒预算，返回状态、原始点/目标、对偶价格和下界。
 # 连续最优时按有界拉格朗日重新计算内部下界；整数模式另返回 Gurobi 的 ObjBound，仅作记录。
-def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, solution_limit=None):
+# int_feas_tol 显式收紧整数可行容差（Gurobi 允许 1e-9～1e-1），用于随后要取整并校验的整数解。
+def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, solution_limit=None, int_feas_tol=None):
     if seconds <= 0:
         raise TimeoutError("No time remaining for optimization")
-    if not integral and any(value is not None for value in (mip_focus, solution_limit)):
+    if not integral and any(value is not None for value in (mip_focus, solution_limit, int_feas_tol)):
         raise ValueError('MIP guidance requires integer optimization')
     if solution_limit is not None and (isinstance(solution_limit, bool)
             or not isinstance(solution_limit, (int, np.integer)) or solution_limit <= 0):
         raise ValueError('solution_limit must be a positive integer')
+    if int_feas_tol is not None and (isinstance(int_feas_tol, bool) or not isinstance(int_feas_tol, (float, int))
+                                     or not 1e-9 <= int_feas_tol <= 1e-1):
+        raise ValueError('int_feas_tol must lie in [1e-9, 1e-1]')
     with gp.Env(empty=True) as env:
         env.setParam("OutputFlag", 0)
         env.start()
@@ -28,7 +32,8 @@ def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, solut
                 g.setParam(name, value)
             if mip_focus is not None:
                 g.setParam('MIPFocus', mip_focus)
-                g.setParam('IntFeasTol', 1e-9)
+            if int_feas_tol is not None:
+                g.setParam('IntFeasTol', int_feas_tol)
             if solution_limit is not None:
                 g.setParam('SolutionLimit', int(solution_limit))
             if log_file is not None:

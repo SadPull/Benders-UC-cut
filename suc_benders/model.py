@@ -146,7 +146,7 @@ def partition(m, hours):
 
 
 # 返回块 b 按跨块乘子 lam（长度同 cross）定价后的副本：各块之和等于 f(x) + lam·(A_cross x - rhs_cross)。
-# 不等式乘子必须非负；数值噪声级的负值截为 0，明显为负则报错。
+# 不等式乘子必须非负；数值噪声级的负值截为 0，明显为负则报错。副本的 lam 是实际使用的乘子。
 def priced(b, lam):
     lam = np.asarray(lam, float).copy()
     if lam.shape != b.crosseq.shape:
@@ -154,7 +154,7 @@ def priced(b, lam):
     if (lam[~b.crosseq] < -1e-10).any():
         raise ValueError("Inequality multipliers must be nonnegative")
     lam[~b.crosseq] = np.maximum(0, lam[~b.crosseq])
-    return NS(**{**vars(b), "obj": b.original_obj + b.crossA.T @ lam, "constant": -float(b.crossrhs @ lam)})
+    return NS(**{**vars(b), "obj": b.original_obj + b.crossA.T @ lam, "constant": -float(b.crossrhs @ lam), "lam": lam})
 
 
 # 标出含连续列的跨块行：块搜索不强制这些行（爬坡、块末停机容量、冷启动窗口），只能靠价格；
