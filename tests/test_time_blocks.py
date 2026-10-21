@@ -156,3 +156,12 @@ def test_coordination_failure_keeps_existing_failure_status(tiny, options, monke
     assert result.status == 'COORDINATION_FAILED'
     assert 'Multiplier selection LP failed' in result.message
     assert result.validation['feasible'] and result.lower_bound <= result.objective
+
+
+def test_exhausted_sa_budget_skips_search_and_keeps_certifying(tiny, options, monkeypatch):
+    monkeypatch.setattr(search_core.StrengthenedCertification, 'step',
+                        lambda cert: cert.update_bound(cert.result.objective))
+    options.sa_budget_seconds = 0.
+    result = solver.solve(*tiny(2, 6), options)
+    assert result.status == 'CONVERGED' and result.diagnostics['sa_budget_exhausted']
+    assert result.diagnostics['sa_calls'] == 0 and result.validation['feasible']
