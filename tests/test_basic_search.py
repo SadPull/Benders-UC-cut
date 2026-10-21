@@ -183,3 +183,10 @@ def test_kaiwu_configuration_is_removed(tmp_path):
     path.write_text('{"kaiwu": {"user_id": "unused"}}', encoding='utf-8')
     with pytest.raises(ValueError, match='Unknown local configuration section'):
         load_options(config_path=path)
+
+
+def test_http_channel_requires_url_and_key_without_codex(tmp_path):
+    options = dict(llm_enabled=True, llm_model='m', llm_agent_directory=str(tmp_path))
+    with pytest.raises(ValueError, match='URL and API key'):
+        load_options(options, config_path=tmp_path/'absent.json')
+    assert load_options(dict(options, llm_url='http://x', llm_api_key='k'), config_path=tmp_path/'absent.json').llm_enabled

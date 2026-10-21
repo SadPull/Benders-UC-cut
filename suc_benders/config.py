@@ -116,6 +116,6 @@ def load_options(overrides=None, config_path=None):
         raise ValueError("LLM escalation requires llm_escalation_command and llm_escalation_directory")
     if o.llm_enabled and not o.llm_model:
         raise ValueError("Set llm_model before enabling LLM")
-    if o.llm_enabled and not o.llm_agent_directory and not all((o.llm_url, o.llm_api_key)):
-        raise ValueError("Fill LLM URL, model and API key before enabling LLM")
+    if o.llm_enabled and not o.llm_codex_command and not all((o.llm_url, o.llm_api_key)):
+        raise ValueError("Fill LLM URL and API key before enabling the HTTP channel")
     return o

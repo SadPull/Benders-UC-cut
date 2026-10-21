@@ -10,11 +10,11 @@ import numpy as np
 from . import advisor_request, llm
 
 TIER = dict(regular="常规层", escalation="升级层")
-TRANSPORT = dict(codex_exec="Codex 独立任务", codex_subagent="手动文件交换", http="HTTP")
+TRANSPORT = dict(codex_exec="Codex 独立任务", http="HTTP")
 
 
 def transport(o):
-    return "codex_exec" if o.llm_codex_command else "codex_subagent" if o.llm_agent_directory else "http"
+    return "codex_exec" if o.llm_codex_command else "http"
 
 
 # 升级层随检查点保存的状态：是否武装及触发调用、连续失败、停用原因、调用次数和最近一次有效改进的时刻。
