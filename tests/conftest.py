@@ -27,7 +27,7 @@ def tiny():
 
 @pytest.fixture
 def options():
-    return Options(max_rounds=50, time_limit=30, verbose=False,
+    return Options(max_rounds=50, lagrangian_max_iterations=5, lagrangian_time_limit=10, time_limit=30, verbose=False,
                    sa_reads=4, sa_sweeps=2, sa_temperature=10, sa_cooling=.8, sa_cutoff=.01)
 
 

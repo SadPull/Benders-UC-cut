@@ -38,6 +38,10 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
     with (output/'result.json').open(encoding='utf-8') as stream:
         result = json.load(stream)
     assert result['objective'] == 110. and result['reference_cost'] == 105.
+    # 拉格朗日记录随摘要与主结果落盘；未运行时给出状态与原因，而不是缺字段。
+    assert summary['lagrangian'] == result['lagrangian'] == dict(
+        status='NOT_RUN', message='NOT_REACHED', iterations=0, serious_steps=0, bound=None)
+    assert (summary['complete_rounds'], summary['search_stop_reason'], summary['sa_budget_exhausted']) == (0, None, False)
     for record in (summary, result):
         assert not {'lower', 'lower_bound', 'relative_gap', 'gap_percent', 'certification_history'} & record.keys()
     reference = json.loads((output/'reference.json').read_text(encoding='utf-8'))
@@ -217,3 +221,14 @@ def test_escalation_options_and_records_reach_results(tmp_path, monkeypatch):
     assert (escalation['tier'], escalation['triggered_by'], escalation['transport'], escalation['requested_model'],
             escalation['codex_home_cleanup']) == ('escalation', 'llm_upper:1', 'codex_exec', 'gpt-6-astra', 'REMOVED')
     assert '"key"' not in (output/'effective-options.json').read_text(encoding='utf-8')
+
+
+def test_progress_rows_carry_the_lagrangian_state(tmp_path):
+    dual = dict(status='RUNNING', iterations=2, serious_steps=1, center_value=9., bound=8.5, history=[{}])
+    whole = NS(result=Result(objective=10., status='RUNNING', lagrangian=dual), started=0.,
+               diagnostics=dict(sa_calls=0), advice=NS(thread_id=None, event_row=None))
+    progress = entry.ExperimentProgress(tmp_path)
+    progress(whole, 'lagrangian_iteration')
+    row = json.loads((tmp_path/'progress.jsonl').read_text(encoding='utf-8').splitlines()[0])
+    assert row['event'] == 'lagrangian_iteration'
+    assert row['lagrangian'] == dict(status='RUNNING', iterations=2, serious_steps=1, center_value=9., bound=8.5)

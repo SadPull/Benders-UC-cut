@@ -209,3 +209,104 @@ def test_plane_below_block_bound_is_rejected():
     with pytest.raises(RuntimeError, match="below the block bound"):
         lagrangian.maximize(lagrangian.start(1, np.array([True]), np.zeros(1)), wrong,
                             iterations=5, remaining=lambda: 10.)
+
+
+# 求解器层测试用的参考记录：成本为全问题最优值，但状态不是 OPTIMAL，因此只用于比较、不会提前停止。
+def comparison_reference(monkeypatch, d, scenarios):
+    from suc_benders import solver
+    optimum = optimize(model(d, scenarios), 60, integral=True).objval
+    monkeypatch.setattr(solver, "solve_reference", lambda *a: dict(
+        status="TIME_LIMIT", objective=optimum, validation={"feasible": True}, elapsed_seconds=0.))
+    return optimum
+
+
+# 求解器层：拉格朗日阶段在 SA 之前运行，其乘子中心只对连续耦合行给块搜索定价。
+def test_search_blocks_are_priced_at_the_lagrangian_center_on_relaxed_rows_only(tiny, options, monkeypatch):
+    from suc_benders import solver
+    d, scenarios = cold(tiny)
+    optimum = comparison_reference(monkeypatch, d, scenarios)
+    options.block_hours, options.max_rounds = 3, 1
+    states, built = [], []
+    maximize = solver.lagrangian.maximize
+    monkeypatch.setattr(solver.lagrangian, "maximize", lambda state, *a, **k: states.append(state) or maximize(state, *a, **k))
+    original = solver.BlockSearch
+    monkeypatch.setattr(solver, "BlockSearch", lambda b, *a: built.append(b) or original(b, *a))
+    r = solver.solve(d, scenarios, options)
+    assert r.validation["feasible"] and r.lagrangian["status"] in ("CONVERGED", "ITERATION_LIMIT")
+    m = model(d, scenarios)
+    _, cross = partition(m, 3)
+    relaxed = relaxed_rows(m, cross)
+    center, = (state.center for state in states)
+    assert len(built) == 2
+    for b in built:
+        assert np.array_equal(b.lam, search_multipliers(m, cross, center)) and not b.lam[~relaxed].any()
+    # 下界有效：不低于 LP 松弛界，不高于参考最优值和最终 UB。
+    record = r.lagrangian
+    assert record["relaxation_bound"] - 1e-6 <= record["bound"] <= optimum + 1e-6
+    assert record["bound"] <= r.objective and record["gap_percent_at_end"] >= 0
+    assert record["serious_steps"] == len([h for h in record["history"] if h["step"] == "serious"])
+
+
+def test_lagrangian_phase_skips_with_explicit_reasons(tiny, options, monkeypatch):
+    from suc_benders import solver
+    comparison_reference(monkeypatch, *cold(tiny))
+    options.block_hours, options.max_rounds = 3, 1
+    single = solver.solve(*tiny(2, 3), options)
+    assert single.lagrangian == lagrangian.skipped("SINGLE_BLOCK") and single.validation["feasible"]
+    options.lagrangian_max_iterations = 0
+    zero = solver.solve(*cold(tiny), options)
+    assert (zero.lagrangian["status"], zero.lagrangian["message"]) == ("NOT_RUN", "ZERO_ITERATIONS")
+    assert zero.diagnostics["complete_rounds"] == 1
+    disabled = solver.solve(*cold(tiny), NS(**dict(vars(options), sa_enabled=False)))
+    assert disabled.lagrangian == lagrangian.skipped("SA_DISABLED")
+
+
+def test_oracle_contract_violation_fails_the_lagrangian_stage(tiny, options, monkeypatch):
+    from suc_benders import solver
+    comparison_reference(monkeypatch, *cold(tiny))
+    options.block_hours = 3
+    def broken(*args):
+        raise RuntimeError("Block Lagrangian plane is not tight at its multipliers")
+    monkeypatch.setattr(solver.lagrangian, "oracle", broken)
+    r = solver.solve(*cold(tiny), options)
+    assert r.status == "LAGRANGIAN_FAILED" and "not tight" in r.message
+    assert r.lagrangian["status"] == "FAILED" and r.validation["feasible"]
+
+
+def test_degraded_oracle_is_counted_and_search_continues(tiny, options, monkeypatch):
+    from suc_benders import solver
+    comparison_reference(monkeypatch, *cold(tiny))
+    options.block_hours, options.max_rounds = 3, 2
+    calls, oracle = [], solver.lagrangian.oracle
+    def flaky(*args):
+        calls.append(True)
+        if len(calls) == 3:
+            return NS(status="NUMERIC", exact=False, value=np.inf, bound=-np.inf, plane=None, point=None)
+        return oracle(*args)
+    monkeypatch.setattr(solver.lagrangian, "oracle", flaky)
+    r = solver.solve(*cold(tiny), options)
+    assert r.lagrangian["status"] == "ORACLE_NUMERIC" and r.lagrangian["oracle_failures"] == {"NUMERIC": 1}
+    assert r.lagrangian["multiplier_change"] == 0. and r.lagrangian["bound"] is not None
+    assert r.status == "SEARCH_EXHAUSTED" and r.diagnostics["complete_rounds"] == 2
+
+
+def test_bound_above_the_validated_upper_bound_fails_the_run(tiny, options, monkeypatch):
+    from suc_benders import solver
+    comparison_reference(monkeypatch, *cold(tiny))
+    options.block_hours, options.max_rounds = 3, 1
+    record = solver.lagrangian.record
+    monkeypatch.setattr(solver.lagrangian, "record", lambda state, history=True: dict(record(state, history), bound=1e12))
+    r = solver.solve(*cold(tiny), options)
+    assert r.status == "LAGRANGIAN_FAILED" and r.message == "Lagrangian bound exceeds the validated UB"
+
+
+def test_round_and_lagrangian_options_are_validated(tmp_path):
+    from suc_benders.config import load_options
+    absent = tmp_path / "absent.json"
+    for removed in ("max_outer", "max_inner"):
+        with pytest.raises(ValueError, match="Unknown option"):
+            load_options({removed: 1}, config_path=absent)
+    assert load_options({"lagrangian_max_iterations": 0}, config_path=absent).lagrangian_max_iterations == 0
+    for bad in ({"lagrangian_max_iterations": -1}, {"lagrangian_time_limit": 0}, {"max_rounds": 0}):
+        with pytest.raises(ValueError):
+            load_options(bad, config_path=absent)
