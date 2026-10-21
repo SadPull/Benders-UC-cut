@@ -23,6 +23,8 @@ BOUND_MARGIN = 1e-5
 POINT_TOLERANCE = 1e-5
 # 连续扩盒而不调用预言机的最大次数。
 MAX_EXPANSIONS = 40
+# 绝对值不超过此值的乘子视为数值噪声，不计入非零乘子数。
+NONZERO = 1e-9
 
 
 def _tolerance(value, relative=1e-6):
@@ -227,7 +229,7 @@ def record(state, history=True):
                oracle_calls=state.oracle_calls, inexact_oracle_results=state.inexact,
                oracle_failures=dict(state.oracle_failures), master_failures=dict(state.master_failures),
                planes=sum(len(group) for group in state.planes), duplicate_planes=state.duplicates,
-               multipliers=len(state.center), nonzero_multipliers=int(np.count_nonzero(np.abs(state.center) > 1e-9)),
+               multipliers=len(state.center), nonzero_multipliers=int(np.count_nonzero(np.abs(state.center) > NONZERO)),
                multiplier_change=float(np.abs(state.center - state.initial).max(initial=0.)), radius=state.radius,
                initial_value=state.initial_value, initial_bound=state.initial_bound,
                center_value=state.center_value if np.isfinite(state.center_value) else None,

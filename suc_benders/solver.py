@@ -219,12 +219,12 @@ def _lagrangian(run, m, relaxation, blocks, cross):
     return state.center
 
 
-# 拉格朗日记录加上 LP 松弛界、被松弛的连续耦合行数和块搜索实际定价的行数。
+# 拉格朗日记录加上 LP 松弛界、被松弛的连续耦合行数和块搜索实际定价（乘子超过噪声阈值）的行数。
 def _lagrangian_record(state, relaxation, m, cross):
     record = lagrangian.record(state)
     record.update(relaxation_bound=float(relaxation.lower) if np.isfinite(relaxation.lower) else None,
                   relaxed_rows=int(relaxed_rows(m, cross).sum()),
-                  search_priced_rows=int(np.count_nonzero(search_multipliers(m, cross, state.center))))
+                  search_priced_rows=int(np.count_nonzero(np.abs(search_multipliers(m, cross, state.center)) > lagrangian.NONZERO)))
     return record
 
 
