@@ -100,7 +100,9 @@ def certify(strengthened, seconds, *, callback=None):
 
 def perspective_batch(physical, strengthened, point, epsilon):
     """Return the total perspective deficit and supports that separate the point."""
-    if strengthened.physical_fingerprint != fingerprint(physical):
+    # 整模型指纹每批只算一次，再传给每条割；逐割重算在默认算例上每轮可达数秒。
+    identity = fingerprint(physical)
+    if strengthened.physical_fingerprint != identity:
         raise ValueError("Perspective model identity changed")
     point = np.asarray(point, float)
     if point.shape != strengthened.obj.shape or not np.isfinite(point).all() or epsilon <= 0:
@@ -120,19 +122,20 @@ def perspective_batch(physical, strengthened, point, epsilon):
                 missing = max(0., float(physical.q[p]*point[p]**2/u-point[strengthened.eta[p]]))
                 gap += missing
                 if missing > 1e-8:
-                    cuts.append(perspective_cut(physical, i, t, k, support))
+                    cuts.append(perspective_cut(physical, i, t, k, support, identity=identity))
     return gap, cuts if gap > epsilon else []
 
 
 def add_perspectives(strengthened, physical, cuts):
     """Append only reconstructed, model-bound perspective inequalities."""
-    if strengthened.physical_fingerprint != fingerprint(physical):
+    identity = fingerprint(physical)
+    if strengthened.physical_fingerprint != identity:
         raise ValueError("Perspective model identity changed")
     I, J, V = [], [], []
     for j, cut in enumerate(cuts):
         if cut.get("kind") != "perspective":
             raise ValueError("Expected perspective cuts")
-        verify_cut(physical, cut)
+        verify_cut(physical, cut, identity)
         I.extend([j]*3); J.extend([cut["p"], cut["u"], strengthened.eta[cut["p"]]])
         V.extend([cut["p_coefficient"], cut["u_coefficient"], -1.])
     A = sparse.csr_matrix((V, (I, J)), shape=(len(cuts), len(strengthened.obj)))
@@ -202,17 +205,18 @@ def proof_model(m):
 
 
 # 从原模型和割的索引/支撑重新生成完整证明记录，逐字段检查模型身份与系数未被修改。
-def verify_cut(m, cut):
+# identity 可传入调用方已算好的 fingerprint(m)，省去逐割重算。
+def verify_cut(m, cut, identity=None):
     if cut.get('kind') != 'perspective':
         raise ValueError('Unknown strengthening cut')
-    expected = perspective_cut(m, cut['unit'], cut['hour'], cut['scenario'], cut['support'])
+    expected = perspective_cut(m, cut['unit'], cut['hour'], cut['scenario'], cut['support'], identity=identity)
     if cut != expected:
         raise ValueError('Strengthening cut model or coefficients changed')
 
 
 # 在给定机组、小时、场景和支撑出力处生成 eta >= 2*a*support*p-a*support^2*u 的整数有效割。
 # 支撑必须位于 Pmin/Pmax 之间，a 已包含场景概率；同时绑定原模型指纹。
-def perspective_cut(m, unit, hour, scenario, support):
+def perspective_cut(m, unit, hour, scenario, support, *, identity=None):
     if (type(unit) is not int or not 0 <= unit < m.d.n_units
             or type(hour) is not int or not 0 <= hour < m.d.horizon
             or type(scenario) is not int or not 0 <= scenario < len(m.scenarios)):
@@ -224,7 +228,8 @@ def perspective_cut(m, unit, hour, scenario, support):
     a = float(m.q[p])
     if a <= 0:
         raise ValueError('Perspective requires a positive weighted quadratic cost')
-    return dict(kind='perspective', model_fingerprint=fingerprint(m), unit=unit, hour=hour,
+    return dict(kind='perspective', model_fingerprint=fingerprint(m) if identity is None else identity,
+                unit=unit, hour=hour,
                 scenario=scenario, support=support, p=p, u=u, a=a,
                 p_coefficient=2*a*support, u_coefficient=-a*support**2,
                 proof='a*(p-support)**2 >= 0 when u=1; p=0 when u=0')
