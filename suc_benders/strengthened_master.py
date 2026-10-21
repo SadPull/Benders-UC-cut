@@ -47,8 +47,7 @@ def build(physical, root, theta):
     out = NS(obj=np.zeros(count), q=np.zeros(count), lb=np.r_[proof.lb, root.lb[nx:]],
         ub=np.r_[proof.ub, root.ub[nx:]], binary=np.unique(np.r_[physical.binary, columns[root.binary]]),
         constant=constant, A=sparse.hstack([proof.A, sparse.csr_matrix((len(proof.rhs), count-n))], format="csr"),
-        rhs=proof.rhs.copy(), eq=proof.eq.copy(), theta=int(columns[theta]), master_columns=columns,
-        eta=proof.eta, and_lift=proof.and_lift, physical_size=len(physical.obj),
+        rhs=proof.rhs.copy(), eq=proof.eq.copy(), theta=int(columns[theta]), eta=proof.eta,
         physical_fingerprint=fingerprint(physical), purpose="strengthened_master")
     out.obj[out.theta] = 1.
     a = root.A.tocoo()
@@ -63,17 +62,15 @@ def separate(physical, strengthened, seconds, epsilon, *, callback=None):
     if not np.isfinite(seconds) or seconds <= 0 or not np.isfinite(epsilon) or epsilon <= 0:
         raise ValueError("Positive finite separation budget and tolerance required")
     started = perf_counter(); deadline = started+seconds
-    result = NS(status="TIME_LIMIT", model=strengthened, lower=-np.inf, gap=np.inf,
-                iterations=0, added_cuts=0, cuts=[])
+    result = NS(status="TIME_LIMIT", model=strengthened, lower=-np.inf, gap=np.inf, cuts=[])
     current = strengthened
     current_cuts = []
     while deadline-perf_counter() > .1:
-        raw = optimize(current, deadline-perf_counter()-.1, **({"callback": callback} if callback else {}))
+        raw = optimize(current, deadline-perf_counter()-.1, callback=callback)
         if raw.status != "OPTIMAL" or not np.isfinite(raw.lower) or perf_counter() > deadline:
             break
         result.model, result.lower = current, float(raw.lower+current.constant)
         result.cuts = current_cuts.copy()
-        result.iterations += 1
         gap, cuts = perspective_batch(physical, current, raw.x, epsilon)
         result.gap = gap
         if perf_counter() > deadline:
@@ -83,28 +80,23 @@ def separate(physical, strengthened, seconds, epsilon, *, callback=None):
             break
         current = add_perspectives(current, physical, cuts)
         current_cuts.extend(cuts)
-        result.added_cuts += len(cuts)
     result.elapsed_seconds = perf_counter()-started
     return result
 
 
-def certify(strengthened, seconds, *, warm_start=None, target_lower=None, callback=None,
-            log_file=None, model_file=None):
+def certify(strengthened, seconds, *, callback=None, log_file=None, model_file=None):
     """One fixed-model MIPFocus=3 solve; expose ObjBound, not a feasible UB."""
     if not np.isfinite(seconds) or seconds <= 0:
         raise ValueError("Positive finite certification budget required")
     started = perf_counter()
-    extra = {key: value for key, value in dict(callback=callback, log_file=log_file,
-                                               model_file=model_file).items() if value is not None}
-    raw = optimize(strengthened, seconds-min(3., seconds*.1), integral=True,
-                   warm_start=warm_start, mip_focus=3, target_lower=target_lower, **extra)
+    raw = optimize(strengthened, seconds-min(3., seconds*.1), integral=True, mip_focus=3,
+                   callback=callback, log_file=log_file, model_file=model_file)
     elapsed = perf_counter()-started
     usable = (elapsed <= seconds and raw.status in ("OPTIMAL", "TIME_LIMIT", "INTERRUPTED", "USER_OBJ_LIMIT")
               and np.isfinite(raw.lower) and abs(raw.lower) < 1e100)
     lower = raw.lower+strengthened.constant-1e-5 if usable else -np.inf
     return NS(status=raw.status if elapsed <= seconds else "TIME_LIMIT", lower=float(lower),
-              point=raw.x, predicted_objective=raw.objval+strengthened.constant,
-              elapsed_seconds=elapsed, optimizer_calls=1)
+              elapsed_seconds=elapsed)
 
 
 def perspective_batch(physical, strengthened, point, epsilon):
@@ -162,17 +154,15 @@ def proof_model(m):
         raise ValueError('Proof model requires the bounded convex SUC model')
     out = copy(m)
     obj, q, lb, ub, time = [list(getattr(m, name)) for name in ('obj', 'q', 'lb', 'ub', 'time')]
-    rows, rhs, labels, auxiliary = [], [], [], []
+    rows, rhs, labels = [], [], []
     for block in partition(m, m.d.horizon)[0]:
         native, _ = master(block, [])
         mapping = list(block.cols[block.binary])
         for z, v, w in native.and_pairs:
             assert z == len(mapping)
-            index = len(obj)
-            mapping.append(index)
+            mapping.append(len(obj))
             obj.append(0.); q.append(0.); lb.append(0.); ub.append(1.)
             time.append(int(m.time[mapping[v]]))
-            auxiliary.append(dict(index=index, v=int(mapping[v]), w=int(mapping[w])))
         for j, kind in enumerate(native.kind):
             if kind not in ('capacity', 'and'):
                 continue
@@ -207,7 +197,7 @@ def proof_model(m):
     for name, values in zip(('obj', 'q', 'lb', 'ub', 'time'), (obj, q, lb, ub, time)):
         setattr(out, name, np.asarray(values, dtype=int if name == 'time' else float))
     out.labels = list(m.labels)+labels
-    out.eta, out.and_lift = eta, auxiliary
+    out.eta = eta
     out.purpose = 'perspective_proof_lp'
     return out
 

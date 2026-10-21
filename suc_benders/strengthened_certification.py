@@ -93,7 +93,7 @@ def _proof(sender, stop, d, scenarios, deadline, started, directory):
             log_file=str(folder/'gurobi.log') if folder else None,
             model_file=folder/'model.mps' if folder else None)
         values = dict(status=result.status, lower=result.lower if np.isfinite(result.lower) else None,
-                      solver_wall_seconds=result.elapsed_seconds, optimizer_calls=result.optimizer_calls)
+                      solver_wall_seconds=result.elapsed_seconds, optimizer_calls=1)
         if folder:
             save_json(folder/'solve.json', dict(values, model_hash=proof_hash))
         report('finished', **values)
