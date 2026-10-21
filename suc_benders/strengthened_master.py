@@ -84,13 +84,12 @@ def separate(physical, strengthened, seconds, epsilon, *, callback=None):
     return result
 
 
-def certify(strengthened, seconds, *, callback=None, log_file=None, model_file=None):
+def certify(strengthened, seconds, *, callback=None):
     """One fixed-model MIPFocus=3 solve; expose ObjBound, not a feasible UB."""
     if not np.isfinite(seconds) or seconds <= 0:
         raise ValueError("Positive finite certification budget required")
     started = perf_counter()
-    raw = optimize(strengthened, seconds-min(3., seconds*.1), integral=True, mip_focus=3,
-                   callback=callback, log_file=log_file, model_file=model_file)
+    raw = optimize(strengthened, seconds-min(3., seconds*.1), integral=True, mip_focus=3, callback=callback)
     elapsed = perf_counter()-started
     usable = (elapsed <= seconds and raw.status in ("OPTIMAL", "TIME_LIMIT", "INTERRUPTED", "USER_OBJ_LIMIT")
               and np.isfinite(raw.lower) and abs(raw.lower) < 1e100)

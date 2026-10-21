@@ -56,7 +56,6 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
     try:
         m = model(d, scenarios)
         full = partition(m, d.horizon)[0][0]
-        full.audit_cuts = bool(getattr(progress, 'audit_cuts', False))
         whole = WholeDay(m, full, o, deadline, result, started, progress)
         phase = perf_counter()
         relaxation = optimize(m, remaining())
@@ -65,8 +64,6 @@ def solve(d, scenarios, o, *, resume_state=None, progress=None, started_at=None)
             raise TimeoutError
         if relaxation.status != "OPTIMAL":
             raise RuntimeError(f"Continuous relaxation failed: {relaxation.status}")
-        if hasattr(progress, 'relaxation'):
-            progress.relaxation(m, relaxation, perf_counter()-started)
         result.lower_bound = relaxation.lower
         if not np.isfinite(result.lower_bound):
             raise RuntimeError("Continuous relaxation has no finite certified lower bound")

@@ -1,8 +1,6 @@
 """A cold, fixed numerical proof in a separate process; only bounds cross back."""
 import hashlib
-import json
 import multiprocessing as mp
-from pathlib import Path
 from time import perf_counter, sleep, time
 
 import gurobipy as gp
@@ -11,7 +9,6 @@ import numpy as np
 from .benders import master
 from .model import fingerprint, model, partition
 from . import strengthened_master as strong
-from .data import save_json
 
 
 def matrix_hash(m):
@@ -25,63 +22,42 @@ def matrix_hash(m):
     return digest.hexdigest()
 
 
-def save_matrix(path, m):
-    np.savez_compressed(path, data=m.A.data, indices=m.A.indices, indptr=m.A.indptr,
-        shape=m.A.shape, rhs=m.rhs, eq=m.eq, obj=m.obj, q=m.q, lb=m.lb, ub=m.ub,
-        binary=m.binary, constant=m.constant)
-
-
-def _proof(sender, stop, d, scenarios, deadline, started, directory):
-    folder = Path(directory) if directory else None
-    trace = None
+# 证明进程主体：建立冷启动强化模型、做透视割分离，再以单次整数求解认证下界；只经管道回传数值事件。
+def _proof(sender, stop, d, scenarios, deadline, started):
     try:
-        if folder:
-            folder.mkdir(parents=True, exist_ok=True)
-            trace = (folder/'trace.jsonl').open('w', encoding='utf-8', buffering=1)
         physical = model(d, scenarios)
         identity = fingerprint(physical)
         proof_hash = None
 
         def report(event, **values):
-            row = dict(event=event, elapsed_seconds=perf_counter()-started,
-                       completed_epoch_seconds=time(), physical_fingerprint=identity,
-                       model_hash=proof_hash, **values)
-            if trace:
-                trace.write(json.dumps(row, allow_nan=False)+'\n')
-            sender.send(row)
-
-        last = [0.]
-        def callback(g, where):
-            if stop.is_set() or perf_counter() >= deadline:
-                g.terminate()
-            elif where == gp.GRB.Callback.MIP and perf_counter()-last[0] >= 5.:
-                lower = float(g.cbGet(gp.GRB.Callback.MIP_OBJBND))+proof_constant-1e-5
-                if np.isfinite(lower) and abs(lower) < 1e100:
-                    report('bound', lower=lower, origin='MIP_OBJBND')
-                last[0] = perf_counter()
+            sender.send(dict(event=event, elapsed_seconds=perf_counter()-started,
+                             completed_epoch_seconds=time(), physical_fingerprint=identity,
+                             model_hash=proof_hash, **values))
 
         full = partition(physical, d.horizon)[0][0]
         root, _ = master(full, [])
         root = strong.add_temporal(root, physical)
         base = strong.build(physical, root, len(root.obj)-1)
-        proof_constant = base.constant
+        last_bound = 0.
+
+        # 停止或到期时终止 Gurobi；整数求解中每 5 秒上报一次加回常数的 ObjBound。
+        def callback(g, where):
+            nonlocal last_bound
+            if stop.is_set() or perf_counter() >= deadline:
+                g.terminate()
+            elif where == gp.GRB.Callback.MIP and perf_counter()-last_bound >= 5.:
+                lower = float(g.cbGet(gp.GRB.Callback.MIP_OBJBND))+base.constant-1e-5
+                if np.isfinite(lower) and abs(lower) < 1e100:
+                    report('bound', lower=lower, origin='MIP_OBJBND')
+                last_bound = perf_counter()
+
         report('started', base_hash=matrix_hash(base), process_seed=7)
-        if folder:
-            save_matrix(folder/'base.npz', base)
         seconds = min(180., deadline-perf_counter()-.5)
         if seconds <= 0 or stop.is_set():
             report('stopped', status='INTERRUPTED')
             return
         refined = strong.separate(physical, base, seconds, .01, callback=callback)
         proof_hash = matrix_hash(refined.model)
-        preparation = dict(physical_fingerprint=identity, base_hash=matrix_hash(base),
-            model_hash=proof_hash, status=refined.status, separation_seconds=refined.elapsed_seconds,
-            perspective_gap=float(refined.gap) if np.isfinite(refined.gap) else None,
-            cuts=refined.cuts, integer_call_limit=1, process_seed=7, warm_start=None,
-            inherited_evidence=False, upper_feedback=False)
-        if folder:
-            save_matrix(folder/'model.npz', refined.model)
-            save_json(folder/'preparation.json', preparation)
         report('prepared', separation_status=refined.status, cuts=len(refined.cuts))
         if np.isfinite(refined.lower):
             report('bound', lower=float(refined.lower), origin='continuous_separation')
@@ -89,14 +65,9 @@ def _proof(sender, stop, d, scenarios, deadline, started, directory):
         if seconds <= 0 or stop.is_set():
             report('stopped', status='INTERRUPTED')
             return
-        result = strong.certify(refined.model, seconds, callback=callback,
-            log_file=str(folder/'gurobi.log') if folder else None,
-            model_file=folder/'model.mps' if folder else None)
-        values = dict(status=result.status, lower=result.lower if np.isfinite(result.lower) else None,
-                      solver_wall_seconds=result.elapsed_seconds, optimizer_calls=1)
-        if folder:
-            save_json(folder/'solve.json', dict(values, model_hash=proof_hash))
-        report('finished', **values)
+        result = strong.certify(refined.model, seconds, callback=callback)
+        report('finished', status=result.status, lower=result.lower if np.isfinite(result.lower) else None,
+               solver_wall_seconds=result.elapsed_seconds, optimizer_calls=1)
     except Exception as error:
         try:
             sender.send(dict(event='failed', message=type(error).__name__,
@@ -104,8 +75,6 @@ def _proof(sender, stop, d, scenarios, deadline, started, directory):
         except (BrokenPipeError, OSError):
             pass
     finally:
-        if trace:
-            trace.close()
         sender.close()
 
 
@@ -138,9 +107,9 @@ class StrengthenedCertification:
         context = mp.get_context('spawn')
         self.connection, sender = context.Pipe(duplex=False)
         self.stop = context.Event()
-        directory = getattr(self.whole.progress, 'proof_directory', None)
-        self.process = context.Process(target=_proof, args=(sender, self.stop, self.whole.d,
-            self.whole.scenarios, self.whole.deadline, self.whole.started, directory), daemon=True)
+        self.process = context.Process(target=_proof, daemon=True, kwargs=dict(
+            sender=sender, stop=self.stop, d=self.whole.d, scenarios=self.whole.scenarios,
+            deadline=self.whole.deadline, started=self.whole.started))
         try:
             self.process.start()
         finally:

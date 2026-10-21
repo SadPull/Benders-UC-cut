@@ -10,8 +10,7 @@ from scipy import sparse
 
 # 输入稀疏模型与秒预算，返回状态、原始点/目标、对偶价格和下界。
 # 整数模式取 ObjBound；连续最优时按有界拉格朗日重新计算下界，不把候选 ObjVal 当作整数证明。
-def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, callback=None, model_file=None,
-             solution_limit=None):
+def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, callback=None, solution_limit=None):
     if seconds <= 0:
         raise TimeoutError("No time remaining for optimization")
     if not integral and any(value is not None for value in (mip_focus, solution_limit)):
@@ -43,8 +42,6 @@ def optimize(m, seconds, integral=False, *, log_file=None, mip_focus=None, callb
             g.setObjective(m.obj @ x + x @ sparse.diags(m.q) @ x)
             constraints = g.addMConstr(m.A, x, np.where(m.eq, "=", "<"), m.rhs)
             g.update()
-            if model_file is not None:
-                g.write(str(model_file))
             if callback is None:
                 g.optimize()
             else:

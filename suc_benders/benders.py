@@ -32,7 +32,6 @@ def dispatch(b, x, seconds, *, certified=False):
         raise ValueError("Dispatch requires an exact binary vector")
     result = NS(feasible=False, status="DISCRETE_INFEASIBLE", cost=np.inf,
                 point=None, cut=None, prices=None)
-    keep_proof = certified and getattr(b, "audit_cuts", False)
     hard = b.A[:, Y].getnnz(axis=1) == 0
     if not discrete_feasible(b, x, hard):
         return result
@@ -51,10 +50,6 @@ def dispatch(b, x, seconds, *, certified=False):
                 raise RuntimeError("Invalid recourse dual bound")
             anchor = raw.lower - 1e-5
         result.cut = NS(beta=beta, alpha=anchor - beta @ x, optimality=True, certified=certified)
-        if keep_proof:
-            active = np.flatnonzero(raw.prices)
-            result.cut.proof = dict(kind="bounded_lagrangian", indices=active.tolist(),
-                                    prices=raw.prices[active].tolist())
         result.point = np.zeros(len(b.obj)); result.point[X] = x; result.point[Y] = raw.x
         result.cost = raw.objval + b.obj[X] @ x + b.constant
         result.feasible = True
@@ -89,10 +84,6 @@ def dispatch(b, x, seconds, *, certified=False):
                 if not np.isfinite(alpha) or alpha + beta @ x <= 1e-7:
                     raise RuntimeError("Feasibility cut does not certify separation")
             result.cut = NS(beta=beta, alpha=alpha, optimality=False, certified=certified)
-            if keep_proof:
-                active = np.flatnonzero(prices)
-                result.cut.proof = dict(kind="bounded_farkas", indices=active.tolist(),
-                                       prices=prices[active].tolist())
             result.status = "INFEASIBLE"
     return result
 

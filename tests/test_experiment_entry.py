@@ -21,7 +21,7 @@ def test_entry_saves_basic_search_results_and_separate_reference(tmp_path, monke
     def solve(options, *, progress, started_at, resume_state):
         seen.append(options)
         assert isinstance(progress, entry.ExperimentProgress)
-        assert not hasattr(progress, 'proof_directory') and started_at > 0 and resume_state is None
+        assert started_at > 0 and resume_state is None
         return Result(status='TIME_LIMIT', objective=110., lower_bound=100., relative_gap=10./110.,
                       validation={'feasible': True}, diagnostics={'sa_calls': 2, 'block_sa_calls': 2,
                       'sa_backend': SA_BACKEND, 'sa_initialization': SA_INITIALIZATION})
