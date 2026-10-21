@@ -5,7 +5,7 @@ import pytest
 
 from suc_benders import solver, search as search_core
 from suc_benders.model import model, partition
-from suc_benders.validation import pack
+from suc_benders.validation import commitment, pack
 
 
 @pytest.fixture(autouse=True)
@@ -53,11 +53,17 @@ def test_sa_repair_crosses_boundary_and_freezes_batch_base(tiny, options, monkey
     options.max_inner = 1
     force_open_master(monkeypatch)
     monkeypatch.setattr(search_core, "anneal", lambda *args: ([a, seed.copy()], {"bits": 1}))
+    seen, prepare = [], whole.prepare
+    def spy(raw, source, record):
+        x = prepare(raw, source, record)
+        seen.append((np.array(raw), commitment(d, x).u))
+        return x
+    monkeypatch.setattr(whole, "prepare", spy)
     result = search_block(b, [seed], options, whole.deadline, 1, 1, whole)
     first, second = whole.diagnostics["proposals"]
     assert not first["raw_discrete_feasible"]
-    assert first["repaired_u"][0][3] == 0  # Minimum downtime extends outside the block.
-    assert second["raw_u"][0][3] == 1     # Still uses the batch-start incumbent.
+    assert seen[0][1][0][3] == 0  # Minimum downtime extends outside the block.
+    assert seen[1][0][0][3] == 1  # Still uses the batch-start incumbent.
     assert first["outcome"] == "accepted" and result.best is not None
 
 

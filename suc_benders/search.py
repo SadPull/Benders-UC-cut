@@ -69,7 +69,7 @@ class WholeDay:
         reachable, _ = master(full, [], search_reachability=True)
         self.fixed = fixed_binary(reachable)[:len(full.binary)]
         start, stop = transition_allowed(self.d)
-        fixed_u = self.fixed[full.u]
+        fixed_u = self.fixed_u = self.fixed[full.u]
         self.diagnostics['reachability'] = dict(index_base=1,
             movable_units=(np.flatnonzero(np.isnan(fixed_u).any(axis=1))+1).tolist(),
             frozen_units=(np.flatnonzero(np.isfinite(fixed_u).all(axis=1))+1).tolist(),
@@ -186,9 +186,17 @@ class WholeDay:
 
     # 对全天原始 u 做形状/有限值检查及启停/容量修复，记录变化、来源和重复状态。
     # 返回重建的 u/v/w 向量或 None；修复可能涉及块外小时，之后仍须完成连续调度和验证。
+    # 每条记录只存统计所需的原始方案哈希与固定位违例数；只有 LLM 提议保留 raw_u/repaired_u 矩阵，
+    # 供下一次调用的反馈列出改动区间。
     def prepare(self, raw, source, record):
         """Repair a whole-day u proposal; the caller then evaluates its block projection."""
-        record.update(origin=source, raw_u=np.asarray(raw).tolist())
+        values = np.asarray(raw, dtype='<f8')
+        known = np.isfinite(self.fixed_u)
+        record.update(origin=source, raw_sha256=hashlib.sha256(values.tobytes()).hexdigest(),
+                      raw_fixed_bit_violations=int(np.count_nonzero(values[known] != self.fixed_u[known]))
+                      if values.shape == self.fixed_u.shape else 0)
+        if source == 'llm':
+            record['raw_u'] = values.tolist()
         self.diagnostics["proposals"].append(record)
         if self.remaining() <= 0:
             record["outcome"] = "deadline"
@@ -200,7 +208,6 @@ class WholeDay:
         if source == 'llm' and np.isin(raw, [0, 1]).all():
             record['raw_constraint_violations'] = transition_violations(self.d, raw)
         raw_x = pack(self.d, raw)
-        record["raw_binary"] = bool(np.isin(raw, [0, 1]).all())
         z = commitment(self.d, raw_x)
         required = (1 + self.d.reserve_fraction) * np.max([s.load for s in self.scenarios], axis=0)
         record["raw_discrete_feasible"] = bool(discrete_feasible(self.full, raw_x)
@@ -220,9 +227,11 @@ class WholeDay:
             and (capacity(self.d, z.u, z.v, z.w).sum(axis=0) >= required - 1e-6).all()
             and (np.sum(self.d.pmin[:, None]*z.u, axis=0)
                  <= np.min([s.load for s in self.scenarios], axis=0) + 1e-6).all())
-        record.update(commitment_id=commitment_hash(z), repaired_u=z.u.tolist(),
+        record.update(commitment_id=commitment_hash(z),
                       hamming_u=int(np.count_nonzero(z.u != raw)), repaired_discrete_feasible=feasible,
                       duplicate=x.astype(np.uint8).tobytes() in self.cache, outcome="repaired")
+        if source == 'llm':
+            record['repaired_u'] = z.u.tolist()
         if not feasible:
             record["outcome"] = "repair_discrete_infeasible"
             return None
@@ -231,12 +240,10 @@ class WholeDay:
     def search_statistics(self):
         """Count whole-day proposals and first validations, never block feasibility."""
         statistics = {}
-        fixed_u = self.fixed[self.full.u]
-        known = np.isfinite(fixed_u)
         for source in ('sa', 'pool', 'llm', 'llm_rebase'):
             proposals = [r for r in self.diagnostics['proposals'] if r['origin'] == source]
             evaluations = [r for r in self.diagnostics['evaluations'] if r['source'] == source]
-            raw = {hashlib.sha256(np.asarray(r['raw_u'], '<f8').tobytes()).digest() for r in proposals}
+            raw = {r['raw_sha256'] for r in proposals}
             repaired = {r['commitment_id'] for r in proposals if r.get('repaired_discrete_feasible')}
             outcomes = {}
             for r in proposals:
@@ -246,8 +253,7 @@ class WholeDay:
                 repaired_duplicate_rate=1-len(repaired)/sum(bool(r.get('repaired_discrete_feasible')) for r in proposals)
                     if repaired else 0.,
                 raw_discrete_violations=sum(r.get('raw_discrete_feasible') is False for r in proposals),
-                raw_fixed_bit_violations=sum(int(np.count_nonzero(np.asarray(r['raw_u'])[known] != fixed_u[known]))
-                                            for r in proposals),
+                raw_fixed_bit_violations=sum(r['raw_fixed_bit_violations'] for r in proposals),
                 repair_bits=sum(r.get('hamming_u', 0) for r in proposals),
                 duplicate_rate=outcomes.get('duplicate', 0)/len(proposals) if proposals else 0.,
                 outcomes=outcomes,
@@ -311,7 +317,6 @@ class WholeDay:
             entry["proposal_id"] = record.get("proposal_id")
             record["incumbent_decrease"] = float(before-z.objective) if improved and np.isfinite(before) else 0.
         self.cache[key] = entry
-        entry["u"] = z.u.tolist()
         self.diagnostics["evaluations"].append(entry)
         if record is not None:
             record.update(outcome="accepted" if r.feasible else "infeasible", feasible=r.feasible,
@@ -560,15 +565,11 @@ class BlockSearch:
                             for k in range(o.sa_reads)]
             proposals, sampling = anneal(q, o, remaining(), sample_seeds)
             whole.timings["annealing"] += perf_counter() - phase
-            sampling.update(outer=outer, block=index, inner=inner, round=inner, seed=sample_seeds,
-                            boundary_rows=len(boundary),
-                            kind='block', anchor=anchor_id, anchor_cost=anchor_cost,
+            # 采样诊断只保留标量与哈希；anchor 是本批共享的 incumbent 身份。
+            sampling.update(outer=outer, block=index, round=inner, seed=sample_seeds,
+                            boundary_rows=len(boundary), anchor=anchor_id, anchor_cost=anchor_cost,
                             raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
                             unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
-            sampling.update(raw_binary_candidates=[x.tolist() for x in proposals],
-                            baseline_u=baseline_u.tolist(), free_indices=q.free.tolist(),
-                            fixed_indices=np.flatnonzero(~np.isnan(q.fixed)).tolist(),
-                            fixed_values=q.fixed[~np.isnan(q.fixed)].tolist())
             whole.diagnostics["sampling"].append(sampling)
             whole.emit("sampling")
             del q
@@ -578,13 +579,10 @@ class BlockSearch:
             for k, x in enumerate(proposals):
                 if remaining() <= 0:
                     return
-                raw_evaluation = evaluate(x, 'sa_raw')
+                evaluate(x, 'sa_raw')  # 原始块候选也参与局部割学习
                 local = np.zeros(len(b.obj)); local[b.binary] = x
                 raw = baseline_u.copy(); raw[:, b.times] = local[b.u]
                 record = {"proposal_id": f"sa:{whole.diagnostics['sa_calls']}:{k}", "outer": outer, "block": index, "round": inner}
-                record['anchor'] = anchor_id
-                record['raw_local_dispatch_completed'] = raw_evaluation is not None
-                record['raw_local_feasible'] = raw_evaluation.feasible if raw_evaluation is not None else None
                 repaired = whole.prepare(raw, "sa", record)
                 if repaired is not None and remaining() > 0:
                     local = evaluate(repaired[b.cols[b.binary]], "sa")

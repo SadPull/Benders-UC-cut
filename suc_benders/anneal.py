@@ -65,6 +65,5 @@ def anneal(q, o, seconds, seeds):
                   "bits": n, "candidates": len(candidates), "chains": chains,
                   "best_energy": min((c["energy"] for c in chains), default=np.inf),
                   "seconds": perf_counter() - started}
-    statistics.update(raw_bits=[''.join(str(int(v)) for v in x) for x in samples],
-                      raw_energies=[c["energy"] for c in chains])
+    statistics["raw_bits"] = [''.join(str(int(v)) for v in x) for x in samples]
     return candidates, statistics

@@ -14,6 +14,7 @@ from suc_benders.config import load_options
 from suc_benders.data import load_data
 from suc_benders.model import model, partition
 from suc_benders.qubo import fixed_binary
+from suc_benders.validation import commitment_hash
 
 
 @pytest.mark.parametrize('matrix,maximum', [
@@ -51,8 +52,7 @@ def test_each_block_sample_uses_derived_chain_seeds_and_current_incumbent(tiny, 
     assert seeds[0] == [int(np.random.SeedSequence([options.seed, 1, k]).generate_state(1)[0])
                         for k in range(options.sa_reads)]
     assert whole.diagnostics['sa_calls'] == 2
-    assert all(row['kind'] == 'block' and row['baseline_u'] == whole.result.u.tolist()
-               for row in whole.diagnostics['sampling'])
+    assert all(row['anchor'] == commitment_hash(whole.result) for row in whole.diagnostics['sampling'])
     assert not any(key.startswith('joint_') for key in whole.diagnostics)
 
 

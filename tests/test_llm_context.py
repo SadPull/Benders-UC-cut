@@ -187,13 +187,13 @@ def test_feedback_attaches_reachable_shortfall_only_to_infeasible_candidates():
         dict(proposal_id='llm:1:1', commitment_id='good', raw_u=u.tolist(), outcome='accepted'),
         dict(proposal_id='llm:1:2', commitment_id='bad', outcome='duplicate')]),
         failed=False, message='')
-    evaluations = [dict(commitment_hash='bad', feasible=False, dispatch_status='INFEASIBLE', improved=False, u=u.tolist()),
-                   dict(commitment_hash='good', feasible=True, dispatch_status='OPTIMAL', improved=True, u=u.tolist(),
+    evaluations = [dict(commitment_hash='bad', feasible=False, dispatch_status='INFEASIBLE', improved=False),
+                   dict(commitment_hash='good', feasible=True, dispatch_status='OPTIMAL', improved=True,
                         objective=1., fixed_cost=0., expected_fuel_cost=1.)]
     rows = summarize(advice, u, None, evaluations, set(),
                      shortfall=lambda x: reachable_shortfall(d, scenarios, x))['proposals']
-    # 按模型原样方案计算（全开只缺第 1 小时）；没有 raw_u 时退回实际评估的方案（缺第 1、3 小时）。
+    # 按模型原样方案计算（全开只缺第 1 小时）；没有原样方案的记录不附缺口。
     assert [r['hour'] for r in rows[0]['reachable_shortfall']] == [1]
-    assert [r['hour'] for r in rows[2]['reachable_shortfall']] == [1, 3]
+    assert rows[2]['reachable_shortfall'] is None
     assert rows[0]['infeasibility_reason'] == 'INFEASIBLE' and rows[1]['reachable_shortfall'] is None
     assert summarize(advice, u, None, evaluations, set())['proposals'][0]['reachable_shortfall'] is None
