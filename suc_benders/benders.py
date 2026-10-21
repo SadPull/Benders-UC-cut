@@ -99,7 +99,7 @@ def master(b, cuts, seconds=0, *, search_reachability=False):
     rhs, eq = list(b.rhs[hard]), list(b.eq[hard])
     kind = ["hard"] * len(rows)
     mapping = np.full(len(b.obj), -1); mapping[X] = np.arange(nx)
-    pairs, nb, capacity_rows = [], nx, {}
+    pairs, nb = [], nx
 
     # 添加主问题约束及 hard/capacity/and/optimality/feasibility 标签，供 QUBO 选择对应编码。
     def add(indices, values, bound, equality=False, label="hard"):
@@ -131,7 +131,6 @@ def master(b, cuts, seconds=0, *, search_reachability=False):
                     add([z, v], [1, -1], 0, label="and"); add([z, w], [1, -1], 0, label="and")
                     add([v, w, z], [1, 1, -1], 1, label="and")
         required = (1 + Fraction(str(b.d.reserve_fraction))) * max(Fraction(str(s.load[hour])) for s in b.scenarios)
-        capacity_rows[len(rows)] = ({j: -v for j, v in capacity.items()}, required)
         add(capacity.keys(), [-v for v in capacity.values()], -float(required), label="capacity")
     # theta 下估计二进制固定费用加连续补偿；b.constant 保留在块模型之外，汇总时加回。
     theta = nb
@@ -150,8 +149,7 @@ def master(b, cuts, seconds=0, *, search_reachability=False):
     m = NS(A=sparse.coo_matrix((V, (I, J)), shape=(len(rows), nb + 1)).tocsr(),
            rhs=np.asarray(rhs), eq=np.asarray(eq, bool), obj=np.r_[np.zeros(nb), 1.],
            q=np.zeros(nb + 1), lb=np.r_[np.zeros(nb), lo], ub=np.r_[np.ones(nb), hi],
-           binary=np.arange(nb), nx=nx, and_pairs=pairs, kind=kind, scale=b.scale,
-           capacity_rows=capacity_rows, constant=0.)
+           binary=np.arange(nb), nx=nx, and_pairs=pairs, kind=kind, constant=0.)
     m.purpose = 'master_lp_relaxation'
     lower = -np.inf
     if seconds > 0:

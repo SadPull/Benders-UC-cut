@@ -143,7 +143,6 @@ def partition(m, hours, prices=None):
                original_obj=m.obj[cols], labels=[m.labels[k] for k in rows], cross=cross)
         b.binary = np.flatnonzero(np.isin(cols, m.binary))
         b.continuous = np.flatnonzero(~np.isin(cols, m.binary))
-        b.scale = max(1., float(np.sum(np.abs(m.obj[cols]) * b.ub + b.q * b.ub ** 2)))
         mapping = np.full(len(m.obj), -1); mapping[cols] = np.arange(len(cols))
         for name in ("u", "v", "w"):
             setattr(b, name, mapping[getattr(m.ix, name)[:, times]])

@@ -6,9 +6,7 @@ import pytest
 
 from conftest import whole_day
 from test_basic_search import checkpoint
-from suc_benders.benders import master
 from suc_benders.data import load_data
-from suc_benders.qubo import qubo
 
 
 @pytest.mark.parametrize('key', ['history', 'outer_history'])
@@ -72,11 +70,3 @@ def test_initial_output_must_be_explicit(tmp_path):
     with pytest.raises(ValueError, match='initial_output is required'):
         load_data(path, data/'stochastic.json')
 
-
-def test_qubo_requires_exact_capacity_metadata(tiny, options):
-    whole = whole_day(tiny, options)
-    m, _ = master(whole.full, [])
-    row = next(iter(m.capacity_rows))
-    del m.capacity_rows[row]
-    with pytest.raises(KeyError):
-        qubo(m, options, whole.result.objective)

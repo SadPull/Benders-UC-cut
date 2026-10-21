@@ -25,10 +25,6 @@ class Options:
     time_limit: float = 600
     seed: int = 7
     verbose: bool = True
-    # theta 步长控制费用编码精度；penalty 惩罚约束违反，reserve_scale 缩放容量罚项（仅归档 qubo 使用）。
-    theta_step: float = 1
-    penalty: float = 1e6
-    reserve_scale: float = 100
     # 搜索 QUBO 以"单个位的最大归一化成本"为能量单位；以下权重、温度均以该单位计。
     # sa_reads 为独立退火链数，sa_sweeps 为每个温度对全部位的扫描次数。
     sa_hard_weight: float = 8
@@ -89,7 +85,7 @@ def load_options(overrides=None, config_path=None):
             continue
         if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
             raise ValueError(f"Invalid integer option: {name}")
-    for name in ("time_limit", "theta_step", "penalty", "reserve_scale", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
+    for name in ("time_limit", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
                  "sa_hard_weight", "sa_capacity_weight", "llm_escalation_timeout", "llm_escalation_min_seconds",
                  "llm_escalation_gain"):
         v = getattr(o, name)
