@@ -1,5 +1,5 @@
-"""Validated UC inputs and atomic JSON output."""
-# 模块职责：读取机组/场景 JSON，保留原物理单位，在进入建模前检查输入边界，并原子保存严格 JSON 输出。
+"""Validated UC inputs and strict JSON output."""
+# 模块职责：读取机组/场景 JSON，保留原物理单位，在进入建模前检查输入边界；把结果转换为严格 JSON 并原子保存。
 # 机组参数为长度 n_units 的向量，负荷为长度 horizon 的向量；返回 d 和场景列表。
 import json
 import os
@@ -106,6 +106,23 @@ def save_json(path, value):
                 raise
             # Windows readers can briefly hold a handle without FILE_SHARE_DELETE.
             sleep(.02)
+
+
+# 把 NumPy 数组/标量、命名空间和嵌套容器转换为可写入严格 JSON 的纯 Python 值；非有限浮点数转为 None。
+def jsonable(value):
+    if isinstance(value, np.ndarray):
+        return jsonable(value.tolist())
+    if isinstance(value, np.generic):
+        return jsonable(value.item())
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    if hasattr(value, "__dict__"):
+        return jsonable(vars(value))
+    return value
 
 
 # 将单个小时负荷序列转为浮点向量，要求长度正确、数值有限且非负。

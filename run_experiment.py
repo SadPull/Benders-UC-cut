@@ -1,4 +1,4 @@
-"""输入固定读取 data 中的 JSON；在 VS Code 中点击“运行 Python 文件”。"""
+"""一键运行入口：参数在文件顶部设置，算例目录由 DATA_DIR 选择；在 VS Code 中点击“运行 Python 文件”。"""
 from datetime import datetime, timedelta, timezone
 from dataclasses import fields
 import hashlib
@@ -12,10 +12,10 @@ from uuid import uuid4
 
 import numpy as np
 
-from run_suc import run_suc, _serializable
+from run_suc import run_suc
 from suc_benders.anneal import SA_BACKEND, SA_INITIALIZATION
 from suc_benders.config import load_options
-from suc_benders.data import load_data
+from suc_benders.data import jsonable, load_data
 from suc_benders.model import model
 from suc_benders.optimization import optimize
 from suc_benders.validation import unpack, validate
@@ -50,7 +50,7 @@ RESULTS = PROJECT / "results"
 
 def save(path, value):
     with path.open("w", encoding="utf-8") as stream:
-        stream.write(json.dumps(_serializable(value), ensure_ascii=False, indent=2, allow_nan=False))
+        stream.write(json.dumps(jsonable(value), ensure_ascii=False, indent=2, allow_nan=False))
         stream.write("\n")
 
 
@@ -156,7 +156,7 @@ class ExperimentProgress:
         if event == "coordination" and result.outer_history:
             row["coordination"] = result.outer_history[-1]["coordination"]
         with (self.output / "progress.jsonl").open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(_serializable(row), ensure_ascii=False, allow_nan=False) + "\n")
+            stream.write(json.dumps(jsonable(row), ensure_ascii=False, allow_nan=False) + "\n")
         if improved or event in ("initialization", "final"):
             temporary = self.output / "latest-solution.tmp.json"
             save(temporary, solution_snapshot(result, elapsed, self.session_id))
@@ -183,10 +183,8 @@ def solve_reference(data, scenarios, seconds, log_file):
     return reference
 
 
-def main():
-    stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
-    output = RESULTS / f"manual-seed{SEED}-{stamp}-{uuid4().hex[:8]}"
-    folder = PROJECT / DATA_DIR
+# 由文件顶部常量组装求解参数；LLM 通道与升级层的组合不合法时直接报错，不创建结果目录。
+def build_options(output, folder):
     if LLM_TRANSPORT not in ("codex", "http"):
         raise ValueError("LLM_TRANSPORT must be 'codex' or 'http'")
     codex = LLM_ENABLED and LLM_TRANSPORT == "codex"
@@ -206,21 +204,10 @@ def main():
                    llm_escalation_directory=str(output / "llm_requests") if escalation else "",
                    llm_escalation_gain=LLM_ESCALATION_GAIN, llm_escalation_min_seconds=LLM_ESCALATION_MIN_SECONDS,
                    llm_escalation_timeout=LLM_ESCALATION_TIMEOUT_SECONDS)
-    checked = load_options(options)
-    data, scenarios = load_data(checked.data_file, checked.scenario_file)
-    dimensions = dict(units=data.n_units, hours=data.horizon, scenarios=len(scenarios))
-    print(f"机组输入：{checked.data_file}", flush=True)
-    print(f"场景输入：{checked.scenario_file}", flush=True)
-    print(f"输入规模：{data.n_units}机组；{data.horizon}小时；{len(scenarios)}场景", flush=True)
-    if CHECK_ONLY:
-        print("输入检查通过；本次没有执行求解或检查授权。")
-        return 0
+    return options, codex, escalation
 
-    output.mkdir(parents=True, exist_ok=False)
-    save(output / "options.json", options)
-    freeze_experiment(output, checked)
-    progress = ExperimentProgress(output)
-    print(f"结果目录：{output}", flush=True)
+
+def print_run_settings(checked, codex, escalation):
     print(f"随机种子：{SEED}；主算法预算：{TIME_LIMIT_SECONDS} 秒；"
           f"认证间隙目标：{TARGET_GAP_PERCENT}%；LLM：{'开启' if LLM_ENABLED else '关闭'}", flush=True)
     if LLM_ENABLED:
@@ -246,47 +233,36 @@ def main():
     print("指标说明：UB 是通过全天物理校验的可行方案成本；LB 是认证下界；"
           "认证间隙 = (UB - LB) / max(1, |UB|)。", flush=True)
     print("块内上下界用于分块搜索，不等于全天原问题的上下界。", flush=True)
-    print("开始主算法：初始化、分块 SA 搜索和独立强化下界认证。", flush=True)
-    started = perf_counter()
-    try:
-        result = run_suc(vars(checked), progress=progress, started_at=started)
-    except Exception as error:
-        save(output / "failure.json", dict(status="INCOMPLETE", error_type=type(error).__name__,
-                                          elapsed_seconds=perf_counter() - started))
-        raise
-    solver_wall = perf_counter() - started
-    final_save_started = perf_counter()
-    compact = solution_snapshot(result, result.elapsed_seconds, progress.session_id)
-    compact.update(timings=result.diagnostics.get("timings", {}),
-                   search_statistics=result.diagnostics.get("search_statistics", {}),
-                   certification_history=result.certification_history,
-                   llm_history=[llm_record(row) for row in result.llm_history])
-    save(output / "result.json", compact)
-    final_save_seconds = perf_counter() - final_save_started
-    summary = dict(**dimensions, seed=SEED, status=result.status, message=result.message,
-                   sa_backend=result.diagnostics.get("sa_backend"),
-                   sa_initialization=result.diagnostics.get("sa_initialization"),
-                   upper=result.objective, lower=result.lower_bound,
-                   gap_percent=100 * result.relative_gap, reference_gap_percent=None,
-                   validation=result.validation,
-                   solver_elapsed_seconds=result.elapsed_seconds, solver_wall_seconds=solver_wall,
-                   recording_seconds=progress.recording_seconds, final_save_seconds=final_save_seconds,
-                   session_id=progress.session_id,
-                   time_limit_overshoot_seconds=result.diagnostics.get("time_limit_overshoot", 0.),
-                   wall_to_result_saved_seconds=perf_counter() - started,
-                   sa_calls=result.diagnostics.get("sa_calls", 0), llm_calls=result.llm_calls,
-                   llm_patience=LLM_PATIENCE, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
-                   llm_disabled=result.diagnostics.get('llm_disabled'),
-                   llm_escalation_model=checked.llm_escalation_model or None,
-                   llm_escalation_calls=sum(row.get("tier") == "escalation" for row in result.llm_history),
-                   llm_escalation_improved=sum(bool(row.get("improved")) for row in result.llm_history
-                                               if row.get("tier") == "escalation"),
-                   llm_escalation_disabled=result.diagnostics.get('llm_escalation_disabled'),
-                   data_dir=DATA_DIR, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS,
-                   dispatch_failures=result.diagnostics.get('dispatch_failures', 0),
-                   search_statistics=result.diagnostics.get('search_statistics', {}),
-                   note="轻量留证；latest-solution.json 仅保存方案，不是可恢复的搜索状态。")
-    save(output / "summary.json", summary)
+
+
+# 汇总一次运行的状态、界、计时、调用与搜索统计；reference_gap_percent 在参考求解后补填。
+def run_summary(result, checked, progress, dimensions, solver_wall, final_save_seconds, started):
+    return dict(**dimensions, seed=SEED, status=result.status, message=result.message,
+                sa_backend=result.diagnostics.get("sa_backend"),
+                sa_initialization=result.diagnostics.get("sa_initialization"),
+                upper=result.objective, lower=result.lower_bound,
+                gap_percent=100 * result.relative_gap, reference_gap_percent=None,
+                validation=result.validation,
+                solver_elapsed_seconds=result.elapsed_seconds, solver_wall_seconds=solver_wall,
+                recording_seconds=progress.recording_seconds, final_save_seconds=final_save_seconds,
+                session_id=progress.session_id,
+                time_limit_overshoot_seconds=result.diagnostics.get("time_limit_overshoot", 0.),
+                wall_to_result_saved_seconds=perf_counter() - started,
+                sa_calls=result.diagnostics.get("sa_calls", 0), llm_calls=result.llm_calls,
+                llm_patience=LLM_PATIENCE, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
+                llm_disabled=result.diagnostics.get('llm_disabled'),
+                llm_escalation_model=checked.llm_escalation_model or None,
+                llm_escalation_calls=sum(row.get("tier") == "escalation" for row in result.llm_history),
+                llm_escalation_improved=sum(bool(row.get("improved")) for row in result.llm_history
+                                            if row.get("tier") == "escalation"),
+                llm_escalation_disabled=result.diagnostics.get('llm_escalation_disabled'),
+                data_dir=DATA_DIR, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS,
+                dispatch_failures=result.diagnostics.get('dispatch_failures', 0),
+                search_statistics=result.diagnostics.get('search_statistics', {}),
+                note="轻量留证；latest-solution.json 仅保存方案，不是可恢复的搜索状态。")
+
+
+def print_result(result, summary):
     status_text = {"CONVERGED": "已达到认证间隙目标", "TIME_LIMIT": "达到时间上限"}.get(result.status, "求解未正常完成")
     print(f"\n主算法状态：{status_text}（{result.status}）", flush=True)
     if result.message:
@@ -300,6 +276,9 @@ def main():
     print(f"主算法耗时：{result.elapsed_seconds:.2f} 秒；"
           f"SA 调用：{summary['sa_calls']} 次；LLM 调用：{result.llm_calls} 次", flush=True)
 
+
+# 主算法结束后另用 Gurobi 直接求解完整问题作比较；参考方案和下界不回填主算法。
+def run_reference(output, data, scenarios, result, summary):
     print(f"\n[2/2] Gurobi 直接求解同一完整问题（保留全部整数变量、时段和场景），"
           f"另用最多 {REFERENCE_TIME_LIMIT_SECONDS} 秒。", flush=True)
     print("参考求解仅用于比较，其方案和下界不回填主算法；日志见 reference-gurobi.log。", flush=True)
@@ -332,6 +311,50 @@ def main():
               "（(UB - 参考成本) / 参考成本 × 100%）", flush=True)
     else:
         print("主算法 UB 相对 Gurobi 参考成本的差距：无法计算（缺少通过校验的可行成本，或参考成本为零）。", flush=True)
+    return reference
+
+
+def main():
+    stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
+    output = RESULTS / f"manual-seed{SEED}-{stamp}-{uuid4().hex[:8]}"
+    options, codex, escalation = build_options(output, PROJECT / DATA_DIR)
+    checked = load_options(options)
+    data, scenarios = load_data(checked.data_file, checked.scenario_file)
+    dimensions = dict(units=data.n_units, hours=data.horizon, scenarios=len(scenarios))
+    print(f"机组输入：{checked.data_file}", flush=True)
+    print(f"场景输入：{checked.scenario_file}", flush=True)
+    print(f"输入规模：{data.n_units}机组；{data.horizon}小时；{len(scenarios)}场景", flush=True)
+    if CHECK_ONLY:
+        print("输入检查通过；本次没有执行求解或检查授权。")
+        return 0
+
+    output.mkdir(parents=True, exist_ok=False)
+    save(output / "options.json", options)
+    freeze_experiment(output, checked)
+    progress = ExperimentProgress(output)
+    print(f"结果目录：{output}", flush=True)
+    print_run_settings(checked, codex, escalation)
+    print("开始主算法：初始化、分块 SA 搜索和独立强化下界认证。", flush=True)
+    started = perf_counter()
+    try:
+        result = run_suc(vars(checked), progress=progress, started_at=started)
+    except Exception as error:
+        save(output / "failure.json", dict(status="INCOMPLETE", error_type=type(error).__name__,
+                                          elapsed_seconds=perf_counter() - started))
+        raise
+    solver_wall = perf_counter() - started
+    final_save_started = perf_counter()
+    compact = solution_snapshot(result, result.elapsed_seconds, progress.session_id)
+    compact.update(timings=result.diagnostics.get("timings", {}),
+                   search_statistics=result.diagnostics.get("search_statistics", {}),
+                   certification_history=result.certification_history,
+                   llm_history=[llm_record(row) for row in result.llm_history])
+    save(output / "result.json", compact)
+    final_save_seconds = perf_counter() - final_save_started
+    summary = run_summary(result, checked, progress, dimensions, solver_wall, final_save_seconds, started)
+    save(output / "summary.json", summary)
+    print_result(result, summary)
+    reference = run_reference(output, data, scenarios, result, summary)
     return int(result.status.endswith("FAILED") or result.validation is None
                or reference["validation"] is None)
 

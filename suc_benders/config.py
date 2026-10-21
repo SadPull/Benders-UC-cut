@@ -60,10 +60,29 @@ class Options:
     llm_escalation_gain: float = .005
 
 
+# 整数参数至少为 1，其中 seed 与 llm_max_calls 可为 0（llm_max_calls 为 None 表示不限次数）。
+INTEGER_OPTIONS = ("block_hours", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed",
+                   "llm_max_calls")
+NONNEGATIVE_INTEGERS = ("seed", "llm_max_calls")
+# 数值参数须有限且为正，ZERO_ALLOWED 中的参数还可为 0。
+NUMERIC_OPTIONS = ("time_limit", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
+                   "sa_hard_weight", "sa_capacity_weight", "llm_escalation_timeout", "llm_escalation_min_seconds",
+                   "llm_escalation_gain")
+ZERO_ALLOWED = ("tolerance", "llm_reserve_seconds", "llm_escalation_min_seconds", "llm_escalation_gain")
+BOOLEAN_OPTIONS = ("llm_enabled", "verbose", "llm_first_call_at_start", "sa_enabled")
+STRING_OPTIONS = ("llm_url", "llm_model", "llm_api_key", "llm_agent_directory", "llm_codex_command",
+                  "llm_escalation_model", "llm_escalation_command", "llm_escalation_directory")
+
+
+def _number(value):
+    return not isinstance(value, bool) and isinstance(value, (float, int)) and np.isfinite(value)
+
+
 # 按默认值 → 本地配置 → 显式覆盖构造 Options，拒绝未知字段、非法数值和不兼容模式。
 # llm_max_calls=None 表示取消全局次数上限，0 表示不发请求，其他预算与停止规则仍适用。
 def load_options(overrides=None, config_path=None):
     o = Options()
+    names = {f.name for f in fields(o)}
     path = ROOT / "config.local.json" if config_path is None else Path(config_path)
     if path.exists():
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -72,42 +91,34 @@ def load_options(overrides=None, config_path=None):
         for section, values in raw.items():
             for name, value in values.items():
                 key = f"{section}_{name}"
-                if key not in {f.name for f in fields(o)}:
+                if key not in names:
                     raise ValueError(f"Unknown configuration option: {key}")
                 setattr(o, key, value)
     for name, value in (overrides or {}).items():
-        if name not in {f.name for f in fields(o)}:
+        if name not in names:
             raise ValueError(f"Unknown option: {name}")
         setattr(o, name, value)
-    for name in ("block_hours", "max_outer", "max_inner", "sa_reads", "sa_sweeps", "llm_patience", "seed", "llm_max_calls"):
+    for name in INTEGER_OPTIONS:
         v = getattr(o, name)
         if name == "llm_max_calls" and v is None:
             continue
-        if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < (0 if name in ("seed", "llm_max_calls") else 1):
+        minimum = 0 if name in NONNEGATIVE_INTEGERS else 1
+        if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < minimum:
             raise ValueError(f"Invalid integer option: {name}")
-    for name in ("time_limit", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
-                 "sa_hard_weight", "sa_capacity_weight", "llm_escalation_timeout", "llm_escalation_min_seconds",
-                 "llm_escalation_gain"):
+    for name in NUMERIC_OPTIONS:
         v = getattr(o, name)
-        if isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v) or v < 0 or (
-                v == 0 and name not in ("tolerance", "llm_reserve_seconds", "llm_escalation_min_seconds",
-                                        "llm_escalation_gain")):
+        if not _number(v) or v < 0 or (v == 0 and name not in ZERO_ALLOWED):
             raise ValueError(f"Invalid numeric option: {name}")
     if not 0 < o.sa_cooling < 1 or not o.sa_cutoff < o.sa_temperature:
         raise ValueError("Require 0 < sa_cooling < 1 and sa_cutoff < sa_temperature")
-    if not all(isinstance(getattr(o, name), bool) for name in ("llm_enabled", "verbose", "llm_first_call_at_start")):
-        raise ValueError("llm_enabled, verbose and llm_first_call_at_start must be boolean")
-    if not isinstance(o.sa_enabled, bool):
-        raise ValueError("sa_enabled must be boolean")
-    if o.sa_budget_seconds is not None:
-        v = o.sa_budget_seconds
-        if (isinstance(v, bool) or not isinstance(v, (float, int)) or not np.isfinite(v)
-                or v < 0):
-            raise ValueError('SA budget requires a nonnegative finite value')
+    for name in BOOLEAN_OPTIONS:
+        if not isinstance(getattr(o, name), bool):
+            raise ValueError(f"{name} must be boolean")
+    if o.sa_budget_seconds is not None and (not _number(o.sa_budget_seconds) or o.sa_budget_seconds < 0):
+        raise ValueError('SA budget requires a nonnegative finite value')
     if not o.sa_enabled and o.llm_enabled:
         raise ValueError("Disabling SA requires LLM disabled")
-    for name in ("llm_url", "llm_model", "llm_api_key", "llm_agent_directory", "llm_codex_command",
-                 "llm_escalation_model", "llm_escalation_command", "llm_escalation_directory"):
+    for name in STRING_OPTIONS:
         if not isinstance(getattr(o, name), str):
             raise ValueError(f"{name} must be a string")
     if o.llm_codex_command and not o.llm_agent_directory:
