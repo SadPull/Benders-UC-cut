@@ -90,7 +90,9 @@ def dispatch(b, x, seconds, *, certified=False):
 
 # 把离散约束、容量/AND 关系与已有 Benders 割组装成线性主问题，并可选求其连续松弛下界。
 # 末列 theta 表示不含 b.constant 的块总费用下估计；返回的松弛解不用于替代 SA 候选。
-def master(b, cuts, seconds=0, *, search_reachability=False):
+# reachability=True 或给出 fixed 时加入不可达启停的禁止行；fixed 为块内二进制位的已知取值（NaN 表示未定），
+# 以等式行固定，使全天推出的固定位在块边界处仍然成立。
+def master(b, cuts, seconds=0, *, reachability=False, fixed=None):
     X, Y = b.binary, b.continuous
     nx = len(X)
     hard = b.A[:, Y].getnnz(axis=1) == 0
@@ -106,14 +108,13 @@ def master(b, cuts, seconds=0, *, search_reachability=False):
         rows.append({int(j): float(v) for j, v in zip(indices, values) if v != 0})
         rhs.append(bound); eq.append(equality); kind.append(label)
 
-    if search_reachability or hasattr(b, 'search_fixed'):
+    if reachability or fixed is not None:
         start, stop = transition_allowed(b.d)
         forbidden = np.r_[b.v[~start].ravel(), b.w[~stop[:, b.times]]]
         for j in forbidden:
             add([mapping[j]], [1.], 0., True)
-    # Whole-horizon implications survive decomposition at a block boundary.
-    for j in np.flatnonzero(np.isfinite(getattr(b, 'search_fixed', []))):
-        add([j], [1.], float(b.search_fixed[j]), True)
+    for j in np.flatnonzero(np.isfinite(fixed if fixed is not None else [])):
+        add([j], [1.], float(fixed[j]), True)
 
     # 用精确容量系数保留启停限制；min_up=1 时 AND 辅助位修正同小时启停容量的重叠。
     for t, hour in enumerate(b.times):

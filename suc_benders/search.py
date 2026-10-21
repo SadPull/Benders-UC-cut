@@ -77,7 +77,7 @@ class WholeDay:
         self.diagnostics['sa_budget_seconds_used'] = 0.
         self.diagnostics.update(search_mode='time_blocks', sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION)
         phase = perf_counter()
-        reachable, _ = master(full, [], search_reachability=True)
+        reachable, _ = master(full, [], reachability=True)
         self.fixed = fixed_binary(reachable)[:len(full.binary)]
         start, stop = transition_allowed(self.d)
         fixed_u = self.fixed_u = self.fixed[full.u]
@@ -448,7 +448,8 @@ class BlockSearch:
     # 绑定块与价格上下文，初始化连续费用基础下界、空割池和局部诊断。
     def __init__(self, b, o, outer, index, whole, planes=None):
         self.b, self.o, self.outer, self.index, self.whole = b, o, outer, index, whole
-        b.search_fixed = whole.fixed[b.cols[b.binary]].copy()
+        # 全天可达性推出的块内固定位，由块主问题以等式行强制。
+        self.fixed = whole.fixed[b.cols[b.binary]].copy()
         self.context = context_id(b, outer, index)
         self.lower = float(np.minimum(b.obj * b.lb, b.obj * b.ub).sum() + b.constant)
         self.upper, self.best = np.inf, None
@@ -532,7 +533,7 @@ class BlockSearch:
     # 用当前割重解块 LP 主问题并抬高块下界；超时返回 None，否则返回主问题供搜索 QUBO 编码。
     def _refresh_lower(self):
         phase = perf_counter()
-        master_lp, bound = master(self.b, self.cuts, self.whole.remaining())
+        master_lp, bound = master(self.b, self.cuts, self.whole.remaining(), fixed=self.fixed)
         self.whole.timings["relaxation"] += perf_counter() - phase
         if self.whole.remaining() <= 0:
             return None

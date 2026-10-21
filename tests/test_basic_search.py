@@ -29,7 +29,7 @@ def test_progress_handles_empty_and_nonempty_qubo(tiny, options, monkeypatch, ma
     whole.progress = lambda state, event: observed.append(
         dict(state.diagnostics['pending_qubo'])) if event == 'before_sampling' else None
     q = NS(Q=matrix, fixed=whole.best.point[whole.full.binary].copy(), free=np.array([], int))
-    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds: (master(b, cuts)[0], -1e6))
+    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds, **kw: (master(b, cuts, **kw)[0], -1e6))
     monkeypatch.setattr(search, 'search_qubo', lambda *args: q)
     monkeypatch.setattr(search, 'anneal', lambda *args: ([], {'bits': matrix.shape[0]}))
     block.step([whole.best.point[whole.full.binary]], 1)
@@ -42,7 +42,7 @@ def test_each_block_sample_uses_derived_chain_seeds_and_current_incumbent(tiny, 
     whole = whole_day(tiny, options)
     block = search.BlockSearch(whole.full, options, 1, 1, whole)
     seeds = []
-    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds: (master(b, cuts)[0], -1e6))
+    monkeypatch.setattr(search, 'master', lambda b, cuts, seconds, **kw: (master(b, cuts, **kw)[0], -1e6))
     monkeypatch.setattr(search, 'anneal', lambda q, o, seconds, seed:
                         (seeds.append(seed) or [], {'bits': q.Q.shape[0]}))
     for inner in (1, 2):
@@ -96,8 +96,8 @@ def test_reachability_survives_without_joint_master(tiny, options):
     whole = search.WholeDay(m, full, options, started+30, solver.Result(), started)
     assert (whole.fixed[full.u] == 0).all()
     for b in partition(m, 3)[0]:
-        search.BlockSearch(b, options, 1, 1, whole)
-        block_master, _ = master(b, [])
+        block = search.BlockSearch(b, options, 1, 1, whole)
+        block_master, _ = master(b, [], fixed=block.fixed)
         assert (fixed_binary(block_master)[b.u] == 0).all()
     assert (master(full, [])[0].A != before).nnz == 0
 

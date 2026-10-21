@@ -24,7 +24,7 @@ def block_qubo(whole, options, j, cuts=(), boundary=True):
     blocks, _ = partition(whole.m, 3)
     s = search.BlockSearch(blocks[j], options, 1, j+1, whole)
     b = s.b
-    m, _ = master(b, list(cuts))
+    m, _ = master(b, list(cuts), fixed=s.fixed)
     anchor = whole.best.point[b.cols[b.binary]]
     q = search_qubo(m, b, list(cuts), anchor, s.boundary_rows() if boundary else [], options)
     return b, anchor, q
