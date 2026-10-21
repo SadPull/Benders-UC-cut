@@ -343,8 +343,8 @@ class WholeDay:
         phase = perf_counter()
         measurements = self.diagnostics["evaluations"]
         evaluations = [CandidateEvaluation(r["source"], r["objective"] if r["feasible"] else np.inf,
-            r["fixed_cost"], r["expected_fuel_cost"] if r["feasible"] else np.inf,
-            r["scenario_costs"], r["feasible"], 0, 0, None) for r in measurements]
+            r["fixed_cost"], r["expected_fuel_cost"] if r["feasible"] else np.inf, r["feasible"])
+            for r in measurements]
         context = build_llm_context(self.d, self.scenarios, LLMContextInput(
             self.result, self.dispatches, evaluations,
             [NS(**row) for row in self.diagnostics["iterations"]]))

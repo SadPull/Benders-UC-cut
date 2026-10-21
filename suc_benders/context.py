@@ -2,35 +2,30 @@
 # 模块职责：把已验证方案、场景调度、费用与对偶敏感度整理成紧凑的全天 LLM 上下文。
 # unit/period 使用零起始索引；梯度是局部启发式估计，三位小数仅用于提示展示，不参与认证。
 # 调用方总是传入已验证的 incumbent 及其各场景调度（含平衡/备用对偶价格）。
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
 from .validation import capacity, fixed_cost, startup_costs
 
 
-# 用于提示词的候选评估摘要，保存来源、实测费用、可行性、割数量和与当前方案的距离。
+# 用于提示词的候选评估摘要：来源、实测总费用及其固定/期望燃料分解和可行性。
 @dataclass
 class CandidateEvaluation:
     source: str
     total_cost: float
     fixed_cost: float
     expected_fuel_cost: float
-    scenario_costs: dict
     feasible: bool
-    optimality_cuts: int
-    feasibility_cuts: int
-    hamming_to_incumbent: int | None
 
 
-# 上下文构建输入：当前方案及场景调度、历史候选评估、迭代记录与不可行诊断。
+# 上下文构建输入：当前方案及场景调度、历史候选评估与迭代记录。
 @dataclass
 class LLMContextInput:
     incumbent: object
     incumbent_results: list
     candidate_evaluations: list
     history: list
-    infeasible_diagnostics: list = field(default_factory=list)
 
 
 # 递归转换 NumPy 标量并将有限浮点数保留三位小数，无穷/NaN 转为 None 以便生成合法 JSON。
@@ -47,11 +42,10 @@ def _round3(value):
     return value
 
 
-# 按总费用选取至多十个候选对照，展示费用分解、可行性和最优性割数量。
+# 按总费用选取至多十个候选对照，展示费用分解和可行性。
 def _candidate_comparison_rows(evaluations):
     return [dict(source=e.source, total_cost=e.total_cost, fixed_cost=e.fixed_cost,
-                 expected_fuel_cost=e.expected_fuel_cost, hamming_to_incumbent=e.hamming_to_incumbent,
-                 feasible=e.feasible, optimality_cuts=e.optimality_cuts)
+                 expected_fuel_cost=e.expected_fuel_cost, feasible=e.feasible)
             for e in sorted(evaluations, key=lambda item: item.total_cost)[:10]]
 
 
@@ -177,7 +171,6 @@ def build_llm_context(data, scenarios, context_input):
         "scenario_dispatch_summary": _scenario_dispatch_summary(data, scenarios, incumbent, results),
         "reserve_margin": [(available - (1.0 + data.reserve_fraction) * scenario.load).tolist()
                            for scenario in scenarios],
-        "infeasible_diagnostics": list(context_input.infeasible_diagnostics)[:20],
         "iteration_history": _iteration_history_rows(context_input.history),
         "unit_marginal_cost": _unit_marginal_cost(data, incumbent, expected_p),
         "unit_cost_decomposition": _unit_cost_decomposition(data, scenarios, incumbent, results),

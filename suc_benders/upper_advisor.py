@@ -1,7 +1,6 @@
 """Upper-bound advice bursts and measured candidate feedback."""
 from copy import deepcopy
 from dataclasses import replace
-import json
 from time import perf_counter
 from types import SimpleNamespace as NS
 
@@ -106,9 +105,6 @@ class UpperAdvisor:
         batch["calls"] += 1
         self.result.llm_calls = iteration
         routing = dict(channel="upper", batch_id=batch["batch_id"], batch_call=batch["calls"])
-        prompt = json.loads(body["input"])
-        prompt["advice_routing"] = routing
-        body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
         # base_u 是提示中模型看到的 incumbent_u；增量候选只有配合它才能还原成完整方案，随回执落盘。
         self.pending = dict(call_id=f"llm_upper:{iteration}", stage="advice_batch", **routing,
             tier="regular", requested_model=self.o.llm_model, transport=transport(self.o),
@@ -296,9 +292,6 @@ class UpperAdvisor:
         s.update(armed=False, armed_by=None, calls=s['calls']+1)
         self.result.llm_calls = iteration
         routing = dict(channel="upper", tier="escalation")
-        prompt = json.loads(body["input"])
-        prompt["advice_routing"] = routing
-        body["input"] = json.dumps(prompt, separators=(",", ":"), allow_nan=False)
         lane.pending = row = dict(call_id=f"llm_escalation:{iteration}", stage="escalation", **routing,
             triggered_by=triggered_by, requested_model=o.llm_model, transport=transport(o),
             deadline_seconds=seconds, status="RUNNING", accepted=0, proposals=[],

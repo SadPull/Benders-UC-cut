@@ -69,8 +69,7 @@ def test_regular_stall_starts_isolated_escalation_in_parallel(lanes):
         directory=lanes.o.llm_escalation_directory, session_id=None, isolated=True)
     assert escalation.call['seconds'] == escalation.call['timeout'] == 1800
     assert escalation.call['prompt']['continuation'] is False
-    assert escalation.call['prompt']['advice_routing']['tier'] == 'escalation'
-    assert 'tier' not in regular2.call['prompt']['advice_routing'] and not regular2.call['isolated']
+    assert 'advice_routing' not in escalation.call['prompt'] and not regular2.call['isolated']
     row = lanes.whole.result.llm_history[-1]
     assert row['tier'] == 'escalation' and row['triggered_by'] == 'llm_upper:1'
     assert row['deadline_seconds'] == 1800 and row['transport'] == 'codex_exec'

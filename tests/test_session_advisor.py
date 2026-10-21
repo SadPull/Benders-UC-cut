@@ -123,7 +123,7 @@ def test_multiple_calls_keep_session_and_send_new_measured_feedback(tiny, option
     assert calls[1][3]['previous_call_feedback'] == {'measured_upper': prior_upper}
     assert 'last_successful_call_feedback' not in calls[1][3]
     assert calls[1][3]['upper'] == prior_upper-1
-    assert calls[1][3]['advice_routing']['batch_call'] == 2
+    assert 'advice_routing' not in calls[1][3] and whole.result.llm_history[-1]['batch_call'] == 2
 
 
 def test_short_window_never_starts_or_charges_a_call(tiny, options, monkeypatch):
