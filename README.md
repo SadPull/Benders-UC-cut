@@ -28,7 +28,7 @@ LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区�
 
 **升级层（可选）**：`LLM_ESCALATION_MODEL` 填入模型名（如 `gpt-6-astra`）即开启，常规层须为 `LLM_TRANSPORT="http"`。常规层一次调用使 UB 降幅低于 `LLM_ESCALATION_GAIN`（默认 0.5%）或调用失败时，升级层被武装，并经 Codex CLI 以推理 max 并行发起一次请求；常规层照常继续，两层回复都走同一评估与移植流程。升级层每次发送完整提示、不续接会话；剩余预算扣除预留后不足 `LLM_ESCALATION_MIN_SECONDS`（默认 700 秒）时不发起，单次最多 `LLM_ESCALATION_TIMEOUT_SECONDS` 且不超过剩余预算。升级请求有效改进后清除期间累积的武装，早于该改进发出的常规请求不再触发升级；连续两次失败只停用升级层。每次升级调用在新建的临时 `CODEX_HOME` 中运行，其中只有登录信息副本和去掉 memories、插件、hooks、MCP、桌面与项目设置的配置，不含全局 AGENTS.md，并加 `--ephemeral`；调用结束即删除，删除结果记入回执 `codex_home_cleanup`。`result.json` 的每次调用标明 `tier`（regular／escalation）、`transport`、`triggered_by` 与 `deadline_seconds`，`summary.json` 汇总升级次数、有效改进次数与停用原因。
 
-入口每次从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%；另用最多 120 秒求参考解，其结果不回填主算法。当前主线已删除续跑（`RESUME_FROM`）：v0.33.0 起不再写全量检查点，而现存检查点都不满足当前 SA 标识，续跑旧实验请使用对应的归档版本。
+入口每次从零开始，预算 7200 秒、seed 17、目标认证 gap 0.1%；另用最多 120 秒求参考解，其结果不回填主算法。v0.36.0 起删除了续跑（`RESUME_FROM`）：v0.33.0 起不再写全量检查点，而现存检查点都不满足当前 SA 标识，续跑旧实验请使用对应的归档版本。
 
 每轮遍历全部时间块，未闭合的块各最多采样一批 SA：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`）；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
 
@@ -77,14 +77,36 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
 
-## 当前主线：代码清理（未发布）
+## v0.36.0 升级层、IEEE118 补跑与代码清理
 
-删除了不可达或无读者的代码，并拆分了最难读的函数；回归脚本逐字比对 UB 轨迹、搜索统计、故障注入下的状态与 LLM 请求体，数值行为不变。对外可见的变化：
+2026-10-21 在 IEEE118 派生算例（54 机组×24 小时×1 场景）、seed 17、每组 1800 秒、12 h 分块、16 sweeps 条件下补跑 SA+DeepSeek（`deepseek-v4.1-flash`，推理 max，HTTP 流式），并试验经 Codex 的 `gpt-6-astra` 升级层。参考成本为 Gurobi 完整问题最优值 3,672,938.50，只用于事后比较，不回填主算法。机器可读汇总见 [archives/v0.36.0.json](archives/v0.36.0.json)。
+
+| 运行 | 代码 | UB 相对最优值 | 认证 gap | LLM 调用 |
+|---|---|---:|---:|---|
+| 纯 SA | `ffaaf1d` | +7.515% | 7.007% | 0 |
+| DeepSeek，增量输出修复后第一次 | `017d925` | +2.103% | 2.078% | 3（全部 OK） |
+| DeepSeek，补全调用记录后 | `2ac87c2` | +2.046% | 2.023% | 3（全部 OK） |
+| DeepSeek，可达出力缺口反馈 + 450 s 超时 | `ffaaf1d` | +2.354% | 2.317% | 5（4 OK，1 超时） |
+| DeepSeek 单独（混合对照组） | `f8054a8` | +2.691% | 2.639% | 4（全部 OK） |
+| DeepSeek + astra 升级层 | `f8054a8` | **+1.465%** | **1.462%** | 常规 4 + 升级 1 |
+
+全部为 `TIME_LIMIT`；纯 SA 在四个代码版本上的结果相同（UB 3,948,959.48）。
+
+- **增量输出修复有效**：v0.35.0 的整矩阵输出曾使 DeepSeek 组停在 +4.934%；改为增量输出与逐候选校验后，各次运行都在 +2.0%～+2.7%。
+- **可达出力缺口反馈**：调度不可行的候选此前都是"计入爬坡和开机首小时后可达出力低于负荷"；把缺口小时与 MW 数反馈给模型后，候选调度可行率从 6/12 升到 15/16，但这次的最终 UB（+2.354%）并未更好。
+- **升级层**：混合组 +1.465% 是目前 IEEE118 的最好结果，但 91.1% 的降幅来自第 1 次 DeepSeek 调用（升级层尚未介入），astra 只贡献 0.5%；这一对的差距不能归因于升级层。停滞点探针中，同一提示下 `gpt-6-astra` 4/4 候选可行、最好 +1.490%，DeepSeek 2/4、+1.901%（各一次调用）。
+- **局限**：每组只有一个种子、一次运行；DeepSeek 推理本身有随机性，同条件下 DeepSeek 单独运行的结果在 +2.046%～+2.691% 之间。各报告见 `results/ieee118-deepseek-fix*-20261021`、`results/ieee118-hybrid-20261021` 与 `results/astra-stall-probe-20261021`。
+
+同时做了一次代码清理：删除不可达或无读者的代码（生产代码 4900 → 4216 行），拆分最难读的函数；回归脚本在每一步逐字比对 UB 轨迹、搜索统计、172 次故障注入下的状态与 LLM 请求体，真实证明进程给出相同的界，数值行为不变。对外可见的变化：
 
 - 删除续跑（`RESUME_FROM`、`run_suc(resume_state=)`）、手动文件交换 LLM 通道（`agent_bridge.py`）、归档的整割 `qubo()` 编码及其选项 `theta_step`／`penalty`／`reserve_scale`，以及从未启用的审计落盘钩子。
 - `summary.json` 去掉 `scope`、`audit_status`、`resume_source`、`segment_*`、`new_llm_calls`、`block_sa_calls`（恒等于 `sa_calls`），`segment_wall_seconds` 改名 `solver_wall_seconds`；`manifest.json` 去掉 `cold_start`、`inherited_evidence`、`resume_source`；`progress.jsonl` 与 `latest-solution.json` 去掉 `resume_cursor`、`segment_elapsed_seconds`，运行中的状态显示 `RUNNING`。
-- LLM 提示去掉恒为 0／null／空的 `optimality_cuts`、`hamming_to_incumbent`、`infeasible_diagnostics` 和 `advice_routing`（每次约少 190 个字符），此后结果不能与 v0.35.0 的提示逐字比较。
+- LLM 提示去掉恒为 0／null／空的 `optimality_cuts`、`hamming_to_incumbent`、`infeasible_diagnostics` 和 `advice_routing`（每次约少 190 个字符）；上表的运行都使用清理前的提示，此后的结果不能与之逐字比较。
 - 证明进程每轮透视割分离只计算一次模型指纹（IEEE118 派生算例首轮从 0.83 秒降到 0.01 秒）；块 SA 诊断在内存中只保留标量与哈希（classic10 上 8 次调用后从 0.65 MB 降到 0.09 MB）。
+
+本地 `results/` 现保留 12 项：8 个分析／探针目录（`deepseek-flash-pilot-20261020`、`ieee118-deepseek-20261020`、`ieee118-deepseek-fix-20261021`、`ieee118-deepseek-fix2-20261021`、`ieee118-deepseek-fix3-20261021`、`ieee118-hybrid-20261021`、`astra-stall-probe-20261021`、`schema-probe-20261020`），以及 fix3 与 hybrid 两组对照的原始运行（`manual-seed17-20261021-104528-*`、`manual-seed17-20261021-142727-*`）。fix、fix2 两轮的原始运行只保存在 Release 的实验归档中，10-20 的首轮对照在 v0.35.0 Release 中。
+
+[v0.36.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.36.0) 提供发布提交对应的 `core-source-v0.36.0.zip`、2026-10-21 全部 13 项实验目录 `experiment-archive-v0.36.0.zip`、逐文件 SHA256 清单 `archive-manifest-v0.36.0.json` 和资产校验和 `SHA256SUMS.txt`。
 
 ## v0.35.0 LLM 通道、多算例实验与归档
 
@@ -107,7 +129,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 局限：每组只有一个种子、一次运行；gpt 组与 DeepSeek 组的通道、会话方式和输出格式都不同，不能直接比较模型；v0.35.0 改变了提示与输出格式，此后结果不能与整矩阵输出的历史结果直接比较。
 
-[v0.35.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.35.0) 提供发布提交对应的 `core-source-v0.35.0.zip`、全部 34 项实验目录与驱动／分析脚本 `experiment-archive-v0.35.0.zip`、逐文件 SHA256 清单和上传／清理验证记录。本地 `results/` 现保留 12 项：8 个分析／探针目录（`deepseek-flash-pilot-20261020`、`ieee118-deepseek-20261020`、`ieee118-deepseek-fix-20261021`、`-fix2-`、`-fix3-`、`ieee118-hybrid-20261021`、`astra-stall-probe-20261021`、`schema-probe-20261020`），以及 fix3 与 hybrid 两组对照的原始运行（`manual-seed17-20261021-104528-*`、`manual-seed17-20261021-142727-*`）。其余 6 个原始运行（10-20 首轮对照与 fix、fix2 两轮）打包在仓库外的 `LLM-benders-SUC-archives/results-pruned-20261021.zip`，附逐文件 SHA256 与清单；其中 10-20 的两项也在本 Release 的实验归档中。
+[v0.35.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v0.35.0) 提供发布提交对应的 `core-source-v0.35.0.zip`、全部 34 项实验目录与驱动／分析脚本 `experiment-archive-v0.35.0.zip`、逐文件 SHA256 清单和上传／清理验证记录。本地 `results/` 只保留 DeepSeek 相关的五项：`deepseek-flash-pilot-20261020`、`ieee118-deepseek-20261020`、`manual-seed17-20261020-224136-14459f84`、`manual-seed17-20261020-224136-7326d548`、`schema-probe-20261020`。
 
 ## v0.34.0 方法选择与归档
 
