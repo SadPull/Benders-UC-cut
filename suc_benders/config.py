@@ -20,9 +20,6 @@ class Options:
     block_hours: int = 3
     # max_rounds 限制遍历全部块的完整轮数（每轮每块一批 SA），不是单个块独占的采样次数。
     max_rounds: int = 400
-    # SA 之前的拉格朗日阶段：限时（秒）与至多迭代次数（每次迭代对全部块各求解一次精确块子问题）；0 次表示跳过。
-    lagrangian_time_limit: float = 120.
-    lagrangian_max_iterations: int = 50
     tolerance: float = 1e-4
     time_limit: float = 600
     reference_time_limit: float = 120
@@ -64,11 +61,11 @@ class Options:
 
 
 # 整数参数至少为 1，其中 seed 与 llm_max_calls 可为 0（llm_max_calls 为 None 表示不限次数）。
-INTEGER_OPTIONS = ("block_hours", "max_rounds", "lagrangian_max_iterations", "sa_reads", "sa_sweeps", "llm_patience", "seed",
+INTEGER_OPTIONS = ("block_hours", "max_rounds", "sa_reads", "sa_sweeps", "llm_patience", "seed",
                    "llm_max_calls")
-NONNEGATIVE_INTEGERS = ("seed", "llm_max_calls", "lagrangian_max_iterations")
+NONNEGATIVE_INTEGERS = ("seed", "llm_max_calls")
 # 数值参数须有限且为正，ZERO_ALLOWED 中的参数还可为 0。
-NUMERIC_OPTIONS = ("time_limit", "reference_time_limit", "lagrangian_time_limit", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
+NUMERIC_OPTIONS = ("time_limit", "reference_time_limit", "sa_temperature", "sa_cutoff", "llm_timeout", "llm_reserve_seconds", "tolerance",
                    "sa_hard_weight", "sa_capacity_weight", "llm_escalation_timeout", "llm_escalation_min_seconds",
                    "llm_escalation_gain")
 ZERO_ALLOWED = ("tolerance", "llm_reserve_seconds", "llm_escalation_min_seconds", "llm_escalation_gain")

@@ -110,8 +110,12 @@ def test_reachability_fixed_bits_reach_every_block_hard_rows(tiny, options):
 
 
 def test_unknown_options_and_local_config_entries_are_rejected(tmp_path):
-    with pytest.raises(ValueError, match='Unknown option'):
-        load_options({'not_an_option': 1}, config_path=tmp_path/'absent.json')
+    # 已删除的协调与拉格朗日选项同样视为未知，避免旧配置被静默忽略。
+    for name in ('not_an_option', 'max_outer', 'max_inner', 'lagrangian_time_limit', 'lagrangian_max_iterations'):
+        with pytest.raises(ValueError, match='Unknown option'):
+            load_options({name: 1}, config_path=tmp_path/'absent.json')
+    with pytest.raises(ValueError):
+        load_options({'max_rounds': 0}, config_path=tmp_path/'absent.json')
     path = tmp_path/'config.json'
     path.write_text('{"other": {"user_id": "unused"}}', encoding='utf-8')
     with pytest.raises(ValueError, match='Unknown local configuration section'):

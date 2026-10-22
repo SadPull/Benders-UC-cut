@@ -53,7 +53,7 @@ class WholeDay:
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
                                 local_evaluations=[], llm_background_seconds=0., blocks=[], rounds=[],
                                 complete_rounds=0, timings={name: 0. for name in (
-                                    "initialization", "lagrangian", "qubo", "annealing", "repair",
+                                    "initialization", "qubo", "annealing", "repair",
                                     "local_dispatch", "subproblems", "validation", "context", "llm")})
         self.timings = self.diagnostics["timings"]
         self.progress = progress

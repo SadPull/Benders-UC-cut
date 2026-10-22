@@ -37,8 +37,6 @@ LLM_ESCALATION_GAIN = 0.005  # 常规层一次调用降幅低于此比例（0.00
 LLM_ESCALATION_MIN_SECONDS = 700  # 剩余预算扣除预留后不足此秒数时不发起升级请求
 LLM_ESCALATION_TIMEOUT_SECONDS = 1800  # 升级层单次上限；实际还不超过剩余预算扣除预留
 BLOCK_HOURS = 12         # 分块小时数；RCUC20 调参：3 h 块被长最小停机时间锁在块坐标局部最优
-LAGRANGIAN_TIME_LIMIT_SECONDS = 120  # SA 之前拉格朗日阶段的预算，计入搜索预算
-LAGRANGIAN_MAX_ITERATIONS = 50       # 拉格朗日阶段至多迭代次数；0 表示跳过，块搜索直接用 LP 对偶定价
 SA_SWEEPS = 16           # 每个温度对全部位的扫描次数；12 h 块下 16 优于默认 4
 DATA_DIR = "data"        # 算例目录（相对项目根）；其他算例在 instances/<名称>
 
@@ -154,9 +152,6 @@ class ExperimentProgress:
         if llm_row is not None:
             row.update(llm_call_id=llm_row.get("call_id"), llm_tier=llm_row.get("tier"),
                        llm_status=llm_row.get("status"))
-        if event in ("lagrangian_iteration", "lagrangian"):
-            row["lagrangian"] = {key: result.lagrangian.get(key) for key in (
-                "status", "iterations", "serious_steps", "center_value", "bound")}
         with (self.output / "progress.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(jsonable(row), ensure_ascii=False, allow_nan=False) + "\n")
         if improved or event in ("initialization", "final"):
@@ -179,7 +174,6 @@ def build_options(output, folder):
     options = dict(data_file=str(folder / "units.json"), scenario_file=str(folder / "stochastic.json"),
                    seed=SEED, time_limit=TIME_LIMIT_SECONDS, reference_time_limit=REFERENCE_TIME_LIMIT_SECONDS,
                    tolerance=TARGET_GAP_PERCENT / 100, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS, max_rounds=1000000,
-                   lagrangian_time_limit=LAGRANGIAN_TIME_LIMIT_SECONDS, lagrangian_max_iterations=LAGRANGIAN_MAX_ITERATIONS,
                    llm_enabled=LLM_ENABLED, llm_model=LLM_MODEL, llm_patience=LLM_PATIENCE,
                    llm_max_calls=LLM_MAX_CALLS, llm_first_call_at_start=LLM_FIRST_CALL_AT_START,
                    llm_timeout=LLM_TIMEOUT_SECONDS, llm_reserve_seconds=LLM_RESERVE_SECONDS,
@@ -219,8 +213,6 @@ def print_run_settings(checked, codex, escalation):
     print("指标说明：UB 是通过全天物理校验的可行方案成本；"
           "参考差距 = (UB - 参考成本) / |参考成本| × 100%，允许为负；参考成本为零时不计算百分比。", flush=True)
     print("先行参考预算独立；只有通过校验的 OPTIMAL 参考允许按目标提前停止。", flush=True)
-    print(f"SA 之前先做拉格朗日阶段（至多 {LAGRANGIAN_TIME_LIMIT_SECONDS} 秒、{LAGRANGIAN_MAX_ITERATIONS} 次迭代）："
-          "得到的下界只报告、不参与停止，乘子只对块搜索放松的连续耦合跨块行定价。", flush=True)
 
 
 # 汇总搜索与独立参考的状态、差距、计时和调用统计。
@@ -249,7 +241,6 @@ def run_summary(result, checked, progress, dimensions, solver_wall, final_save_s
                 llm_escalation_disabled=result.diagnostics.get('llm_escalation_disabled'),
                 data_dir=DATA_DIR, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS,
                 dispatch_failures=result.diagnostics.get('dispatch_failures', 0),
-                lagrangian={key: value for key, value in result.lagrangian.items() if key != "history"},
                 complete_rounds=result.diagnostics.get('complete_rounds', 0),
                 search_stop_reason=result.diagnostics.get('search_stop_reason'),
                 sa_budget_exhausted=bool(result.diagnostics.get('sa_budget_exhausted')),
@@ -283,13 +274,6 @@ def print_result(result, summary):
               "（(UB - 参考成本) / |参考成本| × 100%）", flush=True)
     else:
         print("主算法 UB 相对 Gurobi 参考成本的差距：无法计算（缺少通过校验的可行成本，或参考成本为零）。", flush=True)
-    dual = result.lagrangian
-    if dual.get("bound") is not None:
-        gap = dual.get("gap_percent_at_end")
-        print(f"拉格朗日下界：{dual['bound']:.6f}（状态 {dual['status']}；LP 松弛界 {dual.get('relaxation_bound')}；"
-              f"相对 UB 差距 {'无法计算' if gap is None else f'{gap:.6f}%'}）；只报告，不参与停止。", flush=True)
-    else:
-        print(f"拉格朗日阶段：{dual['status']}（{dual.get('message', '')}），没有下界。", flush=True)
     print(f"参考与搜索总耗时：{result.total_elapsed_seconds:.2f} 秒", flush=True)
 
 
@@ -313,7 +297,7 @@ def main():
     progress = ExperimentProgress(output)
     print(f"结果目录：{output}", flush=True)
     print_run_settings(checked, codex, escalation)
-    print("运行顺序：先计算 Gurobi 参考，再初始化、做拉格朗日阶段，然后执行分块 SA/LLM 搜索。", flush=True)
+    print("运行顺序：先计算 Gurobi 参考，再初始化并执行分块 SA/LLM 搜索。", flush=True)
     started = perf_counter()
     try:
         result = run_suc(vars(checked), progress=progress, started_at=started,
@@ -329,7 +313,7 @@ def main():
                    search_statistics=result.diagnostics.get("search_statistics", {}),
                    reference={key: value for key, value in result.reference.items()
                               if key not in ("u", "v", "w", "scenarios")},
-                   total_elapsed_seconds=result.total_elapsed_seconds, lagrangian=result.lagrangian,
+                   total_elapsed_seconds=result.total_elapsed_seconds,
                    llm_history=[llm_record(row) for row in result.llm_history])
     save(output / "result.json", compact)
     save(output / "reference.json", result.reference)

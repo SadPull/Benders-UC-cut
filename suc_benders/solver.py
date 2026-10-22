@@ -1,4 +1,4 @@
-"""Compute a reference, maximise the cross-block Lagrangian, then run time-block search and upper advice."""
+"""Compute a reference, then run time-block search and upper advice."""
 # 主循环只安排各阶段的执行顺序、预算与结束状态；候选处理在 search 中。
 from dataclasses import dataclass, field
 from time import perf_counter, sleep
@@ -6,8 +6,7 @@ from types import SimpleNamespace as NS
 
 import numpy as np
 
-from . import lagrangian
-from .model import model, partition, priced, relaxed_rows, search_multipliers
+from .model import model, partition, priced, search_multipliers
 from .optimization import optimize
 from .reference import solve_reference
 from .search import BlockSearch, WholeDay, SABudgetExhausted
@@ -18,14 +17,12 @@ DEADLINE_MARGIN_SECONDS = 5.
 
 
 # objective 是已验证方案费用；reference 是独立参考记录，不用于生成候选。
-# lagrangian 是 SA 之前拉格朗日阶段的记录：其 bound 是有效下界，只报告，不参与停止判断。
 @dataclass
 class Result:
     status: str = "RUNNING"
     message: str = ""
     objective: float = np.inf
     reference: dict = field(default_factory=dict)
-    lagrangian: dict = field(default_factory=lambda: lagrangian.skipped("NOT_REACHED"))
     u: np.ndarray | None = None
     v: np.ndarray | None = None
     w: np.ndarray | None = None
@@ -82,7 +79,7 @@ class _Run:
         return False
 
 
-# 主流程：独立参考 → 初始化 → 拉格朗日阶段 → 分块搜索/建议 → 收尾建议 → 整理结果。
+# 主流程：独立参考 → 初始化 → 分块搜索/建议 → 收尾建议 → 整理结果。
 # 保留阶段名定位失败，并在最终返回前独立复核全天方案。
 def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file=None):
     # started_at 是整体调用起点；搜索预算在参考结束后重新起计。
@@ -114,7 +111,7 @@ def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file
     return result
 
 
-# 连续松弛只用于初始化和初始乘子；初始方案不使用参考解。
+# 连续松弛只用于初始化和块搜索的跨块价格；初始方案不使用参考解。
 def _initialize(run, d, scenarios, progress):
     o, result = run.o, run.result
     m = model(d, scenarios)
@@ -135,104 +132,24 @@ def _initialize(run, d, scenarios, progress):
     return m, relaxation
 
 
-# 块搜索：按小时分块，先由拉格朗日阶段得到乘子中心；块费用只对被松弛的连续耦合跨块行按该中心定价。
+# 块搜索：按小时分块；块费用只对含连续变量的跨块行按连续松弛的对偶价格定价，纯二进制跨块行由 incumbent 代入。
 # 每块建立一个持久 BlockSearch，按轮依次访问全部块，至多 max_rounds 轮；价格固定，块内割和缓存一直有效。
 def _search(run, m, relaxation):
-    o, result, whole = run.o, run.result, run.whole
+    o, whole = run.o, run.whole
     if not o.sa_enabled:
-        result.lagrangian = lagrangian.skipped("SA_DISABLED")
         whole.diagnostics['search_stop_reason'] = 'SA_DISABLED'
         return
-    if result.status == "REFERENCE_TARGET_REACHED":
-        result.lagrangian = lagrangian.skipped("REFERENCE_TARGET_REACHED")
+    if run.result.status == "REFERENCE_TARGET_REACHED":
         return
     with whole.sa_work():
-        blocks, cross = partition(m, o.block_hours)
-        center = _lagrangian(run, m, relaxation, blocks, cross)
-        if result.status == "REFERENCE_TARGET_REACHED":
-            return
         run.stage = "SEARCH_SETUP"
-        prices = search_multipliers(m, cross, center)
+        blocks, cross = partition(m, o.block_hours)
+        prices = search_multipliers(m, cross, relaxation.prices[cross])
         run.searches = [BlockSearch(priced(b, prices), o, j + 1, whole) for j, b in enumerate(blocks)]
     for k in range(1, o.max_rounds + 1):
         if _run_round(run, k):
             return
     whole.diagnostics['search_stop_reason'] = 'MAX_ROUNDS'
-
-
-# 拉格朗日阶段：用精确块预言机和信赖域 bundle 最大化跨块对偶函数，返回乘子中心（初值为 LP 对偶）。
-# 两次预言机调用之间轮询 LLM；可预期的降级只体现在 result.lagrangian 的状态与计数中，违反不变量抛错（LAGRANGIAN_FAILED）。
-def _lagrangian(run, m, relaxation, blocks, cross):
-    o, result, whole = run.o, run.result, run.whole
-    initial = relaxation.prices[cross]
-    if len(blocks) < 2:
-        result.lagrangian = lagrangian.skipped("SINGLE_BLOCK")
-        return initial
-    run.stage = "LAGRANGIAN"
-    state = lagrangian.start(len(blocks), m.eq[cross], initial)
-    fixed = [whole.fixed[b.cols[b.binary]] for b in blocks]
-    ended = perf_counter() + o.lagrangian_time_limit
-    if o.verbose:
-        print(f"[拉格朗日] 跨块约束 {len(cross)} 行（其中块搜索定价的连续耦合行 {int(relaxed_rows(m, cross).sum())} 行）；"
-              f"预算 {o.lagrangian_time_limit:g} 秒，至多 {o.lagrangian_max_iterations} 次迭代；LP 松弛界 {relaxation.lower:.6f}。",
-              flush=True)
-
-    def remaining():
-        return min(ended - perf_counter(), whole.remaining())
-
-    def evaluate(j, lam, seconds):
-        return lagrangian.oracle(blocks[j], fixed[j], lam, seconds, whole.best.point)
-
-    # 在预言机调用之间推进 LLM；轮询期间的失败归到 ADVISOR 阶段。
-    def poll():
-        run.stage = "ADVISOR"
-        whole.advice.advance([])
-        run.stage = "LAGRANGIAN"
-        return run.target_reached()
-
-    def report(state):
-        result.lagrangian = _lagrangian_record(state, relaxation, m, cross)
-        if o.verbose and state.history:
-            row = state.history[-1]
-            print(f"[拉格朗日] 第 {row['iteration']} 次：{'严格步' if row['step'] == 'serious' else '空步'}，"
-                  f"候选对偶值={row['value']:.6f}，中心对偶值={row['center_value']:.6f}，下界={row['bound']:.6f}，"
-                  f"预测增益={row['predicted']:.6f}，盒半径={row['radius']:.6g}", flush=True)
-        whole.emit("lagrangian_iteration")
-
-    try:
-        lagrangian.maximize(state, evaluate, iterations=o.lagrangian_max_iterations,
-                            remaining=remaining, poll=poll, report=report)
-    finally:
-        if state.status == "RUNNING":
-            state.status, state.message = "FAILED", "exception during the Lagrangian phase"
-        result.lagrangian = _lagrangian_record(state, relaxation, m, cross)
-        whole.timings["lagrangian"] += state.oracle_seconds + state.master_seconds
-    whole.emit("lagrangian")
-    if o.verbose:
-        record = result.lagrangian
-        print(f"[拉格朗日完成] 状态={record['status']} 下界={record['bound']} LP 松弛界={record['relaxation_bound']} "
-              f"迭代={record['iterations']}（严格步 {record['serious_steps']}，空步 {record['null_steps']}） "
-              f"乘子最大变化={record['multiplier_change']:.6g}，块搜索定价行={record['search_priced_rows']}", flush=True)
-        if _lagrangian_degraded(record):
-            print(f"[拉格朗日降级] 状态={record['status']} {record['message']} 预言机失败={record['oracle_failures']} "
-                  f"LP 失败={record['master_failures']} 非精确预言机结果={record['inexact_oracle_results']}", flush=True)
-    return state.center
-
-
-# 拉格朗日记录加上 LP 松弛界、被松弛的连续耦合行数和块搜索实际定价（乘子超过噪声阈值）的行数。
-def _lagrangian_record(state, relaxation, m, cross):
-    record = lagrangian.record(state)
-    record.update(relaxation_bound=float(relaxation.lower) if np.isfinite(relaxation.lower) else None,
-                  relaxed_rows=int(relaxed_rows(m, cross).sum()),
-                  search_priced_rows=int(np.count_nonzero(np.abs(search_multipliers(m, cross, state.center)) > lagrangian.NONZERO)))
-    return record
-
-
-# 收敛和迭代上限是正常结束；其他状态或任何失败、非精确结果都要醒目报告。
-def _lagrangian_degraded(record):
-    return (record["status"] not in ("CONVERGED", "ITERATION_LIMIT", "NOT_RUN")
-            or bool(record.get("oracle_failures")) or bool(record.get("master_failures"))
-            or bool(record.get("inexact_oracle_results")))
 
 
 # 一个完整遍历轮：每块各采样一批。返回 True 表示达到参考目标、不再继续轮询。
@@ -343,7 +260,7 @@ def _shutdown(run):
     whole.advice.close()
 
 
-# 独立复核最终方案，参考差距由 Result 随当前方案计算；有效拉格朗日下界不能高于已校验 UB，否则说明下界或 UB 有误。
+# 独立复核最终方案，参考差距由 Result 随当前方案计算。
 def _finalize(run, d, scenarios):
     o, result, whole = run.o, run.result, run.whole
     for search in run.searches:
@@ -352,12 +269,6 @@ def _finalize(run, d, scenarios):
         result.validation = validate(d, scenarios, result)
         if not result.validation['feasible']:
             result.status, result.message = "VALIDATION_FAILED", "Final schedule failed validation"
-    bound = result.lagrangian.get("bound")
-    if bound is not None and np.isfinite(result.objective):
-        result.lagrangian.update(upper_at_end=result.objective,
-                                 gap_percent_at_end=100*(result.objective-bound)/max(1., abs(result.objective)))
-        if bound > result.objective + 1e-6*max(1., abs(result.objective)):
-            result.status, result.message = "LAGRANGIAN_FAILED", "Lagrangian bound exceeds the validated UB"
     if whole is not None:
         whole.diagnostics['search_statistics'] = whole.search_statistics()
     result.elapsed_seconds = perf_counter() - run.started
@@ -374,7 +285,5 @@ def _finalize(run, d, scenarios):
               f"参考成本={result.reference_cost}, "
               f"参考差距(%)={result.reference_gap_percent}, 搜索耗时={result.elapsed_seconds:.2f}秒", flush=True)
         failures = result.diagnostics.get("dispatch_failures", 0)
-        if failures or _lagrangian_degraded(result.lagrangian):
-            print(f"[降级汇总] 调度数值失败 {failures} 次；拉格朗日状态 {result.lagrangian['status']}，"
-                  f"预言机失败 {result.lagrangian.get('oracle_failures', {})}，LP 失败 {result.lagrangian.get('master_failures', {})}，"
-                  f"非精确预言机结果 {result.lagrangian.get('inexact_oracle_results', 0)} 次。", flush=True)
+        if failures:
+            print(f"[降级汇总] 调度数值失败 {failures} 次（只拒绝对应候选）。", flush=True)
