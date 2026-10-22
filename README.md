@@ -1,8 +1,8 @@
 # LLM Benders SUC
 
-Python 机组组合求解器：先用 Gurobi 求完整模型的参考方案，再以精确块子问题和信赖域 bundle 最大化跨时间块的拉格朗日对偶（得到只报告的有效下界和块搜索价格），然后由时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步候选。全局评价采用相对参考成本的差距。
+Python 机组组合求解器：先用 Gurobi 求完整模型的参考方案，再由时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步候选。全局评价采用相对参考成本的差距；项目不计算下界。
 
-v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
+v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
 
 当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
 
@@ -30,22 +30,22 @@ LLM 每个候选只列出与 `incumbent_u` 不同的机组及其全天开机区�
 
 入口每次从零开始，先用最多 120 秒独立预算求参考解，再给搜索完整的 7200 秒预算，seed 17、目标参考成本差距 0.1%。参考方案经过独立物理与费用校验；只有状态为 `OPTIMAL` 的有效参考才允许提前停止。仅有未证最优的可行参考时只比较、不据此提前停止；参考失败或没有有效方案时仍继续搜索，参考成本和差距为空。参考方案不用于初始化、候选注入，参考成本不加入 LLM 提示。v0.36.0 起删除了续跑（`RESUME_FROM`），续跑旧实验请使用对应归档版本。
 
-参考差距为 `100 × (UB - reference_cost) / abs(reference_cost)`，允许负数；参考成本为零时百分比为空。停止要求有效 `OPTIMAL` 参考，且 `UB - reference_cost <= 1e-5 + tolerance × abs(reference_cost)`；零参考成本只用绝对容差。达到目标记为 `REFERENCE_TARGET_REACHED`，搜索轮次或 SA 配额耗尽并收尾当前 LLM 工作后记为 `SEARCH_EXHAUSTED`（`search_stop_reason` 为 `MAX_ROUNDS`、`SA_BUDGET` 或 `SA_DISABLED`），只有截止时间信号（`TimeoutError`）记为 `TIME_LIMIT`；其他异常无论是否已过截止时间都记为 `<阶段>_FAILED`（阶段为 `INITIALIZATION`、`LAGRANGIAN`、`SEARCH_SETUP`、`ROUND_<k>_BLOCK_<j>`、`ADVISOR`），拉格朗日不变量被违反或下界高于最终已校验 UB 时为 `LAGRANGIAN_FAILED`。没有待处理工作时不空等剩余预算。
+参考差距为 `100 × (UB - reference_cost) / abs(reference_cost)`，允许负数；参考成本为零时百分比为空。停止要求有效 `OPTIMAL` 参考，且 `UB - reference_cost <= 1e-5 + tolerance × abs(reference_cost)`；零参考成本只用绝对容差。达到目标记为 `REFERENCE_TARGET_REACHED`，搜索轮次或 SA 配额耗尽并收尾当前 LLM 工作后记为 `SEARCH_EXHAUSTED`（`search_stop_reason` 为 `MAX_ROUNDS`、`SA_BUDGET` 或 `SA_DISABLED`），只有截止时间信号（`TimeoutError`）记为 `TIME_LIMIT`；其他异常无论是否已过截止时间都记为 `<阶段>_FAILED`（阶段为 `INITIALIZATION`、`SEARCH_SETUP`、`ROUND_<k>_BLOCK_<j>`、`ADVISOR`）。没有待处理工作时不空等剩余预算。
 
-SA 之前先运行拉格朗日阶段（`LAGRANGIAN_TIME_LIMIT_SECONDS` 默认 120 秒、`LAGRANGIAN_MAX_ITERATIONS` 默认 50 次，计入搜索预算与 SA 配额，期间轮询 LLM），见下文“跨块协调”。之后每块建立一个持久块搜索，整个运行不重建，块内割与调度缓存跨轮保留；每轮遍历全部时间块，每块采样一批 SA（`max_rounds` 限制轮数，入口不限）：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`）；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
+初始化后每块建立一个持久块搜索，整个运行不重建，块内割与调度缓存跨轮保留；每轮遍历全部时间块，每块采样一批 SA（`max_rounds` 限制轮数，入口不限）：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。`LLM_FIRST_CALL_AT_START=True` 时初始化后立即发首个请求，之后连续 `LLM_PATIENCE` 个完整轮改善不足 0.05% 时触发；`LLM_MAX_CALLS=None` 取消全局次数上限，单次最多 `LLM_TIMEOUT_SECONDS` 秒、预留 60 秒。剩余时间不足完整等待窗口时不新发请求，已有在途请求仍正常处理。Codex 后续调用续接同一会话，只发送动态快照（`prompt_mode=delta`）；HTTP 通道每次发送完整提示。会话失效或连续两次失败时先新开一次会话，再失败则停用 LLM，剩余预算继续 SA。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
 
 结果自动写入新建的 `results/manual-seed.../`：
 
-- `summary.json`：状态、UB、参考元数据、`reference_gap_percent`、耗时和统计；`lagrangian` 为拉格朗日阶段记录（不含逐次历史），另有 `complete_rounds`、`search_stop_reason`、`sa_budget_exhausted`。
-- `result.json`：精简主结果、最终方案、计时与调用摘要（含每次 LLM 调用的 usage 与回复原文），以及含逐次历史的 `lagrangian`。
+- `summary.json`：状态、UB、参考元数据、`reference_gap_percent`、耗时和统计，以及 `complete_rounds`、`search_stop_reason`、`sa_budget_exhausted`。
+- `result.json`：精简主结果、最终方案、计时与调用摘要（含每次 LLM 调用的 usage 与回复原文）。
 - `reference.json`：先行参考求解的状态、完整方案、校验和独立耗时；失败时保留原因。`gurobi_bound`／`gurobi_gap_percent` 是 Gurobi 自身的界与间隙，只说明参考离最优多远，不参与停止判断。
 - `llm_requests/`：Codex 通道或升级层实际触发时的请求、提示、命令行、事件流与回执（不含登录信息）。
 - `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、SHA256、依赖版本和脱敏后的完整有效配置。
-- `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案；最新方案不含搜索状态。`lagrangian_iteration`／`lagrangian` 事件行带有阶段状态、迭代数、严格步数、中心对偶值与下界。
+- `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案；最新方案不含搜索状态。
 
 不保存全量检查点，也不序列化全部历史采样；记录开销与最终保存耗时单列。
 
-当前主结果删除全局 `lower_bound`／`lower`、`relative_gap`／`gap_percent` 和 `certification_history`；`lagrangian.bound` 是 Gurobi 容差内有效的拉格朗日下界，只报告，不是已删除的认证下界，也不参与停止。`Result.reference` 保留完整参考记录，`reference_cost` 与 `reference_gap_percent` 是随当前已验证方案计算的只读属性。进度和最新方案同时带有 `reference_status`。`elapsed_seconds`／`solver_elapsed_seconds` 只计搜索，`reference_elapsed_seconds` 单列参考耗时，`total_elapsed_seconds` 计两段总耗时。历史 `results/`、`archives/` 和源码快照不迁移，旧分析脚本需适配新字段与状态。
+当前主结果删除全局 `lower_bound`／`lower`、`relative_gap`／`gap_percent` 和 `certification_history`，不计算下界：SA 只能给出上界，项目历史上的各种下界（连续松弛、精确 Benders 主问题、拉格朗日）都由 Gurobi 求得，评价直接使用 Gurobi 参考成本。`Result.reference` 保留完整参考记录，`reference_cost` 与 `reference_gap_percent` 是随当前已验证方案计算的只读属性。进度和最新方案同时带有 `reference_status`。`elapsed_seconds`／`solver_elapsed_seconds` 只计搜索，`reference_elapsed_seconds` 单列参考耗时，`total_elapsed_seconds` 计两段总耗时。历史 `results/`、`archives/` 和源码快照不迁移，旧分析脚本需适配新字段与状态。
 
 manifest、精简结果及运行诊断记录 `sa_backend` 与 `sa_initialization`（当前为 `random_sa_repair_v1`）。采样诊断包含 beta 序列，以及每条链的原始／实际种子、退火终态与 QUBO 能量；全天提议记录只保存原始方案的 SHA256 与固定位违例数，只有 LLM 提议另存 `raw_u`／`repaired_u` 以生成反馈。这些诊断可经 `run_suc` 返回对象读取，不自动全量落盘。
 
@@ -63,8 +63,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 ## 核心文件
 
-- `suc_benders/solver.py`：结果类型与主循环，安排参考、初始化、拉格朗日阶段、分块轮询和建议。
-- `suc_benders/lagrangian.py`：精确块拉格朗日子问题（预言机）与盒式信赖域 bundle。
+- `suc_benders/solver.py`：结果类型与主循环，安排参考、初始化、分块轮询和建议。
 - `suc_benders/model.py`：稀疏模型、按小时分块（`partition`）、跨块定价（`priced`、`relaxed_rows`、`search_multipliers`）。
 - `suc_benders/search.py`：持久的原始块搜索及共享的全天候选修复、调度、校验、去重和预算。
 - `suc_benders/benders.py`：离散可行性检查、固定二进制后的连续调度与 Benders 割、块内硬约束行（`hard_rows`）。
@@ -75,37 +74,43 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `tests/`：当前分块主线的必要回归；执行 `py -3.10 -m pytest -q tests`。
 - `config.local.json`、`.local/*.lic`：仅本地保留的授权配置。
 
-主线顺序：输入建模 → 独立参考求解 → 连续松弛与初始可行解 → 拉格朗日阶段（精确块子问题 + 信赖域 bundle）→ 固定价格的持久分块 SA 轮询 → 全天修复/调度/校验。LLM 异步提供候选；仅全天验证通过的方案能更新 UB。拉格朗日下界只报告，不作为停止证书。
+主线顺序：输入建模 → 独立参考求解 → 连续松弛与初始可行解 → 固定价格的持久分块 SA 轮询 → 全天修复/调度/校验。LLM 异步提供候选；仅全天验证通过的方案能更新 UB。
 
-**跨块协调**：跨块行指变量落在不同时间块的约束。拉格朗日阶段松弛全部跨块行，从 LP 对偶出发，每次迭代对每块精确求解一次块子问题（Gurobi MIQP，全天推出的固定位作为变量界，IntFeasTol 1e-9）；平面只来自这些块最优点，盒式信赖域 Kelley 方法按严格步／空步移动中心，预测增益很小且盒约束行对偶为零时才判为收敛，否则先扩盒。每块的界取 Gurobi ObjBound 再扣 1e-5，各块之和即有效下界。预言机检查不变量（子问题不可能不可行、块界不高于 incumbent 切片、取整后的点满足块约束与固定位、平面在生成它的乘子处与目标一致、已存平面不低于块界），违反即 `LAGRANGIAN_FAILED`；时间上限、数值状态、LP 失败等降级只停止 bundle 并保留中心，记入 `lagrangian` 的状态与计数，并以 `[拉格朗日降级]` 醒目打印。块搜索只对**含连续变量的跨块行**（跨边界爬坡、块末停机容量、冷启动窗口）按中心定价；纯二进制跨块行（状态转移、最小开停机）价格为 0，由 incumbent 代入后作为块内硬约束。只有一个块时跳过（`SINGLE_BLOCK`）。
+**跨块协调**：跨块行指变量落在不同时间块的约束。块之间不做乘子迭代，而是围绕当前最优全天方案（incumbent）做块坐标搜索：纯二进制跨块行（状态转移、最小开停机）把块外变量代入 incumbent 后作为块内硬约束；含连续变量的跨块行（跨边界爬坡、块末停机容量、冷启动窗口）在块费用中按初始化时连续松弛的对偶价格定价（`search_multipliers`），价格整个运行不变。块内候选一律经全天修复、调度和校验后才能更新 UB。
 
-块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取 incumbent 处最紧最优性割的线性代理，不含 theta 与最优性割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。QUBO 只编码 anchor 处松弛量最小的 64 条可行割，每块至多保存 4096 条割（先进先出，丢弃数记入 `cuts_dropped`），块内缓存只存紧凑记录，使 QUBO 规模与内存不随轮数增长；回报给 LLM 的割数是累计数。LLM 回复返回时若 incumbent 已变化，其相对请求快照改动的机组行会先整体、再逐台移植到当前 incumbent（来源 `llm_rebase`）。没有块搜索时（如拉格朗日阶段内消费的回复），候选的局部可行性记为未知。
+块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取 incumbent 处最紧最优性割的线性代理，不含 theta 与最优性割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。QUBO 只编码 anchor 处松弛量最小的 64 条可行割，每块至多保存 4096 条割（先进先出，丢弃数记入 `cuts_dropped`），块内缓存只存紧凑记录，使 QUBO 规模与内存不随轮数增长；回报给 LLM 的割数是累计数。LLM 回复返回时若 incumbent 已变化，其相对请求快照改动的机组行会先整体、再逐台移植到当前 incumbent（来源 `llm_rebase`）。没有块搜索时（如关闭 SA 后收尾阶段消费的回复），候选的局部可行性记为未知。
 
 每批只有一个搜索 QUBO，直接由稀疏 Q 构造 BINARY BQM，合并 `Qij+Qji`，不生成稠密 Ising 矩阵。每条链由采样器根据种子生成随机初态，每次一个 read。退火终态恢复固定变量后，先进行原始块候选评价／割学习，再走既有全天修复、调度和独立校验；通过校验才可更新 UB。温度从 `sa_temperature*energy_unit` 起逐次乘 `sa_cooling`，严格高于 `sa_cutoff*energy_unit` 时执行，倒数作为自定义 beta；每级执行 `sa_sweeps` 次顺序 Metropolis 扫描。[采样器 API](https://docs.dwavequantum.com/en/latest/ocean/api_ref_samplers/generated/dwave.samplers.SimulatedAnnealingSampler.sample.html)
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
 
-## 拉格朗日协调重构（分支 `refactor/lagrangian-phase`，未发布）
+## v1.0.0 跨块协调清理与封存
 
-重构前的代码已封存为标签 `archive-20261022-pre-lagrangian`（3d3fa3e）。
+2026-10-22。重构前的代码封存为标签 `archive-20261022-pre-lagrangian`（3d3fa3e），v1.0.0 为本次封存版本。
 
-**原有缺陷**：跨块拉格朗日协调从未更新过乘子。探针（seed 17、12 h 分块、关闭 LLM）中 RCUC20 52/52 次、IEEE118 29/29 次协调均为 `CAPPED`，2026-10-21 的 IEEE118 运行 44/44 次同样如此，乘子始终停在 LP 对偶。根因是块搜索同时承担两份工作：协调平面来自边界固定为 incumbent 的 SA／修复点，而不是块拉格朗日子问题的最优点，切平面模型在 λ₀ 处高估真实对偶值 2–7.5%（RCUC20 3,139,365 对 3,031,355；IEEE118 3,947,561 对 3,670,736），始终高于 UB 而被截顶。此外：外层重建清空割和缓存（平面 718 条中只有 38 条不同）；块内上下界差距 3–21%，从未闭合；L1 乘子选择以 0 为中心，即使接受也会降低对偶值（RCUC20 −6.7%）；`dual_lower` 只是 LP 级界且不落盘。
+**原有缺陷**：跨块拉格朗日协调从未更新过乘子。探针（seed 17、12 h 分块、关闭 LLM）中 RCUC20 52/52 次、IEEE118 29/29 次协调均为 `CAPPED`，2026-10-21 的 IEEE118 运行 44/44 次同样如此，乘子始终停在 LP 对偶。根因是协调平面来自边界固定为 incumbent 的 SA／修复点，而不是块拉格朗日子问题的最优点，切平面模型高估真实对偶值 2–7.5%，始终高于 UB 而被截顶。此外：外层重建清空割和缓存；块内上下界从未闭合，闭合跳过是死代码；L1 乘子选择即使接受也会降低对偶值。v0.33.0 两段共 11 次协调也全部 `CAPPED`；有记录的运行实际都在固定的 LP 对偶价格下搜索。
 
-**现在的做法**：见上文“跨块协调”。删除 `benders.coordinate`、外层循环、块上下界与闭合跳过、`planes`、`outer_history`、`coordination_upper`；`master()` 改为只含硬约束行的 `hard_rows()`（固定位与无割块 QUBO 在四个算例上与旧代码逐字一致）；`max_outer`／`max_inner` 改为 `max_rounds`，新增 `lagrangian_time_limit`、`lagrangian_max_iterations`。顺带修正：只有 `TimeoutError` 记为 `TIME_LIMIT`；没有块搜索时 LLM 候选的局部可行性不再空真为 True；`partition` 拒绝空行；`optimize` 的 `IntFeasTol` 改为显式参数。
+**试验过的修复及删除原因**：开发分支曾用 Gurobi 精确求解块子问题、以盒式信赖域 bundle 更新乘子（提交 62b8deb、a8100fb），乘子确实移动，下界在 RCUC20、classic10 上等于参考最优值，IEEE118 上差 0.043%。但块子问题全部由 Gurobi 求解，价格和下界都是经典计算的结果，与 SA 无关；IEEE118 上该阶段 119 秒仍未收敛，而 Gurobi 直接求完整问题只需 9.7 秒（RCUC20 0.8 秒、classic10 4.4 秒）；单种子冒烟中也看不出它对 UB 有帮助。SA 只能给出上界，项目中所有下界都来自 Gurobi，因此 v1.0.0 删除拉格朗日阶段，评价直接使用 Gurobi 参考成本。实现保留在 Git 历史中。
 
-**冒烟验证**（2026-10-22，seed 17、12 h 分块、16 sweeps、关闭 LLM、搜索 600 秒，与封存版本成对；单种子单次运行）：
+**v1.0.0 的改动**：
+- 删除 `benders.coordinate`、外层循环、块上下界与闭合跳过、`planes`、`outer_history`、`coordination_upper`；`master()` 改为只含硬约束行的 `hard_rows()`（固定位与无割块 QUBO 在四个算例上与旧代码逐字一致）。
+- 每块一个持久块搜索，割与调度缓存跨轮保留；QUBO 只编码 anchor 处松弛量最小的 64 条可行割，每块至多保存 4096 条割，缓存只存紧凑记录（不设上限时 RCUC20 的 QUBO 在 90 秒内由 361 位涨到 2227 位）。
+- 块搜索价格只作用于含连续变量的跨块行；纯二进制跨块行价格为 0（旧代码对两类行都按 LP 对偶定价）。
+- 选项 `max_outer`／`max_inner` 改为 `max_rounds`；旧选项名视为未知选项。
+- 修正：只有 `TimeoutError` 记为 `TIME_LIMIT`，截止时间之后的其他异常不再被掩盖；没有块搜索时 LLM 候选的局部可行性不再空真为 True；`partition` 拒绝没有系数的行；`optimize` 的 `IntFeasTol` 改为显式参数，不再由 `mip_focus` 隐式修改。
 
-| 算例 | 封存版本 UB 差距 | 重构后 UB 差距 | 拉格朗日阶段 | 下界距参考最优 | LP 界距参考最优 |
-|---|---:|---:|---|---:|---:|
-| RCUC20 | +0.903% | +0.711% | 收敛，4 次迭代，1.9 秒 | 0.000% | 4.867% |
-| classic10 | +4.285% | +4.420% | 收敛，1 次（λ₀ 已最优），0.7 秒 | 0.000% | 1.029% |
-| IEEE118 派生 | +7.515% | +8.165% | 时间上限，19 次（严格步 3），119 秒 | 0.043% | 1.969% |
+**冒烟验证**（seed 17、12 h 分块、16 sweeps、关闭 LLM、搜索 600 秒、三个算例并行运行；单种子单次运行，UB 差异不能据此判断优劣）：
 
-- 下界全部满足 LP 界 ≤ 下界 ≤ 参考最优。预言机计入全天推出的固定位后，RCUC20 的 λ₀ 对偶值由 3,031,355 升到 3,061,439，收敛后对偶间隙为 0。
-- 割上限生效：RCUC20 每次 SA 的 QUBO 平均 804→889 位、0.22 秒，不随轮次增长（未设上限时 90 秒内由 361 位涨到 2227 位）；classic10 在可行割达到 64 条前由 763 位升到 1001 位。
-- 同一设置运行两次，UB、提议序列与拉格朗日记录完全一致；IEEE118 把拉格朗日预算设为 2 秒时状态为 `TIME_LIMIT`，下界仍有效并醒目报告，搜索照常继续。
-- UB 差异来自单次运行，不能据此判断优劣；IEEE118 的拉格朗日阶段占用了 600 秒中的 120 秒。
-- 离线观察（尚未接入主流程）：RCUC20 和 classic10 上，把收敛中心处各块预言机点的开机状态拼成全天方案，经修复、全天调度和校验后正好是参考最优值；RTS-24 修复 11 位后比下界高 1.3%；IEEE118 拼接方案调度不可行。
+| 算例 | 封存版本 UB 差距 | 拉格朗日版本（已删除） | v1.0.0 UB 差距 | v1.0.0 SA 调用 | v1.0.0 状态 |
+|---|---:|---:|---:|---:|---|
+| RCUC20 | +0.903% | +0.710% | +0.710% | 747 | TIME_LIMIT |
+| classic10 | +4.285% | +4.420% | +4.420% | 724 | TIME_LIMIT |
+| IEEE118 派生 | +7.515% | +8.165% | +7.767% | 229 | TIME_LIMIT |
+
+- RCUC20、classic10 上 v1.0.0 与拉格朗日版本的提议序列不同（少了拉格朗日阶段，SA 调用更多），但停在相同的 UB。
+- 每次 SA 的 QUBO 位数有界：前后各十分之一调用的平均位数 RCUC20 805→891、classic10 766→999、IEEE118 1946→2069；全部运行没有调度数值失败。
+
+机器可读汇总见 [archives/v1.0.0.json](archives/v1.0.0.json)。[v1.0.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.0.0) 提供发布提交对应的 `core-source-v1.0.0.zip`、实验归档 `experiment-archive-v1.0.0.zip`（重构用脚本、上述冒烟运行、离线探针与 v0.36.0 清理时的回归脚本）、逐文件 SHA256 清单 `archive-manifest-v1.0.0.json` 和资产校验和 `SHA256SUMS.txt`；[archive-20261022-pre-lagrangian Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/archive-20261022-pre-lagrangian) 提供重构前源码与协调排查探针。本地 `tmp/`、`releases/` 已在资产下载校验后清理，`results/` 未变动。
 
 ## v0.36.0 升级层、IEEE118 补跑与代码清理
 

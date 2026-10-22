@@ -1,0 +1,173 @@
+{
+ "version": "v1.0.0",
+ "date": "2026-10-22",
+ "release_url": "https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.0.0",
+ "sealed_predecessor": {
+  "tag": "archive-20261022-pre-lagrangian",
+  "commit": "3d3fa3e",
+  "release_url": "https://github.com/SadPull/LLM-benders-SUC/releases/tag/archive-20261022-pre-lagrangian"
+ },
+ "changes": [
+  "Removed cross-block Lagrangian coordination (benders.coordinate), the outer loop, block lower/upper bounds and closure skipping, planes, outer_history and coordination_upper; master() became hard_rows() (fixed bits and cut-free block QUBOs byte-identical to 3d3fa3e on four instances)",
+  "One persistent BlockSearch per block for the whole run; cuts and dispatch cache survive across rounds",
+  "Bounded retention: the QUBO encodes at most 64 feasibility cuts (least slack at the anchor), each block stores at most 4096 cuts FIFO, the cache keeps compact records",
+  "Block-search prices apply only to cross rows with continuous columns (ramp, end-of-block shutdown capacity, cold start), at the continuous-relaxation duals; pure-binary cross rows are priced 0 and enforced through the incumbent",
+  "Options max_outer/max_inner replaced by max_rounds; removed option names are rejected as unknown",
+  "Only TimeoutError maps to TIME_LIMIT; LLM local feasibility is None without block searches; partition rejects rows without coefficients; optimize takes IntFeasTol explicitly",
+  "An exact-oracle Lagrangian phase (Gurobi block MIQP + box trust-region bundle) was implemented and then removed; it remains in Git history (62b8deb, a8100fb)"
+ ],
+ "findings": {
+  "coordination_defect": "Old coordination was CAPPED on every recorded call (RCUC20 probe 52/52, IEEE118 probe 29/29, 2026-10-21 IEEE118 run 44/44, v0.33.0 11/11); multipliers never left the LP duals because planes came from SA/repair points, not block minimizers, so the cutting-plane model overestimated the dual by 2-7.5%",
+  "lagrangian_bound": "With exact Gurobi block oracles the Lagrangian bound equalled the reference optimum on RCUC20 and classic10 and was 0.043% below it on IEEE118 (TIME_LIMIT after 119 s, 19 iterations)",
+  "gurobi_full_solve_seconds": {
+   "rcuc20": 0.81,
+   "classic10": 4.35,
+   "ieee118": 9.7
+  },
+  "removal_reason": "Every lower bound in the project (continuous relaxation, exact Benders master, Lagrangian) is computed by Gurobi; SA only yields upper bounds. The Lagrangian phase was slower than solving the full problem with Gurobi and showed no UB benefit, so v1.0.0 evaluates against the Gurobi reference only",
+  "unbounded_qubo_growth": "Without the cut cap, persistent RCUC20 block QUBOs grew from 361 to 2227 bits within 90 s (SA call 0.07 s -> 0.62 s)"
+ },
+ "experiments": [
+  {
+   "instance": "instances/rcuc20",
+   "code": "archive-20261022-pre-lagrangian (3d3fa3e)",
+   "status": "TIME_LIMIT",
+   "upper": 3096509.7540691784,
+   "reference": 3068785.384105565,
+   "reference_gap_percent": 0.9034313740937587,
+   "sa_calls": 651,
+   "complete_rounds": 325,
+   "file": "experiment-archive-v1.0.0/tmp/refactor/runs/base-rcuc20-600.json"
+  },
+  {
+   "instance": "instances/rcuc20",
+   "code": "Lagrangian phase, removed (c1f8e0d)",
+   "status": "TIME_LIMIT",
+   "upper": 3090589.049002381,
+   "reference": 3068785.384105565,
+   "reference_gap_percent": 0.7104981993770464,
+   "sa_calls": 733,
+   "complete_rounds": 366,
+   "file": "experiment-archive-v1.0.0/tmp/refactor/runs/new-rcuc20-600.json",
+   "lagrangian_status": "CONVERGED",
+   "lagrangian_bound": 3068785.3840855667,
+   "lagrangian_seconds": 1.885998899997503
+  },
+  {
+   "instance": "instances/rcuc20",
+   "code": "v1.0.0",
+   "status": "TIME_LIMIT",
+   "upper": 3090589.049002381,
+   "reference": 3068785.384105565,
+   "reference_gap_percent": 0.7104981993770464,
+   "sa_calls": 747,
+   "complete_rounds": 373,
+   "file": "experiment-archive-v1.0.0/tmp/release/runs/v1-rcuc20-600.json"
+  },
+  {
+   "instance": "instances/classic10",
+   "code": "archive-20261022-pre-lagrangian (3d3fa3e)",
+   "status": "TIME_LIMIT",
+   "upper": 582727.2364875001,
+   "reference": 558785.020094375,
+   "reference_gap_percent": 4.284691881876405,
+   "sa_calls": 750,
+   "complete_rounds": 374,
+   "file": "experiment-archive-v1.0.0/tmp/refactor/runs/base-classic10-600.json"
+  },
+  {
+   "instance": "instances/classic10",
+   "code": "Lagrangian phase, removed (c1f8e0d)",
+   "status": "TIME_LIMIT",
+   "upper": 583484.214294922,
+   "reference": 558785.020094375,
+   "reference_gap_percent": 4.420160403794544,
+   "sa_calls": 714,
+   "complete_rounds": 356,
+   "file": "experiment-archive-v1.0.0/tmp/refactor/runs/new-classic10-600.json",
+   "lagrangian_status": "CONVERGED",
+   "lagrangian_bound": 558785.0200743679,
+   "lagrangian_seconds": 0.6607472999967285
+  },
+  {
+   "instance": "instances/classic10",
+   "code": "v1.0.0",
+   "status": "TIME_LIMIT",
+   "upper": 583484.214294922,
+   "reference": 558785.020094375,
+   "reference_gap_percent": 4.420160403794544,
+   "sa_calls": 724,
+   "complete_rounds": 362,
+   "file": "experiment-archive-v1.0.0/tmp/release/runs/v1-classic10-600.json"
+  },
+  {
+   "instance": "data (IEEE118-derived)",
+   "code": "archive-20261022-pre-lagrangian (3d3fa3e)",
+   "status": "TIME_LIMIT",
+   "upper": 3948959.480359558,
+   "reference": 3672938.4986727764,
+   "reference_gap_percent": 7.514990566450333,
+   "sa_calls": 172,
+   "complete_rounds": 85,
+   "file": "experiment-archive-v1.0.0/tmp/refactor/runs/base-data-600.json"
+  },
+  {
+   "instance": "data (IEEE118-derived)",
+   "code": "Lagrangian phase, removed (c1f8e0d)",
+   "status": "TIME_LIMIT",
+   "upper": 3972817.547533586,
+   "reference": 3672938.4986727764,
+   "reference_gap_percent": 8.164554047642552,
+   "sa_calls": 179,
+   "complete_rounds": 89,
+   "file": "experiment-archive-v1.0.0/tmp/refactor/runs/new-data-600.json",
+   "lagrangian_status": "TIME_LIMIT",
+   "lagrangian_bound": 3671372.511432771,
+   "lagrangian_seconds": 119.72564260001673
+  },
+  {
+   "instance": "data (IEEE118-derived)",
+   "code": "v1.0.0",
+   "status": "TIME_LIMIT",
+   "upper": 3958221.5461348905,
+   "reference": 3672938.4986727764,
+   "reference_gap_percent": 7.767161022848646,
+   "sa_calls": 229,
+   "complete_rounds": 114,
+   "file": "experiment-archive-v1.0.0/tmp/release/runs/v1-data-600.json"
+  }
+ ],
+ "limitations": [
+  "Single seed (17) and a single 600 s run per group, three instances run in parallel; UB differences are not evidence of better or worse",
+  "The three code versions differ in several ways at once (coordination removal, persistent searches, cut cap, pricing rule)",
+  "Reference optima are used only for after-the-fact comparison"
+ ],
+ "assets": [
+  "core-source-v1.0.0.zip",
+  "experiment-archive-v1.0.0.zip",
+  "archive-manifest-v1.0.0.json",
+  "SHA256SUMS.txt"
+ ],
+ "runtime_source_sha256": {
+  "run_experiment.py": "db06feb4ccbe749f86f9c3001c61f975ecb33be5d69a3c565d50d3c594d60d71",
+  "run_suc.py": "bf7490809ee19d3ed16a3522291438c5f087db8bc1fd8f3e7a6da102d5e30728",
+  "suc_benders/__init__.py": "502308daf982b32aa416f1be1267945c625288483240e9b612b76e26f3658a8d",
+  "suc_benders/advisor_request.py": "62fc2617f288211043c83f9b58fb883c99b5a44fbf0797320aa3b810854dc3fe",
+  "suc_benders/anneal.py": "9bf2aa35cf397e7f205288138acf2cb04f53e4b223a085308af54573b0c1954f",
+  "suc_benders/benders.py": "f94d7f50d1f96e21e27e0657773d72130d3495a5ccaeac30d2fa43c7d06a12d1",
+  "suc_benders/config.py": "59059b046819667f2c59d42e5d709dc15a02d992a74d53eeb4ede1349effbbdf",
+  "suc_benders/context.py": "4bd5696d26c091c5ab915d283bf273900599895d7b949e671c9ae34cbbeb3cd4",
+  "suc_benders/data.py": "2a036c1b1a8d745f9cd24861e15e3a8450bf9982ba4074fada104daa2eef0464",
+  "suc_benders/llm.py": "0d3e792b5aeca85aabe3f96c5a6aaaf0696e9c6df9604e0fd13a466bad09f55c",
+  "suc_benders/model.py": "bba90162aaf3d733d83ac3eddbb09730a8a9d5313202d9e53fe4019b3e72774c",
+  "suc_benders/optimization.py": "d03ac122f0c3c512f7adae8772f04566371aba4859f5e2c2719758922d6376cd",
+  "suc_benders/qubo.py": "090b23c4f4531e010e50df0fdc8ffa742bc7fe93f72ae0bf2aecc500d68356f4",
+  "suc_benders/reference.py": "804be0e02f42811e2fad3af9549c3e7ff51c9a17d702e4f9f920f6d2ad5a5775",
+  "suc_benders/search.py": "fad2c4959328fa131cee32216ab7e160039a04552cc7bf6704914f115da78ba6",
+  "suc_benders/solver.py": "89254e67694c3c0b1f6e37e83b0f60b1826e2e6e365578bc7dd0bf93c7a0a7c6",
+  "suc_benders/upper_advisor.py": "15854a42502844355744d1f18e7053d0e61c3670ecfe826d9275a8101c9268f6",
+  "suc_benders/validation.py": "d03a45d5f0c020d290aaaa6f6528e659298965a3f7482886b538b41181d78030"
+ },
+ "runtime_source_hash_format": "SHA256 of exact working-tree bytes at release time; Git source archive may normalize text line endings",
+ "validation_tests": "py -3.10 -m pytest -q tests: 139 passed"
+}
