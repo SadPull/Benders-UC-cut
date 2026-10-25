@@ -43,27 +43,33 @@ def transition_violations(d, u):
     return rows
 
 
-# 与负荷无关的可达出力上界：开机首小时 <= min(pstart, ramp_up)，持续开机 <= 上一小时上界 + ramp_up，
-# 下一小时关机前 <= min(pshut, ramp_down)，均不超过 pmax。合计低于最大场景负荷即证明方案不可行；
-# 返回这些小时（1 起始）及缺口，空列表不代表可行。
-def reachable_shortfall(d, scenarios, u):
+# 与负荷无关的逐机组逐小时可达出力上界：前向链为开机首小时 <= min(pstart, ramp_up)、持续开机 <= 上一小时上界 + ramp_up
+# （初始开机机组从 initial_output 出发）；后向链为停机前最后一个开机小时 <= min(pshut, ramp_down)、再往前每小时可多 ramp_down；
+# 均不超过 pmax，关机小时为 0。两条链取较小者，一次前向加一次后向即为不动点。只是必要条件，备用不受爬坡约束，故不同于 capacity。
+def reachable_capacity(d, u):
     u = np.asarray(u) > .5
-    load = np.max([s.load for s in scenarios], axis=0)
-    previous, was_on, rows = d.initial_output.astype(float), d.initial_on.astype(bool), []
+    bound = np.zeros(u.shape)
+    previous, was_on = d.initial_output.astype(float), d.initial_on.astype(bool)
+    first = np.minimum(np.minimum(d.pstart, d.ramp_up), d.pmax)
     for t in range(d.horizon):
-        bound = np.where(was_on, np.minimum(d.pmax, previous+d.ramp_up),
-                         np.minimum(np.minimum(d.pstart, d.ramp_up), d.pmax))
-        if t+1 < d.horizon:
-            bound = np.where(u[:, t] & ~u[:, t+1], np.minimum(bound, np.minimum(d.pshut, d.ramp_down)), bound)
-        bound = np.where(u[:, t], bound, 0.)
-        if bound.sum() < load[t]-1e-6:
-            rows.append(dict(hour=t+1, reachable_mw=round(float(bound.sum()), 3), load_mw=round(float(load[t]), 3),
-                             shortfall_mw=round(float(load[t]-bound.sum()), 3)))
-        previous, was_on = bound, u[:, t]
-    return rows
+        bound[:, t] = np.where(u[:, t], np.where(was_on, np.minimum(d.pmax, previous+d.ramp_up), first), 0.)
+        previous, was_on = bound[:, t], u[:, t]
+    last = np.minimum(np.minimum(d.pshut, d.ramp_down), d.pmax)
+    for t in range(d.horizon-2, -1, -1):
+        following = np.where(u[:, t+1], bound[:, t+1]+d.ramp_down, last)
+        bound[:, t] = np.where(u[:, t], np.minimum(bound[:, t], following), 0.)
+    return bound
 
 
-# 按初始历史修复启停时序、必要的启停爬坡条件和场景容量；连续可行性仍由调度判断。
+# 可达出力合计低于最大场景负荷即证明方案不可行；返回这些小时（1 起始）及缺口，空列表不代表可行。
+def reachable_shortfall(d, scenarios, u):
+    load = np.max([s.load for s in scenarios], axis=0)
+    total = reachable_capacity(d, u).sum(axis=0)
+    return [dict(hour=t+1, reachable_mw=round(float(total[t]), 3), load_mw=round(float(load[t]), 3),
+                 shortfall_mw=round(float(load[t]-total[t]), 3)) for t in np.flatnonzero(total < load-1e-6)]
+
+
+# 按初始历史修复启停时序、必要的启停爬坡条件、场景容量和可达出力；连续可行性仍由调度判断。
 # 返回重建 u/v/w 或 None；容量修复可把机组从允许最早开机时刻一直打开，因此会修改其他小时。
 def repair(d, scenarios, u):
     u = np.asarray(u)
@@ -97,12 +103,14 @@ def repair(d, scenarios, u):
     if (np.sum(d.pmin[:, None] * u, axis=0) > minimum_load + 1e-6).any():
         return None
 
-    # 重建当前试探方案的 v/w，返回打包向量及每小时最坏场景负荷加备用的容量缺口。
+    # 重建当前试探方案的 v/w，返回打包向量及每小时缺口：最坏场景负荷加备用的容量缺口，
+    # 与计入启停和爬坡链的可达出力缺口取较大者（备用不受爬坡约束，两者分别检查）。
     def evaluate(on):
         x = pack(d, on)
         n = d.n_units * d.horizon
         v, w = x[n:2 * n].reshape(on.shape, order="F"), x[2 * n:].reshape(on.shape, order="F")
-        return x, np.maximum(0, required - capacity(d, on, v, w).sum(axis=0))
+        return x, np.maximum(0, np.maximum(required - capacity(d, on, v, w).sum(axis=0),
+                                           loads.max(axis=0) - reachable_capacity(d, on).sum(axis=0)))
 
     # 每轮只选择能减少首个容量缺口且不扩大其他缺口的开机扩展；不能修复则返回 None。
     for _ in range(d.n_units + 1):

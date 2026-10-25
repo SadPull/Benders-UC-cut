@@ -231,6 +231,10 @@ class WholeDay:
         if not feasible:
             record["outcome"] = "repair_discrete_infeasible"
             return None
+        # 计入启停和爬坡链后可达出力仍低于负荷的方案必然调度不可行，跳过调度。
+        if reachable_shortfall(self.d, self.scenarios, z.u):
+            record["outcome"] = "reachable_infeasible"
+            return None
         return x
 
     def search_statistics(self):
@@ -488,6 +492,11 @@ class BlockSearch:
             chosen = {feasibility[k] for k in np.argsort(-values, kind="stable")[:QUBO_FEASIBILITY_CUTS]}
         return [c for k, c in enumerate(self.cuts) if c.optimality or k in chosen], len(feasibility), len(chosen)
 
+    # 以 anchor 处选出的割和给定边界行建立本块的搜索 QUBO，返回 (QUBO, 已存可行割数, 编码可行割数)。
+    def build_qubo(self, anchor, boundary):
+        cuts, stored, encoded = self.qubo_cuts(anchor)
+        return search_qubo(self.hard, self.b, cuts, anchor, boundary, self.o), stored, encoded
+
     # 在固定价格下评估精确二进制块点（块内约束，跨块行松弛），缓存调度并学习块内割。
     # 超时或数值状态不缓存；定价费用只用于块内比较和 QUBO 代理，不能替代全天原始费用。
     def evaluate(self, x, source):
@@ -544,8 +553,7 @@ class BlockSearch:
         columns = b.cols[b.binary]
         boundary = self.boundary_rows()
         anchor = whole.best.point[columns]
-        cuts, stored, encoded = self.qubo_cuts(anchor)
-        q = search_qubo(self.hard, b, cuts, anchor, boundary, o)
+        q, stored, encoded = self.build_qubo(anchor, boundary)
         whole.timings["qubo"] += perf_counter() - phase
         if whole.progress is not None:
             whole.diagnostics["pending_qubo"] = dict(bits=q.Q.shape[0], nonzeros=q.Q.nnz,

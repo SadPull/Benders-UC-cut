@@ -2,9 +2,9 @@
 
 Python 机组组合求解器：先用 Gurobi 求完整模型的参考方案，再由时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步候选。全局评价采用相对参考成本的差距；项目不计算下界。
 
-v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
+v1.1.0 加入爬坡可达出力修复，以及多场景 IEEE118 和 RTS24 上 SA+Benders 不加与加离线 LLM 程序 L3 的对比实验，见下文“v1.1.0”一节。v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
 
-当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
+当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20，以及 10 场景的 ieee118s10），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
 
 ## 运行
 
@@ -70,7 +70,8 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `suc_benders/reference.py`：Gurobi 完整模型参考求解及独立方案校验。
 - `suc_benders/upper_advisor.py`：异步 LLM 建议调度（常规层批次与并行升级层）；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程与升级层的隔离 `CODEX_HOME`。
 - `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
-- `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20 输入。
+- `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20、ieee118s10 输入。
+- `offline_pilot.py`、`offline_worker.py`、`programs/L3.py`：离线 LLM 程序 L3 的沙箱调用与 A／L+SA 冷启动运行；`paper_pilot.py`、`paper_figures.py`、`run_paper_pilot.py`、`make_ieee118_scenarios.py`：论文实验（见 v1.1.0 一节）。
 - `tests/`：当前分块主线的必要回归；执行 `py -3.10 -m pytest -q tests`。
 - `config.local.json`、`.local/*.lic`：仅本地保留的授权配置。
 
@@ -83,6 +84,76 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 每批只有一个搜索 QUBO，直接由稀疏 Q 构造 BINARY BQM，合并 `Qij+Qji`，不生成稠密 Ising 矩阵。每条链由采样器根据种子生成随机初态，每次一个 read。退火终态恢复固定变量后，先进行原始块候选评价／割学习，再走既有全天修复、调度和独立校验；通过校验才可更新 UB。温度从 `sa_temperature*energy_unit` 起逐次乘 `sa_cooling`，严格高于 `sa_cutoff*energy_unit` 时执行，倒数作为自定义 beta；每级执行 `sa_sweeps` 次顺序 Metropolis 扫描。[采样器 API](https://docs.dwavequantum.com/en/latest/ocean/api_ref_samplers/generated/dwave.samplers.SimulatedAnnealingSampler.sample.html)
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
+
+## v1.1.0 可达出力修复与论文实验
+
+2026-10-25。
+
+### 可达出力修复
+
+- `validation.reachable_capacity`：逐机组逐小时的可达出力上界，取两条链中的较小者：前向的开机爬坡链（初始开机机组从 `initial_output` 出发）和后向的停机链。`reachable_shortfall` 改为基于它计算。
+- `repair()` 的缺口取"场景容量缺口"与"可达出力缺口"中的较大者，其余选择规则不变。
+- `WholeDay.prepare()` 遇到仍有可达缺口的方案，记为 `reachable_infeasible` 并跳过调度。
+- `BlockSearch.build_qubo`：行为不变的提取，供记录 QUBO 规模使用。
+- 回归测试见 `tests/test_reachability.py`。
+
+### 论文实验：SA+Benders 不加 LLM（A）与加离线 LLM 程序（L+SA）
+
+**离线程序 L3**（`programs/L3.py`）是事先由 LLM 写好、此后冻结的程序。
+- 它按价格信号提出最多 4 个候选，每个候选最多改动 4 台机组。
+- 程序在隔离子进程（`offline_worker.py`）中运行，每次调用最多 0.5 秒；在线不调用 LLM。
+- L+SA 在每轮 SA 之后让 L3 运行同样长的时间，见 `offline_pilot.run_trial`。
+- 多场景时，程序收到按概率加权的负荷与出力；候选仍要对全部场景做必要性检查，并经过全天精确调度。
+
+**算例**：
+- `instances/ieee118s10`：54 机组 × 24 小时 × 10 场景，由 `make_ieee118_scenarios.py` 生成。日系数和小时扰动的做法参照 Mahroo & Kargarian（TPWRS 2026），幅度按机组容量余量收窄。场景是本项目的扩展，不是 IEEE 源数据。
+- `instances/rts24`：32 机组 × 24 小时 × 3 场景。
+
+**参考解**只当差距尺子，由 Gurobi 单线程求解：
+- ieee118s10：OPTIMAL，3,625,778.90，用时 212 秒；
+- RTS24：OPTIMAL，885,066.70，用时 114 秒。
+
+**复现**：
+
+```powershell
+py -3.10 make_ieee118_scenarios.py --check
+py -3.10 run_paper_pilot.py --reference ieee118s10 rts24
+py -3.10 run_paper_pilot.py --compare results/paper-reference-<时间>    # 先跑全部测试，再做 20 次 600 秒运行
+py -3.10 run_paper_pilot.py --case results/paper-compare-<时间>
+py -3.10 run_paper_pilot.py --audit results/paper-compare-<时间>
+```
+
+**结果**：每次 600 秒冷启动，12 h 分块，16 sweeps，种子 17、29、41、53、67。
+
+| 算例 | A 终点差距 | L+SA 终点差距 | L+SA 更优 | AUC 降幅中位数 |
+|---|---:|---:|---:|---:|
+| IEEE118，10 场景 | 2.881% | 0.196%–0.633% | 5/5 | 70.8% |
+| RTS24，3 场景 | 5.475% | 0.531%–3.321% | 5/5 | 39.8% |
+
+- L+SA 只用约 10 秒（RTS24 上约 1 秒）就达到了 A 在 600 秒时的终点。
+- 两个预先登记的判据都通过：至少 4/5 个种子更优，且 AUC 降幅中位数 ≥ 10%。
+- 复核通过：判据重算一致；方案重新调度后成本一致并通过独立校验；实例文件和参考解的哈希一致。
+- 运行结束时，本文块 QUBO 为 1,413–2,490 位。若用标准编码（θ 二进制展开，加上每条割一个松弛寄存器）编码同一批已存割，至少需要 2,537–14,143 位，见报告 E2 表。场景在子问题中被聚合成一条割，因此场景数不进入 QUBO。
+- **案例**：在 A 的终点方案上，L3 第 3 次调用就把 G5 在第 1–6 小时停机。那几个小时按概率加权的边际价格约为 21–24 $/MWh，这一改动使全天成本降低 21,631（−0.58%）。
+- **局限**：场景由本项目生成，零备用；每个算例 5 个种子；SA 在 CPU 上运行。
+
+**结果目录**：
+
+| 目录 | 内容 |
+|---|---|
+| `results/paper-reference-20261025-124811-c6f41da2` | 参考解 |
+| `results/paper-compare-20261025-125905-c264cdcf` | `report.md`；`figures/` 中的 F1 收敛曲线和 F2 QUBO 位数；`audit.json`；`CONSOLIDATION.md` |
+| `results/paper-case-20261025-133936-d0ed2658` | F3 案例图 |
+
+`results/` 不进仓库，这三个目录的完整副本在 Release 资产 `experiment-archive-v1.1.0.zip` 中。
+
+[v1.1.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.1.0) 提供：
+- 发布提交对应的源码 `core-source-v1.1.0.zip`；
+- 上述三个结果目录 `experiment-archive-v1.1.0.zip`；
+- 逐文件 SHA256 清单 `archive-manifest-v1.1.0.json`；
+- 资产校验和 `SHA256SUMS.txt`。
+
+机器可读汇总见 [archives/v1.1.0.json](archives/v1.1.0.json)。
 
 ## v1.0.0 跨块协调清理与封存
 
