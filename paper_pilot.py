@@ -1,4 +1,4 @@
-"""论文补充实验：多场景 IEEE118 上 SA+Benders 不加与加离线程序 L3 的对比、QUBO 比特数记录与案例。"""
+"""论文实验：多场景 IEEE118 与 RTS24 上 SA 与 SA+L118 的对比、QUBO 比特数记录与案例。"""
 # 试探脚本，不属于生产代码。运行沿用 offline_pilot.run_trial；参考解只用来计算差距，从不注入搜索。
 from contextlib import contextmanager
 from pathlib import Path
@@ -7,7 +7,7 @@ from time import perf_counter
 import numpy as np
 
 import offline_pilot
-from offline_pilot import EMPTY_LIMIT, L3, Operator
+from offline_pilot import EMPTY_LIMIT, L118, Operator
 from suc_benders import search as search_core, solver
 from suc_benders.config import load_options
 from suc_benders.data import load_data
@@ -17,14 +17,14 @@ from suc_benders.validation import commitment, pack
 ROOT = Path(__file__).resolve().parent
 INSTANCES = dict(ieee118=ROOT/'data', rcuc20=ROOT/'instances/rcuc20', rts24=ROOT/'instances/rts24',
                  ieee118s10=ROOT/'instances/ieee118s10')
-ARMS = ('A', 'L+SA')
+ARMS = ('SA', 'SA+L118')
 # 参考解未证明最优时，Gurobi 自报 gap 不超过此值（百分比）才可当尺子。
 RULER_GAP = .05
-# 判据：L+SA 终点差距严格更小的种子数下限，与 AUC 降幅中位数下限。
+# 判据：SA+L118 终点差距严格更小的种子数下限，与 AUC 降幅中位数下限。
 WINS_NEEDED, AUC_REDUCTION = 4, .10
-# 标准编码的 θ 位数；θ 按此位数展开时，每条割的松弛寄存器在同一分辨率下至少也需要同样多位。
+# 资源估算假设 θ 为 12 位；每条割另按 1 或 12 位松弛寄存器分别计数。
 THETA_BITS = 12
-# 案例：从停滞点起至多调用 L3 的次数。
+# 案例：从停滞点起至多调用 L118 的次数。
 CASE_CALLS = 50
 
 
@@ -78,7 +78,7 @@ def counted(log):
         search_core.BlockSearch, CountingSearch.log = original, None
 
 
-# 标准编码（θ 二进制展开 + 每条割一个松弛寄存器）的位数下界，只用计数：
+# 给定 θ 和每条割寄存器位数后的资源估算，不是无条件下界，也不主张与费用代理等价：
 # same_cuts 编码本文同一批已存割；single_cut 为经典单割 Benders，每次主问题求解只多一条割。
 def standard_bits(row, per_cut):
     same = row['stored_optimality'] + row['stored_feasibility']
@@ -95,7 +95,7 @@ def counted_trial(name, arm, seed, seconds, reference, rounds=None, burst_calls=
     return dict(row, qubo_sizes=log)
 
 
-# 按种子配对 A 与 L+SA；要求每个预定种子都有完整配对。gap 缺失（不可行）按无穷大计。
+# 按种子配对 SA 与 SA+L118；要求每个预定种子都有完整配对。gap 缺失（不可行）按无穷大计。
 def evaluate(runs, name, seeds):
     pairs = {}
     for r in runs:
@@ -103,14 +103,14 @@ def evaluate(runs, name, seeds):
             pairs.setdefault(r['seed'], {})[r['arm']] = r
     complete = [pairs[s] for s in seeds if set(ARMS) <= set(pairs.get(s, {}))]
     gap = lambda r: r['gap_percent'] if r['gap_percent'] is not None else np.inf
-    wins = sum(gap(p['L+SA']) < gap(p['A']) - 1e-9 for p in complete)
-    reductions = [1 - p['L+SA']['auc']/p['A']['auc'] for p in complete if p['A']['auc']]
+    wins = sum(gap(p['SA+L118']) < gap(p['SA']) - 1e-9 for p in complete)
+    reductions = [1 - p['SA+L118']['auc']/p['SA']['auc'] for p in complete if p['SA']['auc']]
     median = float(np.median(reductions)) if reductions else None
     passed = len(complete) == len(seeds) and wins >= WINS_NEEDED and median is not None and median >= AUC_REDUCTION
     return dict(pairs=len(complete), wins=wins, auc_reduction=median, passed=bool(passed))
 
 
-# L+SA 首次达到 A 终点成本的时间；达不到返回 None。
+# SA+L118 首次达到 SA 终点成本的时间；达不到返回 None。
 def time_to_reach(trajectory, objective):
     return next((t for t, cost in trajectory if cost <= objective + 1e-6), None)
 
@@ -131,7 +131,7 @@ def hold(whole):
     whole._adopt_incumbent = lambda r, plan, report: None
 
 
-# 案例：固定在停滞方案上逐次调用 L3（当前方案不切换），取按候选顺序第一个改进全天成本的方案。
+# 案例：固定在停滞方案上逐次调用 L118（当前方案不切换），取按候选顺序第一个改进全天成本的方案。
 def case_study(name, seed, start_u, reference, max_calls=CASE_CALLS, seconds=600.):
     d, scenarios = instance(name)
     o = options(name, seed, seconds)
@@ -149,7 +149,7 @@ def case_study(name, seed, start_u, reference, max_calls=CASE_CALLS, seconds=600
         return feasible
 
     whole.accept = watched
-    operator = Operator(whole, seed, L3.read_text(encoding='utf-8'))
+    operator = Operator(whole, seed, L118.read_text(encoding='utf-8'))
     try:
         while not found and operator.calls < max_calls and operator.empty < EMPTY_LIMIT:
             operator.step()

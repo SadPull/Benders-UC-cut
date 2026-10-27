@@ -60,7 +60,7 @@ def test_recorder_matches_the_built_qubo(tiny, options):
     assert pilot.standard_bits(row, 12) == dict(same_cuts=100+12+120, single_cut=100+12+48)
 
 
-@pytest.mark.parametrize('arm', ['A', 'L+SA'])
+@pytest.mark.parametrize('arm', ['SA', 'SA+L118'])
 def test_recorder_does_not_change_the_trial(tiny, options, arm):
     d, scenarios = tiny(3, 6)
     reference = solve_reference(d, scenarios, 30)
@@ -82,13 +82,13 @@ def run(seed, arm, gap, area, name='x'):
 
 def test_two_arm_evaluation_counts_wins_and_auc_reduction():
     seeds = (1, 2, 3, 4, 5)
-    runs = [run(s, 'A', 1., 2.) for s in seeds] + [run(s, 'L+SA', .5, 1.) for s in seeds[:4]] + [run(5, 'L+SA', 1., 2.)]
+    runs = [run(s, 'SA', 1., 2.) for s in seeds] + [run(s, 'SA+L118', .5, 1.) for s in seeds[:4]] + [run(5, 'SA+L118', 1., 2.)]
     value = pilot.evaluate(runs, 'x', seeds)
     assert value == dict(pairs=5, wins=4, auc_reduction=.5, passed=True)
     assert not pilot.evaluate(runs[:-1], 'x', seeds)['passed']
-    worse = [run(s, 'A', 1., 2.) for s in seeds] + [run(s, 'L+SA', .5, 1.9) for s in seeds]
+    worse = [run(s, 'SA', 1., 2.) for s in seeds] + [run(s, 'SA+L118', .5, 1.9) for s in seeds]
     assert pilot.evaluate(worse, 'x', seeds)['auc_reduction'] == pytest.approx(.05) and not pilot.evaluate(worse, 'x', seeds)['passed']
-    infeasible = [run(s, 'A', None, 2.) for s in seeds] + [run(s, 'L+SA', .5, 1.) for s in seeds]
+    infeasible = [run(s, 'SA', None, 2.) for s in seeds] + [run(s, 'SA+L118', .5, 1.) for s in seeds]
     assert pilot.evaluate(infeasible, 'x', seeds)['wins'] == 5
 
 

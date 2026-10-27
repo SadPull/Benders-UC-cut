@@ -1,4 +1,4 @@
-"""论文补充实验的静态图：收敛曲线、QUBO 位数与 L3 案例。"""
+"""论文实验的静态图：收敛曲线、QUBO 位数与 L118 案例；METHOD_STYLE 供各图共用。"""
 # 配色取参考调色板前三个类别槽位（三色在全部两两配对下通过色觉校验），并用线型做二次编码以便黑白打印。
 import matplotlib
 matplotlib.use('Agg')
@@ -9,9 +9,15 @@ import numpy as np
 import paper_pilot as pilot
 
 INK, MUTED, GRID, OFF = '#0b0b0b', '#52514e', '#e4e3df', '#f1f0ed'
-BLUE, ORANGE, AQUA = '#2a78d6', '#eb6834', '#1baf7a'
-ARM_STYLE = {'A': dict(color=BLUE, linestyle='-', label='A: SA+Benders (S1)'),
-             'L+SA': dict(color=ORANGE, linestyle='--', label='L+SA: + offline program L3 (S3)')}
+BLUE, ORANGE, AQUA, GREY = '#2a78d6', '#eb6834', '#1baf7a', '#7a7a7a'
+# 每个方法在所有图中颜色固定。SA 是中性灰基线；SA+L24r2 与 SA+L24 同属 RTS24 训练，同用蓝色，以空心／实心区分。
+# 第四个类别色在色觉校验中与已有三色分不开，因此不用；线型和标记形状做二次编码。
+METHOD_STYLE = {
+    'SA': dict(color=GREY, linestyle='-', marker='o', filled=True, label='SA: SA+Benders'),
+    'SA+R': dict(color=ORANGE, linestyle='-.', marker='s', filled=True, label='SA+R: + random operator (no LLM)'),
+    'SA+L118': dict(color=AQUA, linestyle='--', marker='^', filled=True, label='SA+L118: + LLM program L118'),
+    'SA+L24r2': dict(color=BLUE, linestyle=':', marker='o', filled=False, label='SA+L24r2: + LLM program L24r2'),
+    'SA+L24': dict(color=BLUE, linestyle='-', marker='o', filled=True, label='SA+L24: + LLM program L24')}
 TITLES = dict(ieee118s10='IEEE118, 54 units x 24 h x 10 scenarios', rts24='RTS24, 32 units x 24 h x 3 scenarios',
               ieee118='IEEE118, 54 units x 24 h x 1 scenario', rcuc20='RCUC20, 20 units x 24 h x 1 scenario')
 
@@ -48,7 +54,8 @@ def convergence_figure(runs, names, path):
         mine = [r for r in runs if r['instance'] == name and r['trajectory']]
         horizon = max(r['seconds'] for r in mine) - 5
         grid = np.linspace(0, horizon, 600)
-        for arm, s in ARM_STYLE.items():
+        for arm in pilot.ARMS:
+            s = METHOD_STYLE[arm]
             curves = np.array([gap_curve(r, grid) for r in mine if r['arm'] == arm])
             if not len(curves):
                 continue
@@ -79,9 +86,9 @@ def bits_figure(runs, path):
             fine = [pilot.standard_bits(s, pilot.THETA_BITS) for s in sizes]
             ax.plot(k, [s['ours'] for s in sizes], color=BLUE, linewidth=2, label='This work (tightest-cut cost)')
             ax.plot(k, [f['same_cuts'] for f in fine], color=ORANGE, linestyle='--', linewidth=2,
-                    label='Standard encoding of the same cuts (lower bound)')
+                    label='Same stored cuts (12-bit register assumption)')
             ax.plot(k, [f['single_cut'] for f in fine], color=AQUA, linestyle=':', linewidth=2,
-                    label='Standard single-cut Benders (lower bound)')
+                    label='Single-cut Benders (12-bit register assumption)')
             ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v:,.0f}'))
             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
             ax.set_title(f"{TITLES.get(run['instance'], run['instance'])}\nblock {block} (seed {run['seed']})",
@@ -126,7 +133,7 @@ def case_figure(row, d, path):
         style(a)
     axes[2].set_xticks(hours[::2])
     share = 100*row['delta']/abs(row['base_objective'])
-    fig.suptitle(f"{TITLES.get(row['instance'], row['instance'])}, seed {row['seed']}: first improving L3 candidate "
+    fig.suptitle(f"{TITLES.get(row['instance'], row['instance'])}, seed {row['seed']}: first improving L118 candidate "
                  f"(call {row['calls']}), cost change {row['delta']:,.0f} ({share:.3f}%)", fontsize=9, color=INK)
     fig.tight_layout()
     save(fig, path)

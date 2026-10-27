@@ -33,10 +33,10 @@ ONLINE_PAIRS = (('RCUC20, 3 h blocks', 'manual-seed17-20261020-143502-f8585936',
                 ('RTS24, 5400 s', 'manual-seed17-20261020-210949-7ff40209', 'manual-seed17-20261020-210949-b40f0800'),
                 ('IEEE118', 'manual-seed17-20261020-224136-14459f84', 'manual-seed17-20261020-224136-7326d548'))
 SOURCES = ('paper_pilot.py', 'paper_figures.py', 'run_paper_pilot.py', 'make_ieee118_scenarios.py',
-           'offline_pilot.py', 'offline_worker.py', 'programs/L3.py', 'tests/test_offline_pilot.py',
+           'offline_pilot.py', 'offline_worker.py', 'programs/L118.py', 'tests/test_offline_pilot.py',
            'tests/test_paper_pilot.py')
 CRITERIA = {
-    'M1 ieee118s10': f'L+SA 终点差距严格小于 A 的种子 >= {pilot.WINS_NEEDED}/{len(SEEDS)}，且 AUC 降幅中位数 >= '
+    'M1 ieee118s10': f'SA+L118 终点差距严格小于 SA 的种子 >= {pilot.WINS_NEEDED}/{len(SEEDS)}，且 AUC 降幅中位数 >= '
                      f'{pilot.AUC_REDUCTION:.0%}',
     'M2 rts24': '同 M1，单独报告'}
 DECISIONS = {
@@ -125,15 +125,15 @@ def freeze(output, smoke, references):
     save(output/'protocol.json', dict(
         smoke=smoke, instances=COMPARE, seeds=SEEDS, seconds=SECONDS, workers=WORKERS, arms=pilot.ARMS,
         settings='cold start, run_suc-equivalent initialization, block_hours=12, sa_sweeps=16, LLM off',
-        arms_meaning=dict(A='SA+Benders without LLM (S1)', **{'L+SA': 'SA+Benders plus the frozen offline '
-                          'program programs/L3.py (S3); zero online LLM calls'}),
-        l3_context='probability-weighted load and dispatch (identical to the old context for one scenario); '
+        arms_meaning={'SA': 'SA+Benders without LLM', 'SA+L118': 'SA+Benders plus the frozen offline '
+                      'program programs/L118.py; zero online LLM calls'},
+        program_context='probability-weighted load and dispatch (identical to the old context for one scenario); '
                    'feasibility still checked on every scenario by necessary() and exact full-day dispatch',
         qubo_sizes=f'per master solve: ours = q.Q.shape[0]; standard lower bounds = free + {pilot.THETA_BITS} theta '
                    f'bits + (1 or {pilot.THETA_BITS}) bits per cut, for the same stored cuts and for single-cut '
                    'Benders (one cut per master solve)',
         criteria=CRITERIA, decisions={f'M1={k[0]},M2={k[1]}': v for k, v in DECISIONS.items()},
-        case=f'start from ieee118s10 seed 17 A final schedule; call L3 at most {pilot.CASE_CALLS} times with the '
+        case=f'start from ieee118s10 seed 17 SA final schedule; call L118 at most {pilot.CASE_CALLS} times with the '
              'incumbent held; take the first improving candidate in proposal order; if none, next seed in '
              f'{SEEDS}, then rts24',
         reference_usage='gap ruler only; never injected as a candidate'))
@@ -150,13 +150,19 @@ def run_all(output, jobs, refs, seconds, workers):
                   f"status={row['status']} sa_calls={row['sa_calls']} operator_calls={row['operator_calls']}", flush=True)
 
 
-# 每个（算例，种子）配对内轮换两臂的提交顺序。
+# 每个（算例，种子）配对内轮换两个方法的提交顺序。
 def jobs_for(names, seeds):
     jobs = []
     for j, (name, seed) in enumerate((n, s) for n in names for s in seeds):
         arms = pilot.ARMS if j % 2 == 0 else pilot.ARMS[::-1]
         jobs += [(name, arm, seed) for arm in arms]
     return jobs
+
+
+# 按（算例，种子，ARMS 顺序）读入运行；不按文件名排序，因为 'SA+L118.json' 的字典序在 'SA.json' 之前。
+def load_runs(output):
+    runs = [read(p) for p in (output/'runs').glob('*.json')]
+    return sorted(runs, key=lambda r: (r['instance'], r['seed'], pilot.ARMS.index(r['arm'])))
 
 
 def summarize(runs):
@@ -175,20 +181,20 @@ def table_rows(runs, names, seeds):
         for seed in seeds:
             pair = {r['arm']: r for r in runs if r['instance'] == name and r['seed'] == seed}
             if set(pilot.ARMS) <= set(pair):
-                a, l = pair['A'], pair['L+SA']
+                a, l = pair['SA'], pair['SA+L118']
                 rows.append((name, seed, a, l, pilot.time_to_reach(l['trajectory'], a['objective'])))
     return rows
 
 
 def report(output, smoke=False):
     from paper_figures import bits_figure, convergence_figure
-    runs = [read(p) for p in sorted((output/'runs').glob('*.json'))]
+    runs = load_runs(output)
     manifest, protocol = read(output/'manifest.json'), read(output/'protocol.json')
     names = [n for n in COMPARE if any(r['instance'] == n for r in runs)]
     seeds = sorted({r['seed'] for r in runs})
     summary = summarize(runs)
     seconds = runs[0]['seconds'] if runs else SECONDS
-    lines = ['# 论文补充实验：SA+Benders 不加（A）与加离线程序 L3（L+SA）', '',
+    lines = ['# 论文实验：SA 与 SA+L118', '',
              f"每次 {seconds:g} 秒冷启动；在线 LLM 调用为 0；参考解只当差距尺子。"
              + ('**冒烟运行，判据无意义。**' if smoke else ''), '',
              '## T1 算例与参考解', '', '| 算例 | 机组×小时×场景 | 参考成本 | 状态 | Gurobi gap | 求解用时 (s) | 来源 |',
@@ -200,14 +206,14 @@ def report(output, smoke=False):
                      f"{fmt(ref['gurobi_gap_percent'], 4, '%')} | {fmt(ref['elapsed_seconds'], 1)} | "
                      f"{reference_file(manifest, name).relative_to(ROOT).as_posix()} |")
     lines += ['', '## T2 终点差距与 AUC', '',
-              '| 算例 | 种子 | A 差距 | L+SA 差距 | A AUC | L+SA AUC | AUC 降幅 | L+SA 达到 A 终点 (s) |',
+              '| 算例 | 种子 | SA 差距 | SA+L118 差距 | SA AUC | SA+L118 AUC | AUC 降幅 | SA+L118 达到 SA 终点 (s) |',
               '|---|---:|---:|---:|---:|---:|---:|---:|']
     for name, seed, a, l, reach in table_rows(runs, names, seeds):
         reduction = 1 - l['auc']/a['auc'] if a['auc'] else None
         lines.append(f"| {name} | {seed} | {fmt(a['gap_percent'], 3, '%')} | {fmt(l['gap_percent'], 3, '%')} | "
                      f"{fmt(a['auc'], 3)} | {fmt(l['auc'], 3)} | {fmt(None if reduction is None else 100*reduction, 1, '%')} | "
                      f"{fmt(reach, 1)} |")
-    lines += ['', '## 来源拆分与 L3 候选去向', '',
+    lines += ['', '## 来源拆分与 L118 候选去向', '',
               '| 运行 | 状态 | SA 降幅 | 程序降幅 | SA 调用 | 程序调用 | SA 用时 (s) | 程序用时 (s) | 候选去向 |',
               '|---|---|---:|---:|---:|---:|---:|---:|---|']
     for r in sorted(runs, key=lambda r: (r['instance'], r['seed'], r['arm'])):
@@ -216,9 +222,9 @@ def report(output, smoke=False):
                      f"{r['decrease']['operator']:.0f} | {r['sa_calls']} | {r['operator_calls']} | {r['sa_seconds']:.1f} | "
                      f"{r['operator_seconds']:.1f} | {outcomes} |")
     lines += ['', '## E2 QUBO 位数（每块最后一次主问题求解）', '',
-              '标准编码为下界：θ 取 12 位，每条割的松弛寄存器取 1 位（宽松）或 12 位（与 θ 同分辨率）。'
+              '标准编码为给定位宽后的计数估算：θ 取 12 位，每条割的松弛寄存器假设为 1 位或 12 位。'
               '"同一批割"指编码本文同一批已存割；"单割 Benders"指每次主问题求解只多一条割。'
-              '下界只计自由位、θ 与割的松弛位，不计两种编码共有的容量行与边界行松弛位，因此偏小。', '',
+              '估算只计自由位、θ 与割的松弛位，不计容量行与边界行松弛位。本文费用代理与完整多割主问题不宣称等价。', '',
               '| 运行 | 块 | 主问题次数 | 自由位 | 本文 | 已存最优性割 | 已存可行割 | 编码可行割 | 同一批割（1 位） | '
               '同一批割（12 位） | 单割 Benders（12 位） |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in sorted(runs, key=lambda r: (r['instance'], r['seed'], r['arm'])):
@@ -247,7 +253,7 @@ def report(output, smoke=False):
     lines += ['', f"**判定**：{summary['verdict']}"]
     figures = output/'figures'
     convergence_figure(runs, names, figures/'F1-convergence')
-    sized = [r for r in runs if r['arm'] == 'L+SA' and r['seed'] == min(seeds) and r['qubo_sizes']]
+    sized = [r for r in runs if r['arm'] == 'SA+L118' and r['seed'] == min(seeds) and r['qubo_sizes']]
     bits_figure(sized, figures/'F2-qubo-bits')
     lines += ['', '## 图', '', '- F1 收敛曲线：`figures/F1-convergence.png`',
               '- F2 QUBO 位数：`figures/F2-qubo-bits.png`', f"- 协议：`protocol.json`（{len(protocol['seeds'])} 个种子）"]
@@ -256,7 +262,7 @@ def report(output, smoke=False):
     return summary
 
 
-# 案例：按预先登记的顺序找第一个由 L3 改进停滞方案的例子。
+# 案例：按预先登记的顺序找第一个由 L118 改进停滞方案的例子。
 def run_case(compare_dir):
     from paper_figures import case_figure
     output = stamp('case')
@@ -264,7 +270,7 @@ def run_case(compare_dir):
     order = [('ieee118s10', s) for s in SEEDS] + [('rts24', s) for s in SEEDS]
     tried = []
     for name, seed in order:
-        path = compare_dir/'runs'/f'{name}-s{seed}-A.json'
+        path = compare_dir/'runs'/f'{name}-s{seed}-SA.json'
         if not path.exists():
             continue
         start = read(path)
@@ -283,7 +289,7 @@ def run_case(compare_dir):
 
 
 def audit(output):
-    runs = [read(p) for p in sorted((output/'runs').glob('*.json'))]
+    runs = load_runs(output)
     stored, manifest = read(output/'summary.json'), read(output/'manifest.json')
     recomputed = summarize(runs)
     checks = []
@@ -318,7 +324,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference', nargs='+', metavar='INSTANCE', help='单独求解参考解，缓存到同一目录')
     parser.add_argument('--seconds', type=float, default=REFERENCE_SECONDS, help='参考解时间上限')
-    parser.add_argument('--smoke', type=Path, metavar='REFERENCE_DIR', help='ieee118s10 seed 17，A 与 L+SA 各 90 秒')
+    parser.add_argument('--smoke', type=Path, metavar='REFERENCE_DIR', help='ieee118s10 seed 17，SA 与 SA+L118 各 90 秒')
     parser.add_argument('--compare', type=Path, metavar='REFERENCE_DIR', help='主实验；参数为含 ieee118s10、rts24 参考解的目录')
     parser.add_argument('--case', type=Path, metavar='COMPARE_DIR', help='案例')
     parser.add_argument('--report', type=Path, metavar='DIR', help='重新生成报告与图')

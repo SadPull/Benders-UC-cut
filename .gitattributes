@@ -1,3 +1,4 @@
 # Preserve input and source bytes used by provenance hashes.
 data/** -text -whitespace
 instances/** -text -whitespace
+programs/** -text -whitespace
