@@ -1,0 +1,1046 @@
+{
+  "version": "v1.2.0",
+  "date": "2026-10-27",
+  "release_url": "https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.2.0",
+  "changes": [
+    "Unified naming: methods SA (was A), SA+R (was N+SA; the same random interval operator as training control R), SA+L118 (was L+SA / L3+SA), SA+L24 (was LIT+SA), SA+L24r2 (was LIT1+SA); programs/L118.py, L24.py, L24r2.py (were L3.py, LIT.py, LIT1.py) with unchanged bytes and SHA256",
+    "lit_* modules renamed to program_training.py, run_program_training.py, program_evaluation.py, run_program_evaluation.py; new result directories use program-training-/program-evaluation- prefixes; archived directories keep their names and are reproduced with their own snapshot/",
+    "offline_pilot.py adds SA+R, SA+L24 and SA+L24r2; the two L24 programs also receive scenario_loads and scenario_probabilities; SA and SA+L118 are bit-identical to v1.1.0 A and L+SA at fixed rounds, and all five methods are bit-identical before and after the rename",
+    "Closed-loop multi-round program training on rts24 (program_training.py, run_program_training.py): 3-scenario training variants, fixed-anchor 15 s probes from a 120 s SA+R run, full training feedback on every earlier program checked by closed-loop.json, validation withheld from the LLM, pre-registered stopping rule (4-10 rounds, patience 2)",
+    "Program evaluation (program_evaluation.py, run_program_evaluation.py): pre-registered gates T1-T3, all controls re-run from cold starts, serial single-thread runs, independent audit",
+    "paper_figures.METHOD_STYLE: one colour, line style and marker per method shared by all figures (three validated categorical slots plus a neutral grey SA baseline; SA+L24r2 hollow and SA+L24 filled blue)",
+    ".gitattributes marks programs/** -text so program bytes and hashes survive checkout",
+    "run_paper_pilot.load_runs orders runs by (instance, seed, ARMS) instead of by file name"
+  ],
+  "naming": [
+    {
+      "name": "SA",
+      "kind": "method",
+      "meaning": "SA+Benders only",
+      "previous": [
+        "A"
+      ]
+    },
+    {
+      "name": "SA+R",
+      "kind": "method",
+      "meaning": "SA+Benders plus the random interval operator R; no LLM",
+      "previous": [
+        "N+SA",
+        "training control R"
+      ]
+    },
+    {
+      "name": "SA+L118",
+      "kind": "method",
+      "meaning": "SA+Benders plus program L118 (programs/L118.py), generated on IEEE118 in two rounds",
+      "previous": [
+        "L+SA",
+        "L3+SA",
+        "program L3"
+      ]
+    },
+    {
+      "name": "SA+L24",
+      "kind": "method",
+      "meaning": "SA+Benders plus program L24 (programs/L24.py), final program of the 10-round rts24 training (P9b)",
+      "previous": [
+        "LIT+SA",
+        "program LIT"
+      ]
+    },
+    {
+      "name": "SA+L24r2",
+      "kind": "method",
+      "meaning": "SA+Benders plus program L24r2 (programs/L24r2.py), best round-2 program of the same training (P2a)",
+      "previous": [
+        "LIT1+SA",
+        "program LIT1"
+      ]
+    }
+  ],
+  "findings": {
+    "training": "10 rounds (MAX_ROUNDS); round 1: both programs STATIC_INVALID (set.add); best validation mean J B_r 1.22 (round 2) -> 3.08 (round 9); control R 0.32; L24 = P9b (validation1 3.005, validation2 3.151); gate passed",
+    "amendment": "The early program was registered as the best round-1 program; round 1 had no valid program, so (user-approved, after training, before any evaluation run) L24r2 = P2a, best of round 2 (validation mean J 1.219); gates unchanged",
+    "T1_iteration": "ITERATION_HELPS: rts24-base SA+L24 vs SA+L24r2, 4/5 final-cost wins, median AUC difference 0.041 (median reduction 6.4%); gains are mostly convergence speed, final gaps 0.53-0.59% for both",
+    "T2_vs_R": "PASS: rts24-base SA+L24 vs SA+R, 5/5 wins, median AUC reduction 83.0%",
+    "T3_vs_L118": "SUPPORTED: rts24 base+minus+plus SA+L24 vs SA+L118, 8/11 wins (lost base s17; equal end cost on plus s101 and s137), median AUC difference 2.290",
+    "descriptive": "SA+L118 vs SA+R (base) 5/5 wins, median AUC reduction 8.0%; SA+L24r2 vs SA+R (base) 5/5, 81.9%; SA+L24 vs SA+R (all) 11/11",
+    "stalls": "SA+R ends at 3.545% on rts24-base every seed; SA+L118 escapes only on s17 (0.531%); on rts24-minus SA+L24 stays at 2.18% on 2 of 3 seeds (SA+L118 2.24%) and reaches 0.23% on s137",
+    "online_llm_calls": 0,
+    "audit": "All 38 end schedules re-dispatched and independently validated; costs, scores and independent AUC integrals matched; paired initialization identical; program hashes matched",
+    "budget_seconds": {
+      "checks": 93.0,
+      "references": 219.1,
+      "runs": 17242.0,
+      "audit": 4.0
+    }
+  },
+  "training": {
+    "directory": "results/lit-training-rts24-20261026-170730-82fb090e",
+    "stop": {
+      "stop": true,
+      "reason": "MAX_ROUNDS",
+      "rounds": 10,
+      "improvements": [
+        false,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false
+      ],
+      "best": [
+        null,
+        1.2192292247094139,
+        1.3567449594437209,
+        1.8933502720052973,
+        2.348623285595268,
+        2.4166663107088824,
+        2.519193739281225,
+        2.519193739281225,
+        3.0782970403100016,
+        3.0782970403100016
+      ]
+    },
+    "R_validation_mean": 0.32445005193974935,
+    "rounds": [
+      {
+        "round": 1,
+        "best_validation": null,
+        "improved": false,
+        "programs": {
+          "P1a": {
+            "status": "STATIC_INVALID",
+            "validation_mean_J": null
+          },
+          "P1b": {
+            "status": "STATIC_INVALID",
+            "validation_mean_J": null
+          }
+        }
+      },
+      {
+        "round": 2,
+        "best_validation": 1.2192292247094139,
+        "improved": true,
+        "programs": {
+          "P2a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 1.2192292247094139
+          },
+          "P2b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 0.47063020697396074
+          }
+        }
+      },
+      {
+        "round": 3,
+        "best_validation": 1.3567449594437209,
+        "improved": true,
+        "programs": {
+          "P3a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 1.0805993268421759
+          },
+          "P3b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 1.3567449594437209
+          }
+        }
+      },
+      {
+        "round": 4,
+        "best_validation": 1.8933502720052973,
+        "improved": true,
+        "programs": {
+          "P4a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 1.8933502720052973
+          },
+          "P4b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 0.9196760504475069
+          }
+        }
+      },
+      {
+        "round": 5,
+        "best_validation": 2.348623285595268,
+        "improved": true,
+        "programs": {
+          "P5a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 1.7278729953301184
+          },
+          "P5b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 2.348623285595268
+          }
+        }
+      },
+      {
+        "round": 6,
+        "best_validation": 2.4166663107088824,
+        "improved": false,
+        "programs": {
+          "P6a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 2.4166663107088824
+          },
+          "P6b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 1.2589494781253592
+          }
+        }
+      },
+      {
+        "round": 7,
+        "best_validation": 2.519193739281225,
+        "improved": true,
+        "programs": {
+          "P7a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 2.3233464642098056
+          },
+          "P7b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 2.519193739281225
+          }
+        }
+      },
+      {
+        "round": 8,
+        "best_validation": 2.519193739281225,
+        "improved": false,
+        "programs": {
+          "P8a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 2.3026701601252113
+          },
+          "P8b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 1.9777043383258421
+          }
+        }
+      },
+      {
+        "round": 9,
+        "best_validation": 3.0782970403100016,
+        "improved": true,
+        "programs": {
+          "P9a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 2.499492593796665
+          },
+          "P9b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 3.0782970403100016
+          }
+        }
+      },
+      {
+        "round": 10,
+        "best_validation": 3.0782970403100016,
+        "improved": false,
+        "programs": {
+          "P10a": {
+            "status": "EVALUATED",
+            "validation_mean_J": 3.0686161114565222
+          },
+          "P10b": {
+            "status": "EVALUATED",
+            "validation_mean_J": 2.449825622164073
+          }
+        }
+      }
+    ],
+    "programs": {
+      "L24": {
+        "origin": "P9b",
+        "round": 9,
+        "sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+        "validation_mean_J": 3.0782970403100016
+      },
+      "L24r2": {
+        "origin": "P2a",
+        "round": 2,
+        "sha256": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+        "validation_mean_J": 1.2192292247094139
+      }
+    },
+    "numeric_seconds": 4137.912905699992,
+    "llm_requests": 10,
+    "llm_seconds": 11099.1694896
+  },
+  "references": {
+    "rts24-base": {
+      "status": "OPTIMAL",
+      "objective": 885066.7044303418,
+      "gurobi_gap_percent": 0.0,
+      "elapsed_seconds": 92.17175200000202,
+      "threads": 1,
+      "usage": "gap ruler only"
+    },
+    "rts24-minus": {
+      "status": "OPTIMAL",
+      "objective": 845851.3951116224,
+      "gurobi_gap_percent": 9.43018814627939e-05,
+      "elapsed_seconds": 83.00942480000231,
+      "threads": 1,
+      "usage": "gap ruler only"
+    },
+    "rts24-plus": {
+      "status": "OPTIMAL",
+      "objective": 906091.5526968217,
+      "gurobi_gap_percent": 0.0,
+      "elapsed_seconds": 42.03842379999696,
+      "threads": 1,
+      "usage": "gap ruler only"
+    }
+  },
+  "experiments": [
+    {
+      "instance": "rts24-base",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 17,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 916440.2751210321,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.5447690590601724,
+      "auc": 3.560960548859378,
+      "sa_calls": 236,
+      "operator_calls": 1333,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s17-N+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 17,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 889763.6703681113,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5306906150980596,
+      "auc": 1.000024476230662,
+      "sa_calls": 130,
+      "operator_calls": 8681,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s17-L+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24r2",
+      "archived_arm": "LIT1+SA",
+      "seed": 17,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890280.4800932364,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5890827930591234,
+      "auc": 0.6350103037937745,
+      "sa_calls": 128,
+      "operator_calls": 2834,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s17-LIT1+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 17,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890059.3621887183,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5640996021412741,
+      "auc": 0.6015291369599969,
+      "sa_calls": 108,
+      "operator_calls": 2668,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s17-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 29,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 914455.8913140591,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.3205617990830603,
+      "auc": 3.357450791830885,
+      "sa_calls": 80,
+      "operator_calls": 4671,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s29-L+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24r2",
+      "archived_arm": "LIT1+SA",
+      "seed": 29,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890280.4800932365,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5890827930591365,
+      "auc": 0.6719308894820766,
+      "sa_calls": 98,
+      "operator_calls": 1745,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s29-LIT1+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 29,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890122.4642336682,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.571229239335174,
+      "auc": 0.6058995204710029,
+      "sa_calls": 134,
+      "operator_calls": 3144,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s29-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 29,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 916440.2751210321,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.5447690590601724,
+      "auc": 3.563786912518188,
+      "sa_calls": 194,
+      "operator_calls": 1794,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s29-N+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24r2",
+      "archived_arm": "LIT1+SA",
+      "seed": 41,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890280.4800932365,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5890827930591365,
+      "auc": 0.644811383689404,
+      "sa_calls": 116,
+      "operator_calls": 2632,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s41-LIT1+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 41,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890122.4642336683,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5712292393351872,
+      "auc": 0.6115314524875682,
+      "sa_calls": 144,
+      "operator_calls": 3129,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s41-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 41,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 916440.2751210321,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.5447690590601724,
+      "auc": 3.5641738017992117,
+      "sa_calls": 229,
+      "operator_calls": 1334,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s41-N+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 41,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 913640.8040509942,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.228468484648693,
+      "auc": 3.340130757401954,
+      "sa_calls": 132,
+      "operator_calls": 8239,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s41-L+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 53,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890122.4642336683,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5712292393351872,
+      "auc": 0.6135113101297124,
+      "sa_calls": 140,
+      "operator_calls": 3403,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s53-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 53,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 916440.2751210321,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.5447690590601724,
+      "auc": 3.567628758874133,
+      "sa_calls": 245,
+      "operator_calls": 1357,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s53-N+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 53,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 913640.8040509943,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.2284684846487064,
+      "auc": 3.2726538304760857,
+      "sa_calls": 138,
+      "operator_calls": 9740,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s53-L+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24r2",
+      "archived_arm": "LIT1+SA",
+      "seed": 53,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890059.3621887182,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.564099602141261,
+      "auc": 1.4762366324775857,
+      "sa_calls": 137,
+      "operator_calls": 2230,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s53-LIT1+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 67,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 916440.2751210321,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.5447690590601724,
+      "auc": 3.561349212782068,
+      "sa_calls": 238,
+      "operator_calls": 1328,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s67-N+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 67,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 913640.8040509942,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 3.228468484648693,
+      "auc": 3.2758294396277265,
+      "sa_calls": 132,
+      "operator_calls": 8883,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s67-L+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24r2",
+      "archived_arm": "LIT1+SA",
+      "seed": 67,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 890320.9666245378,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5936571975756123,
+      "auc": 0.6386553581421585,
+      "sa_calls": 135,
+      "operator_calls": 3112,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s67-LIT1+SA.json"
+    },
+    {
+      "instance": "rts24-base",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 67,
+      "seconds": 600.0,
+      "status": "TIME_LIMIT",
+      "upper": 889763.6703681112,
+      "reference": 885066.7044303418,
+      "reference_gap_percent": 0.5306906150980465,
+      "auc": 0.5980879364354149,
+      "sa_calls": 142,
+      "operator_calls": 3414,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-base-s67-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 83,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 864328.448407422,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 2.184432561391157,
+      "auc": 2.2389394621399195,
+      "sa_calls": 73,
+      "operator_calls": 1576,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s83-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 83,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 878907.5393356297,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 3.9080321218415706,
+      "auc": 3.951589092268203,
+      "sa_calls": 107,
+      "operator_calls": 1088,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s83-N+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 83,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 864795.1007417913,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 2.239602102644638,
+      "auc": 2.4146589694062,
+      "sa_calls": 68,
+      "operator_calls": 3366,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s83-L+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 101,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 878907.5393356297,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 3.9080321218415706,
+      "auc": 3.9575109874685395,
+      "sa_calls": 110,
+      "operator_calls": 997,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s101-N+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 101,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 864795.1007417913,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 2.239602102644638,
+      "auc": 2.4212296378363285,
+      "sa_calls": 70,
+      "operator_calls": 3588,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s101-L+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 101,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 864328.4484074219,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 2.184432561391143,
+      "auc": 2.233293704180515,
+      "sa_calls": 74,
+      "operator_calls": 1718,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s101-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 137,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 866227.1413987451,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 2.408903786750135,
+      "auc": 2.6040415300605786,
+      "sa_calls": 68,
+      "operator_calls": 3254,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s137-L+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 137,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 847776.3831747947,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 0.2275799359435106,
+      "auc": 0.3138714541507491,
+      "sa_calls": 66,
+      "operator_calls": 1478,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s137-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-minus",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 137,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 876671.8569644081,
+      "reference": 845851.3951116224,
+      "reference_gap_percent": 3.643720638271035,
+      "auc": 3.909857315634411,
+      "sa_calls": 100,
+      "operator_calls": 1179,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "e9ab58ad8fd4eb50b343614b76ac90389af2eb8df906b13f517d40cd129fad02",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-minus-s137-N+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 83,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 912472.2234021196,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 0.7041971295623388,
+      "auc": 0.7630530105747992,
+      "sa_calls": 75,
+      "operator_calls": 1710,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s83-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 83,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 942048.0501989163,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 3.9683073299907083,
+      "auc": 3.9924337447688982,
+      "sa_calls": 107,
+      "operator_calls": 985,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s83-N+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 83,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 939705.5178556307,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 3.709775801215996,
+      "auc": 3.808167104686923,
+      "sa_calls": 68,
+      "operator_calls": 3140,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s83-L+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 101,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 942048.0501989165,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 3.968307329990721,
+      "auc": 3.9890268900577657,
+      "sa_calls": 110,
+      "operator_calls": 948,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s101-N+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 101,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 912472.2234021195,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 0.7041971295623259,
+      "auc": 0.8523866171723282,
+      "sa_calls": 68,
+      "operator_calls": 3396,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s101-L+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 101,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 912472.2234021196,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 0.7041971295623388,
+      "auc": 0.7747274345146519,
+      "sa_calls": 70,
+      "operator_calls": 1692,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s101-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+L118",
+      "archived_arm": "L+SA",
+      "seed": 137,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 912472.2234021196,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 0.7041971295623388,
+      "auc": 0.9034953982700725,
+      "sa_calls": 69,
+      "operator_calls": 3848,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s137-L+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+L24",
+      "archived_arm": "LIT+SA",
+      "seed": 137,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 912472.2234021196,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 0.7041971295623388,
+      "auc": 0.7676643492845907,
+      "sa_calls": 76,
+      "operator_calls": 1810,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s137-LIT+SA.json"
+    },
+    {
+      "instance": "rts24-plus",
+      "method": "SA+R",
+      "archived_arm": "N+SA",
+      "seed": 137,
+      "seconds": 300.0,
+      "status": "TIME_LIMIT",
+      "upper": 942060.645908502,
+      "reference": 906091.5526968217,
+      "reference_gap_percent": 3.9696974444386592,
+      "auc": 4.010638996583169,
+      "sa_calls": 110,
+      "operator_calls": 1060,
+      "online_llm_calls": 0,
+      "initial_u_sha256": "d866447f04378a42c00a26cf701aeb76057c161a299e83868de6df86b1953e78",
+      "program_sha256": null,
+      "file": "experiment-archive-v1.2.0/results/lit-evaluation-rts24-20261026-213117-7bb610af/runs/rts24-plus-s137-N+SA.json"
+    }
+  ],
+  "corrections": [
+    "v1.1.0 findings.time_to_baseline said L+SA reached the end cost of A within about 10 s (1 s on rts24). Both methods start from the same initialization, which already reaches that cost; the 10 s / 1 s are initialization time, not a speed-up by the program. SA+L118 first strictly improved on that cost at about 35-42 s (ieee118s10) and 5.5-7.3 s (rts24).",
+    "v1.1.0 findings.qubo_bits said the standard encoding needs at least 2,537-14,143 bits. These are count estimates assuming 12-bit registers for theta and each cut slack, not an unconditional lower bound.",
+    "Evaluation F6 legend: the frozen snapshot labelled the early program \"round 1\"; it is P2a from round 2. The figure was re-rendered and the original kept (corrections/correction-001.json in the evaluation directory). No data changed.",
+    "Evaluation pause: paused overnight at 12/38 jobs; the just-started rts24-base-s53-LIT+SA was killed after 0.7 s, marked INTERRUPTED and counted against the budget, then rerun from a cold start (interruptions/pause-001.json)."
+  ],
+  "limitations": [
+    "One system (rts24) for training and evaluation; scenarios generated by this project",
+    "Five base seeds and three seeds per shifted load; engineering gates, not significance tests",
+    "The T1 iteration effect is small: about 6% median AUC reduction and nearly equal final gaps",
+    "Simulated annealing runs on CPU (dwave-samplers); reference optima are used only for after-the-fact comparison"
+  ],
+  "assets": [
+    "core-source-v1.2.0.zip",
+    "experiment-archive-v1.2.0.zip",
+    "archive-manifest-v1.2.0.json",
+    "SHA256SUMS.txt"
+  ],
+  "runtime_source_sha256": {
+    "run_experiment.py": "db06feb4ccbe749f86f9c3001c61f975ecb33be5d69a3c565d50d3c594d60d71",
+    "run_suc.py": "bf7490809ee19d3ed16a3522291438c5f087db8bc1fd8f3e7a6da102d5e30728",
+    "suc_benders/__init__.py": "c658638b5b313518c2074f55e21c74304799058f3cdb80306b3978f4a18d0913",
+    "suc_benders/advisor_request.py": "62fc2617f288211043c83f9b58fb883c99b5a44fbf0797320aa3b810854dc3fe",
+    "suc_benders/anneal.py": "9bf2aa35cf397e7f205288138acf2cb04f53e4b223a085308af54573b0c1954f",
+    "suc_benders/benders.py": "f94d7f50d1f96e21e27e0657773d72130d3495a5ccaeac30d2fa43c7d06a12d1",
+    "suc_benders/config.py": "59059b046819667f2c59d42e5d709dc15a02d992a74d53eeb4ede1349effbbdf",
+    "suc_benders/context.py": "4bd5696d26c091c5ab915d283bf273900599895d7b949e671c9ae34cbbeb3cd4",
+    "suc_benders/data.py": "2a036c1b1a8d745f9cd24861e15e3a8450bf9982ba4074fada104daa2eef0464",
+    "suc_benders/llm.py": "0d3e792b5aeca85aabe3f96c5a6aaaf0696e9c6df9604e0fd13a466bad09f55c",
+    "suc_benders/model.py": "bba90162aaf3d733d83ac3eddbb09730a8a9d5313202d9e53fe4019b3e72774c",
+    "suc_benders/optimization.py": "d03ac122f0c3c512f7adae8772f04566371aba4859f5e2c2719758922d6376cd",
+    "suc_benders/qubo.py": "090b23c4f4531e010e50df0fdc8ffa742bc7fe93f72ae0bf2aecc500d68356f4",
+    "suc_benders/reference.py": "804be0e02f42811e2fad3af9549c3e7ff51c9a17d702e4f9f920f6d2ad5a5775",
+    "suc_benders/search.py": "2312d4d1d2ce4cde624c1eff1711a4dc2123e71525e3e64a777d84d5bca3ea4e",
+    "suc_benders/solver.py": "89254e67694c3c0b1f6e37e83b0f60b1826e2e6e365578bc7dd0bf93c7a0a7c6",
+    "suc_benders/upper_advisor.py": "1abbdd7338203e3f5510aba449e715bfef44cbd41b7ebee67bc540c1038b166e",
+    "suc_benders/validation.py": "ece97e71e2f03e7383cac3ef820ee124668483082cccd18d68112325d16f8456",
+    "offline_pilot.py": "6e4b3b204315927254bba5028a52d03f9ab9f55f911dcee31788c4e534501267",
+    "offline_worker.py": "cc9ea782df126bd2f36f8caa484979ac007424869f2de73826cebec27ef359a6",
+    "programs/L118.py": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+    "programs/L24.py": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+    "programs/L24r2.py": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+    "paper_pilot.py": "0be0ecee0e9b9b5688d7ab06c2df9a525e801cf903197965443627b7be691433",
+    "paper_figures.py": "0fea73a8d49e42b5568cef910464ba6520d45818a858f1ca3573b5fa7402a185",
+    "run_paper_pilot.py": "7f79e40a91c5949f5154832c7d45ebc240779172d637c477fed019661d2afd4f",
+    "make_ieee118_scenarios.py": "332e835e0240df4d530e7ce90b8bc2604225090c463de036cc5be5825d6342e5",
+    "program_training.py": "2316347fc3136b38e602dc90146d8368a4741c8588a8973494cd806dc59d9300",
+    "run_program_training.py": "8d6051e11f1cd21902612f299521aea69bbf0c1231e44f5870a2f6ce6ba2f479",
+    "program_evaluation.py": "3d8faa699636427067b5124133c7c9863bb82e4558fca660aa7486bc03a4473c",
+    "run_program_evaluation.py": "402eb87859e1f626677f0ff748a86783f02efa16a0285a83bd9b8339bfc9a910"
+  },
+  "runtime_source_hash_format": "SHA256 of exact working-tree bytes at release time; Git source archive may normalize text line endings (programs/** is stored byte-exact)",
+  "validation_tests": "py -3.10 -m pytest -q tests: 180 passed"
+}

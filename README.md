@@ -2,7 +2,7 @@
 
 Python 机组组合求解器：先用 Gurobi 求完整模型的参考方案，再由时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步候选。全局评价采用相对参考成本的差距；项目不计算下界。
 
-v1.1.0 加入爬坡可达出力修复，以及多场景 IEEE118 和 RTS24 上 SA+Benders 不加与加离线 LLM 程序 L3 的对比实验，见下文“v1.1.0”一节。v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
+v1.2.0 在 RTS24 上做了 10 轮闭环程序训练，得到程序 L24，通过小型验证实验的三个预登记判据，并统一了方法与程序的命名，见下文“命名”与“v1.2.0”两节。v1.1.0 加入爬坡可达出力修复，以及多场景 IEEE118 和 RTS24 上 SA 与 SA+L118（发布时称 A 与 L+SA）的对比实验，见下文“v1.1.0”一节。v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
 
 当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20，以及 10 场景的 ieee118s10），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
 
@@ -61,6 +61,20 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 机组输入必须明确提供 `initial_output`。运行环境固定为上述 Windows／Python 3.10，TOML 解析直接使用已声明的 `tomli` 依赖。
 
+## 命名
+
+每个方法都是 SA+Benders 加一个算子，记为 `SA+<算子>`。离线 LLM 程序按生成时所用的系统命名，早期轮次的程序再加 `r<轮>`。
+
+| 名称 | 含义 | v1.2.0 之前的名称 |
+|---|---|---|
+| `SA` | 只有 SA+Benders | `A` |
+| `SA+R` | 加随机区间算子 R，不用 LLM；训练中的手写对照 R 是同一个算子 | `N+SA`；训练对照 `R` |
+| `SA+L118` | 加程序 L118（`programs/L118.py`），在 IEEE118 上经两轮生成 | `L+SA`、`L3+SA`；程序 `L3` |
+| `SA+L24` | 加程序 L24（`programs/L24.py`），RTS24 上 10 轮闭环训练的终选程序（第 9 轮的 P9b） | `LIT+SA`；程序 `LIT` |
+| `SA+L24r2` | 加程序 L24r2（`programs/L24r2.py`），同一训练第 2 轮的最佳程序（P2a） | `LIT1+SA`；程序 `LIT1` |
+
+训练中的候选程序记为 `P{轮}{a|b}`，手写对照为 `R`、`H0`–`H3`；判据编号（论文实验的 M1／M2、验证实验的 T1–T3）和图号 F1–F6 不变。已归档的结果目录（`results/paper-*`、`results/lit-*`）及其中的报告、图和运行记录保留实验时的名称，用各自 `snapshot/` 中的代码复现。
+
 ## 核心文件
 
 - `suc_benders/solver.py`：结果类型与主循环，安排参考、初始化、分块轮询和建议。
@@ -71,7 +85,9 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `suc_benders/upper_advisor.py`：异步 LLM 建议调度（常规层批次与并行升级层）；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程与升级层的隔离 `CODEX_HOME`。
 - `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
 - `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20、ieee118s10 输入。
-- `offline_pilot.py`、`offline_worker.py`、`programs/L3.py`：离线 LLM 程序 L3 的沙箱调用与 A／L+SA 冷启动运行；`paper_pilot.py`、`paper_figures.py`、`run_paper_pilot.py`、`make_ieee118_scenarios.py`：论文实验（见 v1.1.0 一节）。
+- `offline_pilot.py`、`offline_worker.py`、`programs/`：离线 LLM 程序 L118、L24、L24r2 的沙箱调用，以及 SA、SA+R、SA+L118、SA+L24r2、SA+L24 的冷启动运行；SA 与 SA+L118 与 v1.1.0 逐位一致。
+- `paper_pilot.py`、`paper_figures.py`、`run_paper_pilot.py`、`make_ieee118_scenarios.py`：论文实验（见 v1.1.0 一节）；`paper_figures.METHOD_STYLE` 是各图共用的方法配色。
+- `program_training.py`、`run_program_training.py`、`program_evaluation.py`、`run_program_evaluation.py`：RTS24 多轮闭环程序训练与验证（见 v1.2.0 一节）。
 - `tests/`：当前分块主线的必要回归；执行 `py -3.10 -m pytest -q tests`。
 - `config.local.json`、`.local/*.lic`：仅本地保留的授权配置。
 
@@ -85,6 +101,79 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
 
+## v1.2.0 RTS24 多轮闭环程序训练与验证
+
+2026-10-26 至 27。L118 只经过两轮生成、一次反馈。这次在 RTS24 上重新做一次完整的闭环训练，得到程序 L24，并用一个小型验证实验检查训练效果；同时按“命名”一节统一了方法与程序的名称。v1.1.0 之后、本节之前的补充实验与交叉测试已作废，整体归档在仓库外，不随本版本发布。
+
+**训练**（`program_training.py`、`run_program_training.py`）：
+- 训练实例由 RTS24 派生，3 个场景（负荷系数 0.9／1.0／1.05，概率 .25／.5／.25），备用 5%。
+  - train 用 3 个负荷扰动变体，validation 用 2 个。
+  - 每个变体与测试实例在各场景负荷上的相对距离都至少 0.5%。
+- 程序额外收到 `scenario_loads` 与 `scenario_probabilities`。接口不变：每个候选最多改动 4 台机组。
+- 评分：在 SA+R 的 120 秒运行上取 3 个锚点（初始、成本降到一半处、终点），各做 15 秒探测，J 为前 10 秒的时间平均改善。
+- 每轮请求两个程序。反馈包含此前每个程序的全部训练测量及失败原因，`closed-loop.json` 断言没有遗漏；验证分数不进入反馈。
+- 停止规则：B_r 为截至第 r 轮的最佳验证均分。
+  - 第 r 轮算“改进”的条件：B_r ≥ B_{r−1} + max(0.10, 3%·|B_{r−1}|)。
+  - 至少 4 轮；连续 2 轮无改进即停，最多 10 轮。
+  - 传输故障不计轮数，只暂停。
+- 结果：跑满 10 轮（`MAX_ROUNDS`）。
+  - 第 1 轮两个程序都用了沙箱禁止的 `set.add`，静态检查不通过。
+  - 最佳验证均分从第 2 轮的 1.22 升到第 9 轮的 3.08。手写对照 R（即 SA+R 的算子）为 0.32。
+  - L24 = 第 9 轮的 P9b（`programs/L24.py`），按残余缺口逐台做动态规划来凑伴随机组。
+- 早期对照原定为第 1 轮最佳程序。因第 1 轮无有效程序，经用户批准，在任何验证运行之前修订：改取第 2 轮验证最佳的 P2a，即 L24r2（`programs/L24r2.py`），判据不变。
+
+**验证**（`program_evaluation.py`、`run_program_evaluation.py`）：
+- 实例：rts24 原工况 5 个种子，每次 600 秒，比较 SA+R、SA+L118、SA+L24r2、SA+L24。负荷扰动的 minus／plus 工况各 3 个种子，每次 300 秒，比较 SA+R、SA+L118、SA+L24。
+- 运行方式：所有对照方法重新冷启动；单任务串行、单线程，在线 LLM 调用为零。
+
+| 预登记判据 | 结果 |
+|---|---|
+| T1 迭代效应：SA+L24 对 SA+L24r2，原工况，≥4/5 且 AUC 差值中位数 > 0 | **通过**：4/5，AUC 差值中位数 0.041（降幅中位数约 6%） |
+| T2 对无 LLM：SA+L24 对 SA+R，原工况，≥4/5 且 AUC 降幅中位数 ≥ 10% | **通过**：5/5，83.0% |
+| T3 对 L118：SA+L24 对 SA+L118，全部 11 对，≥8/11 且 AUC 差值中位数 > 0 | **通过**：8/11（另 2 对终点相同），2.290 |
+
+- 原工况：
+  - SA+R 每次都停在 3.545%。
+  - SA+L118 只在 s17 上走出停滞点（0.531%），其余停在 3.23%–3.32%。
+  - SA+L24 与 SA+L24r2 在 5 个种子上都降到 0.53%–0.59%。
+- 迭代的增益主要在收敛速度，终点差距相差很小。SA+L24r2 只在 s53 上明显较慢，AUC 为 1.48，SA+L24 为 0.61。
+- minus 工况：
+  - SA+L24 有 2 个种子停在 2.18%，只比 SA+L118 的 2.24% 略好；
+  - s137 降到 0.23%。
+- plus 工况：
+  - SA+L24 在 3 个种子上都是 0.704%；
+  - SA+L118 有 2 个种子也到 0.704%，这两对终点相同，不计胜。
+- 复核：审计逐个重新调度 38 个终点，成本一致并通过独立校验，计分重算一致，配对初始化一致。
+- 局限：只有 RTS24 一个系统，场景由本项目生成，种子少。判据是工程门槛，不是显著性检验。
+
+**复现**：
+
+```powershell
+py -3.10 run_program_training.py                        # 每轮生成后暂停，写入审阅文件再继续
+py -3.10 run_program_training.py --resume results/program-training-rts24-<时间>
+py -3.10 run_program_evaluation.py --prepare results/program-training-rts24-<时间>
+py -3.10 run_program_evaluation.py --run results/program-evaluation-rts24-<时间>
+```
+
+改名前后，固定轮数下 5 个方法的运行逐位一致。下面两个目录在改名前生成，目录名、报告、图和运行记录沿用旧名（见“命名”一节），用各自 `snapshot/` 中的代码复现。
+
+**结果目录**：
+
+| 目录 | 内容 |
+|---|---|
+| `results/lit-training-rts24-20261026-170730-82fb090e` | `report.md`、`learning-curve.json`、`closed-loop.json`、F5 学习曲线、全部程序与审阅 |
+| `results/lit-evaluation-rts24-20261026-213117-7bb610af` | `report.md`、`audit.json`、F6 终点差距图；`interruptions/` 记录一次夜间暂停，`corrections/` 记录 F6 图例更正 |
+
+`results/` 不进仓库，这两个目录与运行日志 `results/_lit_logs` 的完整副本在 Release 资产 `experiment-archive-v1.2.0.zip` 中；资产还附有 `NAMING.md` 对照表和用新名重绘的 F6。
+
+[v1.2.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.2.0) 提供：
+- 发布提交对应的源码 `core-source-v1.2.0.zip`；
+- 上述结果目录 `experiment-archive-v1.2.0.zip`；
+- 逐文件 SHA256 清单 `archive-manifest-v1.2.0.json`；
+- 资产校验和 `SHA256SUMS.txt`。
+
+机器可读汇总见 [archives/v1.2.0.json](archives/v1.2.0.json)，其中也记录了对 v1.1.0 两处表述的更正（见 v1.1.0 一节）。
+
 ## v1.1.0 可达出力修复与论文实验
 
 2026-10-25。
@@ -97,12 +186,14 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `BlockSearch.build_qubo`：行为不变的提取，供记录 QUBO 规模使用。
 - 回归测试见 `tests/test_reachability.py`。
 
-### 论文实验：SA+Benders 不加 LLM（A）与加离线 LLM 程序（L+SA）
+### 论文实验：SA 与 SA+L118
 
-**离线程序 L3**（`programs/L3.py`）是事先由 LLM 写好、此后冻结的程序。
+发布时方法称 A 与 L+SA，程序称 L3（`programs/L3.py`）；下文用统一后的名称，见“命名”一节。
+
+**离线程序 L118**（`programs/L118.py`）是事先由 LLM 写好、此后冻结的程序。
 - 它按价格信号提出最多 4 个候选，每个候选最多改动 4 台机组。
 - 程序在隔离子进程（`offline_worker.py`）中运行，每次调用最多 0.5 秒；在线不调用 LLM。
-- L+SA 在每轮 SA 之后让 L3 运行同样长的时间，见 `offline_pilot.run_trial`。
+- SA+L118 在每轮 SA 之后让 L118 运行同样长的时间，见 `offline_pilot.run_trial`。
 - 多场景时，程序收到按概率加权的负荷与出力；候选仍要对全部场景做必要性检查，并经过全天精确调度。
 
 **算例**：
@@ -125,16 +216,16 @@ py -3.10 run_paper_pilot.py --audit results/paper-compare-<时间>
 
 **结果**：每次 600 秒冷启动，12 h 分块，16 sweeps，种子 17、29、41、53、67。
 
-| 算例 | A 终点差距 | L+SA 终点差距 | L+SA 更优 | AUC 降幅中位数 |
+| 算例 | SA 终点差距 | SA+L118 终点差距 | SA+L118 更优 | AUC 降幅中位数 |
 |---|---:|---:|---:|---:|
 | IEEE118，10 场景 | 2.881% | 0.196%–0.633% | 5/5 | 70.8% |
 | RTS24，3 场景 | 5.475% | 0.531%–3.321% | 5/5 | 39.8% |
 
-- L+SA 只用约 10 秒（RTS24 上约 1 秒）就达到了 A 在 600 秒时的终点。
+- 两组初始化时就达到 SA 的终点成本；约 10 秒（RTS24 上约 1 秒）是初始化耗时，不作为 L118 加速成绩。SA+L118 首次严格改善该成本分别发生在约 35–42 秒和 5.5–7.3 秒。
 - 两个预先登记的判据都通过：至少 4/5 个种子更优，且 AUC 降幅中位数 ≥ 10%。
 - 复核通过：判据重算一致；方案重新调度后成本一致并通过独立校验；实例文件和参考解的哈希一致。
-- 运行结束时，本文块 QUBO 为 1,413–2,490 位。若用标准编码（θ 二进制展开，加上每条割一个松弛寄存器）编码同一批已存割，至少需要 2,537–14,143 位，见报告 E2 表。场景在子问题中被聚合成一条割，因此场景数不进入 QUBO。
-- **案例**：在 A 的终点方案上，L3 第 3 次调用就把 G5 在第 1–6 小时停机。那几个小时按概率加权的边际价格约为 21–24 $/MWh，这一改动使全天成本降低 21,631（−0.58%）。
+- 运行结束时，本文块 QUBO 为 1,413–2,490 位。假设 θ 和每条割的松弛寄存器均取 12 位，编码同一批已存割的计数估算为 2,537–14,143 位；另见 E2 表的一位假设。这不是无条件下界，本文最紧割费用代理也不宣称与完整多割主问题等价。场景在子问题中聚合，QUBO 不为每个场景复制一组变量。
+- **案例**：在 SA 的终点方案上，L118 第 3 次调用就把 G5 在第 1–6 小时停机。那几个小时按概率加权的边际价格约为 21–24 $/MWh，这一改动使全天成本降低 21,631（−0.58%）。
 - **局限**：场景由本项目生成，零备用；每个算例 5 个种子；SA 在 CPU 上运行。
 
 **结果目录**：
