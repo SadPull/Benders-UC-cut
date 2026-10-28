@@ -5,8 +5,9 @@ import numpy as np
 import pytest
 
 import offline_pilot as pilot
-import paper_pilot
 from offline_worker import check_source
+from suc_benders.config import load_options
+from suc_benders.data import load_data
 from suc_benders.reference import solve_reference
 from conftest import make_whole
 
@@ -64,8 +65,12 @@ def test_trials_are_reproducible_with_fixed_rounds_and_bursts(tiny, options):
 
 def test_l118_proposes_on_the_multi_scenario_ieee118_initial_schedule():
     from suc_benders import solver
-    d, scenarios = paper_pilot.instance('ieee118s10')
-    o = paper_pilot.options('ieee118s10', 17, 60.)
+    folder = pilot.ROOT/'instances'/'ieee118s10'
+    d, scenarios = load_data(folder/'units.json', folder/'stochastic.json')
+    # 论文实验的纯 SA 设置：12 h 分块、16 sweeps、LLM 关闭。
+    o = load_options(dict(data_file=str(folder/'units.json'), scenario_file=str(folder/'stochastic.json'),
+                          seed=17, time_limit=60., block_hours=12, sa_sweeps=16, max_rounds=10**6,
+                          llm_enabled=False, verbose=False))
     run = solver._Run(o, perf_counter(), {}, perf_counter())
     solver._initialize(run, d, scenarios, None)
     whole = run.whole

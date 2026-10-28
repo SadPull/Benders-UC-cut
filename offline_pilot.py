@@ -22,7 +22,7 @@ from offline_worker import check_source, intervals, make_candidate
 
 ROOT = Path(__file__).resolve().parent
 # 程序按生成时所用的系统命名：L118 在 IEEE118 上生成；L24、L24r2 是 RTS24 多场景多轮闭环训练
-# （run_program_training.py）的终选程序与第 2 轮最佳程序。
+# （v1.2.0，训练脚本见 v1.3.0 Release 的 experiment-source）的终选程序与第 2 轮最佳程序。
 L118 = ROOT/'programs'/'L118.py'
 L24 = ROOT/'programs'/'L24.py'
 L24r2 = ROOT/'programs'/'L24r2.py'
