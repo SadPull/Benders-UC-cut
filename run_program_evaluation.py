@@ -376,7 +376,7 @@ def figure(rows, folder):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from paper_figures import METHOD_STYLE
+    from paper_figures import METHOD_STYLE, style as axis_style
     names = {study.CONTROL_ARM: 'SA+R (no LLM)', study.L118_ARM: 'SA+L118',
              study.EARLY_ARM: 'SA+L24r2 (early)', study.FINAL_ARM: 'SA+L24 (final)'}
     keys = list(dict.fromkeys((r['instance'], r['seed']) for r in rows))
@@ -393,7 +393,8 @@ def figure(rows, folder):
                    facecolors=style['color'] if style['filled'] else 'none', label=names[arm], zorder=3)
     ax.set_xticks(range(len(keys)))
     ax.set_xticklabels([f"{i.split('-')[1]}\ns{s}" for i, s in keys], fontsize=7)
-    ax.set_ylabel('Final gap to reference (%)'); ax.grid(axis='y', alpha=.25)
+    ax.set_ylabel('Final gap to reference (%)', fontsize=8); ax.set_ylim(bottom=0)
+    axis_style(ax); ax.grid(axis='x', visible=False)
     ax.legend(frameon=False, fontsize=8, ncol=len(arms), loc='upper center', bbox_to_anchor=(.5, 1.13))
     fig.tight_layout()
     folder.mkdir(parents=True, exist_ok=True)
