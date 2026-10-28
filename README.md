@@ -2,7 +2,7 @@
 
 Python 机组组合求解器：先用 Gurobi 求完整模型的参考方案，再由时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步候选。全局评价采用相对参考成本的差距；项目不计算下界。
 
-v1.2.0 在 RTS24 上做了 10 轮闭环程序训练，得到程序 L24，通过小型验证实验的三个预登记判据，并统一了方法与程序的命名，见下文“命名”与“v1.2.0”两节。v1.1.0 加入爬坡可达出力修复，以及多场景 IEEE118 和 RTS24 上 SA 与 SA+L118（发布时称 A 与 L+SA）的对比实验，见下文“v1.1.0”一节。v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
+v1.3.0 清理仓库：只保留求解器、离线程序算子、输入和测试；论文、训练、验证、作图与修复上限实验的脚本，以及尚未封存的实验结果，都移到 v1.3.0 Release 中，见下文“v1.3.0”一节。v1.2.0 在 RTS24 上做了 10 轮闭环程序训练，得到程序 L24，通过小型验证实验的三个预登记判据，并统一了方法与程序的命名，见下文“命名”与“v1.2.0”两节。v1.1.0 加入爬坡可达出力修复，以及多场景 IEEE118 和 RTS24 上 SA 与 SA+L118（发布时称 A 与 L+SA）的对比实验，见下文“v1.1.0”一节。v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
 
 当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20，以及 10 场景的 ieee118s10），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
 
@@ -73,7 +73,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 | `SA+L24` | 加程序 L24（`programs/L24.py`），RTS24 上 10 轮闭环训练的终选程序（第 9 轮的 P9b） | `LIT+SA`；程序 `LIT` |
 | `SA+L24r2` | 加程序 L24r2（`programs/L24r2.py`），同一训练第 2 轮的最佳程序（P2a） | `LIT1+SA`；程序 `LIT1` |
 
-训练中的候选程序记为 `P{轮}{a|b}`，手写对照为 `R`、`H0`–`H3`；判据编号（论文实验的 M1／M2、验证实验的 T1–T3）和图号 F1–F6 不变。已归档的结果目录（`results/paper-*`、`results/lit-*`）及其中的报告、图和运行记录保留实验时的名称，用各自 `snapshot/` 中的代码复现。
+训练中的候选程序记为 `P{轮}{a|b}`，手写对照为 `R`、`H0`–`H3`；判据编号（论文实验的 M1／M2、验证实验的 T1–T3）和图号 F1–F6 不变。已归档的结果目录（`results/paper-*`、`results/lit-*`）及其中的报告、图和运行记录保留实验时的名称，用各自 `snapshot/` 中的代码复现。这些目录只在 Release 资产中，见“v1.3.0”一节的封存表。
 
 ## 核心文件
 
@@ -85,10 +85,9 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `suc_benders/upper_advisor.py`：异步 LLM 建议调度（常规层批次与并行升级层）；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程与升级层的隔离 `CODEX_HOME`。
 - `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
 - `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20、ieee118s10 输入。
-- `offline_pilot.py`、`offline_worker.py`、`programs/`：离线 LLM 程序 L118、L24、L24r2 的沙箱调用，以及 SA、SA+R、SA+L118、SA+L24r2、SA+L24 的冷启动运行；SA 与 SA+L118 与 v1.1.0 逐位一致。
-- `paper_pilot.py`、`paper_figures.py`、`run_paper_pilot.py`、`make_ieee118_scenarios.py`：论文实验（见 v1.1.0 一节）；`paper_figures.METHOD_STYLE` 是各图共用的方法配色。
-- `program_training.py`、`run_program_training.py`、`program_evaluation.py`、`run_program_evaluation.py`：RTS24 多轮闭环程序训练与验证（见 v1.2.0 一节）。
-- `tests/`：当前分块主线的必要回归；执行 `py -3.10 -m pytest -q tests`。
+- `offline_pilot.py`、`offline_worker.py`、`programs/`：离线 LLM 程序 L118、L24、L24r2 的沙箱调用，以及 SA、SA+R、SA+L118、SA+L24r2、SA+L24 的冷启动运行（`offline_pilot.run_trial`）；SA 与 SA+L118 与 v1.1.0 逐位一致。
+- `tests/`：求解器与离线程序算子的回归；执行 `py -3.10 -m pytest -q tests`。
+- 实验脚本（论文实验、程序训练与验证、作图、修复上限实验）自 v1.3.0 起不在仓库中，完整代码在 Release 资产 `experiment-source-v1.3.0.zip` 中，解压即可运行，见“v1.3.0”一节。
 - `config.local.json`、`.local/*.lic`：仅本地保留的授权配置。
 
 主线顺序：输入建模 → 独立参考求解 → 连续松弛与初始可行解 → 固定价格的持久分块 SA 轮询 → 全天修复/调度/校验。LLM 异步提供候选；仅全天验证通过的方案能更新 UB。
@@ -100,6 +99,76 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 每批只有一个搜索 QUBO，直接由稀疏 Q 构造 BINARY BQM，合并 `Qij+Qji`，不生成稠密 Ising 矩阵。每条链由采样器根据种子生成随机初态，每次一个 read。退火终态恢复固定变量后，先进行原始块候选评价／割学习，再走既有全天修复、调度和独立校验；通过校验才可更新 UB。温度从 `sa_temperature*energy_unit` 起逐次乘 `sa_cooling`，严格高于 `sa_cutoff*energy_unit` 时执行，倒数作为自定义 beta；每级执行 `sa_sweeps` 次顺序 Metropolis 扫描。[采样器 API](https://docs.dwavequantum.com/en/latest/ocean/api_ref_samplers/generated/dwave.samplers.SimulatedAnnealingSampler.sample.html)
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
+
+## v1.3.0 清理与封存
+
+2026-10-28。仓库只保留方法核心，见“核心文件”一节。此前没有封存的实验结果和全部实验脚本都封存到 v1.3.0 Release；本地 `results/` 在资产下载校验后删除。
+
+**移出的代码**：先在提交 5a72fbc 中完整入库，再在 5b05cc8 中删除。
+- 论文实验：`paper_pilot.py`、`run_paper_pilot.py`、`paper_figures.py`、`make_ieee118_scenarios.py`。
+- 程序训练与验证：`program_training.py`、`run_program_training.py`、`program_evaluation.py`、`run_program_evaluation.py`。
+- 作图：`program_figures.py`。
+- 修复上限实验：`repair_headroom.py`、`run_repair_headroom.py`。
+- 以上脚本的 4 个测试文件。
+
+`tests/test_offline_pilot.py` 改为直接读取 ieee118s10，选项不变。保留部分的测试为 152 passed。
+
+### 修复上限实验（repair-headroom）
+
+2026-10-28，不调用 LLM。
+
+问题：SA 的块样本先由 `validation.repair()` 机械修复。如果修复是理想的，纯 SA 样本能不能变成改进？只有能，才值得让 LLM 来做修复。
+
+做法：
+- rts24 跑 5 个种子，ieee118s10 跑 2 个种子，每次 300 秒纯 SA，记录全部样本。
+- 每个种子抽取与当时 incumbent 不同的去重样本：rts24 每种子 120 个。ieee118s10 每种子计划 60 个，在 oracle 时限内只完成了 38 个。
+- 每个样本做精确最小改动修复 P0：先在完整模型上找与原样本 Hamming 距离最小的可行方案，再在这个距离内取真实成本最低的方案。
+- Gurobi 只作诊断标尺；是否改进以独立调度校验后的成本为准。
+
+预登记判据（rts24）：
+- PASS：至少 3/5 个种子有改进样本，且合并改进率 ≥ 1%。
+- FAIL：至多 1/5 个种子有改进样本，unresolved ≤ 10%，且每个种子重放至少 60 个样本。
+
+| 算例 | 重放样本 | P0 改进 | 原样本离散可行 | 现有修复相对 incumbent（各种子中位数） | P0 相对 incumbent（各种子中位数） |
+|---|---:|---:|---:|---:|---:|
+| rts24 | 600 | 0 | 0 | +16.2% 至 +16.7% | +19.1% 至 +20.6% |
+| ieee118s10 | 76 | 0 | 0 | +2.1% 至 +2.2% | +2.5% 至 +2.6% |
+
+- rts24 上，把最小改动放宽 Δ=2 的 200 个样本同样 0 个改进。所有样本都没有 unresolved。
+- 现有修复从不失败，但修复后的方案都比 incumbent 贵。P0 的改动约为现有修复的一半（rts24 中位 14–16 位，现有修复为 32–37.5 位），成本反而更高。
+- SA 样本离 incumbent 很远：rts24 的中位距离为 138–140 位（全天共 768 位），ieee118s10 为 184.5–186 位。
+- 对照（只作描述），相对 incumbent：
+
+  | 算例 | 只放开块 1（C_b） | 只放开块 2（C_b） | incumbent 的 Hamming-2 球 |
+  |---|---:|---:|---:|
+  | rts24 | −4.23% | −0.92% | −0.61% |
+  | ieee118s10 | −1.71% | −1.00% | −0.19% |
+
+  也就是说，改进就在 incumbent 附近，但 SA 从来没有采到那里。
+- **结论**：FAIL。按预登记的解读规则，问题出在 SA 样本本身（QUBO 费用代理或退火），不在修复。因此不做 LLM 修复。
+- **更正**：`report.md` 和 `summary.json` 写的是 INVALID。原因是复核 5 把 rts24-s67 的 `sa:138:2` 判为与重算的修复不一致，而这条记录在记录运行到截止时间时还没有评估，`commitment_id` 为空。该样本无论记为 N/A 还是排除（剩 599 个），判据都是 FAIL。说明见目录下的 `corrections/correction-001.json`，由 `corrections/correction_001.py` 生成；原文件均未改动。
+
+### 封存位置
+
+`results/` 不进仓库。各结果目录的完整副本：
+
+| 目录 | Release 资产 |
+|---|---|
+| `results/paper-reference-20261025-124811-c6f41da2`、`results/paper-compare-20261025-125905-c264cdcf`、`results/paper-case-20261025-133936-d0ed2658` | v1.1.0 `experiment-archive-v1.1.0.zip` |
+| `results/lit-training-rts24-20261026-170730-82fb090e`、`results/lit-evaluation-rts24-20261026-213117-7bb610af`、`results/_lit_logs` | v1.2.0 `experiment-archive-v1.2.0.zip` |
+| `results/repair-headroom-20261028-112213-f5f97cef`（含更正） | v1.3.0 `experiment-archive-v1.3.0.zip` |
+| `results/figures-v1.1.0`、`results/figures-v1.2.0`：用统一名称重绘的 v1.1.0、v1.2.0 图和 `data.md` 数据表，由 `program_figures.py` 生成 | v1.3.0 `experiment-archive-v1.3.0.zip` |
+
+删除本地 `results/` 之前，三个实验归档都从 GitHub 下载回来，逐个确认本地每个文件（`__pycache__` 除外）都在其中且字节一致。
+
+[v1.3.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.3.0) 提供：
+- 发布提交对应的核心源码 `core-source-v1.3.0.zip`；
+- 清理前的完整源码 `experiment-source-v1.3.0.zip`（提交 5a72fbc，含全部实验脚本与测试）；
+- 上述新封存的结果目录 `experiment-archive-v1.3.0.zip`；
+- 逐文件 SHA256 清单 `archive-manifest-v1.3.0.json`；
+- 资产校验和 `SHA256SUMS.txt`。
+
+机器可读汇总见 [archives/v1.3.0.json](archives/v1.3.0.json)。
 
 ## v1.2.0 RTS24 多轮闭环程序训练与验证
 
@@ -154,6 +223,8 @@ py -3.10 run_program_training.py --resume results/program-training-rts24-<时间
 py -3.10 run_program_evaluation.py --prepare results/program-training-rts24-<时间>
 py -3.10 run_program_evaluation.py --run results/program-evaluation-rts24-<时间>
 ```
+
+这些脚本自 v1.3.0 起移出仓库，在 `experiment-source-v1.3.0.zip` 中运行。
 
 改名前后，固定轮数下 5 个方法的运行逐位一致。下面两个目录在改名前生成，目录名、报告、图和运行记录沿用旧名（见“命名”一节），用各自 `snapshot/` 中的代码复现。
 
@@ -213,6 +284,8 @@ py -3.10 run_paper_pilot.py --compare results/paper-reference-<时间>    # 先�
 py -3.10 run_paper_pilot.py --case results/paper-compare-<时间>
 py -3.10 run_paper_pilot.py --audit results/paper-compare-<时间>
 ```
+
+这些脚本（含生成 `instances/ieee118s10` 的 `make_ieee118_scenarios.py`）自 v1.3.0 起移出仓库，在 `experiment-source-v1.3.0.zip` 中运行。
 
 **结果**：每次 600 秒冷启动，12 h 分块，16 sweeps，种子 17、29、41、53、67。
 
