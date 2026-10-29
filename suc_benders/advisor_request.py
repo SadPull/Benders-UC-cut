@@ -155,6 +155,9 @@ def _kill_tree(pid):
 # 全局 AGENTS.md、memories 和会话记录不复制，只保留登录信息与模型提供方等其余设置。
 ISOLATED_DROP = ('features', 'memories', 'plugins', 'hooks', 'mcp_servers', 'marketplaces', 'desktop',
                  'projects', 'notify')
+# 这些设置是相对 CODEX_HOME 的文件路径；隔离 home 里没有这些文件，改写成指向原 home 的绝对路径，
+# 否则 CLI 启动即报 os error 2。
+HOME_RELATIVE = ('model_catalog_json',)
 
 
 def _toml_value(value, path):
@@ -187,6 +190,9 @@ def isolated_home():
     config = tomli.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
     for key in ISOLATED_DROP:
         config.pop(key, None)
+    for key in HOME_RELATIVE:
+        if isinstance(config.get(key), str) and not Path(config[key]).is_absolute():
+            config[key] = str(source/config[key])
     lines = []
     _toml_table(config, (), lines)
     text = '\n'.join(lines)+'\n'

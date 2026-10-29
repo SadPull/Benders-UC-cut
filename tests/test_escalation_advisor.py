@@ -258,6 +258,13 @@ def test_isolated_home_keeps_login_and_provider_only(codex_home, tmp_path):
     assert config['tui']['model_availability_nux']['gpt-6.1-sol'] == 1
 
 
+def test_isolated_home_points_home_relative_files_at_the_user_home(codex_home):
+    import tomli
+    (codex_home/'config.toml').write_text('model_catalog_json = "models.json"\n'+USER_CONFIG, encoding='utf-8')
+    config = tomli.loads((transport.isolated_home()/'config.toml').read_text(encoding='utf-8'))
+    assert config['model_catalog_json'] == str(codex_home/'models.json')
+
+
 @pytest.mark.parametrize('extra', ['[[profiles]]\nname = "a"\n', 'x = [{a = 1}]\n', 'when = 1979-05-27T07:32:00Z\n'])
 def test_unsupported_codex_config_fails_without_leftovers(codex_home, tmp_path, extra):
     (codex_home/'config.toml').write_text(extra+USER_CONFIG if extra.startswith(('x', 'when')) else USER_CONFIG+extra,
