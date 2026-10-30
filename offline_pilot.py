@@ -1,4 +1,4 @@
-"""离线 LLM 程序：沙箱调用、候选检查，以及各方法（SA、SA+R、SA+L118、SA+L24r2、SA+L24）的一次冷启动运行。"""
+"""离线 LLM 程序：沙箱调用、候选检查，以及各方法（SA、SA+R、SA+L118、SA+L24r2、SA+L24、SA+L24x）的一次冷启动运行。"""
 # 在线不调用 LLM；L118、L24、L24r2 是事先写好的冻结程序（programs/），在隔离子进程中运行。参考最优解只用来计算差距，不注入搜索。
 import json
 import os
@@ -26,11 +26,16 @@ ROOT = Path(__file__).resolve().parent
 L118 = ROOT/'programs'/'L118.py'
 L24 = ROOT/'programs'/'L24.py'
 L24r2 = ROOT/'programs'/'L24r2.py'
-PROGRAMS = {'SA+L118': L118, 'SA+L24r2': L24r2, 'SA+L24': L24}
+# L24x：2026-10-30 小型程序演化训练（12 台接口、停滞锚点、MAP-Elites）的终选程序 P3a。
+L24x = ROOT/'programs'/'L24x.py'
+PROGRAMS = {'SA+L118': L118, 'SA+L24r2': L24r2, 'SA+L24': L24, 'SA+L24x': L24x}
 # 这些组的程序在训练时看到各场景负荷与概率，测试时同样提供。
-SCENARIO_ARMS = ('SA+L24r2', 'SA+L24')
+SCENARIO_ARMS = ('SA+L24r2', 'SA+L24', 'SA+L24x')
 # SA 只做 SA 轮次；SA+R 用随机区间算子 R（不调用 LLM）；其余用对应程序。
-ARMS = ('SA', 'SA+R', 'SA+L118', 'SA+L24r2', 'SA+L24')
+ARMS = ('SA', 'SA+R', 'SA+L118', 'SA+L24r2', 'SA+L24', 'SA+L24x')
+# 每个候选至多改动的机组数：默认 4（各程序训练时的接口）；L24x 在 12 台接口下训练。
+MAX_UNITS = 4
+ARM_MAX_UNITS = {'SA+L24x': 12}
 OP_STREAM = 202610231
 CONTEXT_FIELDS = ('pmin', 'pmax', 'pstart', 'pshut', 'ramp_up', 'ramp_down', 'min_up',
                   'min_down', 'initial_on', 'initial_duration', 'initial_output',
@@ -120,12 +125,12 @@ def context(d, scenarios, plan, scenario_fields=False):
         reserve_fraction=d.reserve_fraction, u=plan.u, p=p, **extra))
 
 
-def candidate_u(base_u, candidate):
+def candidate_u(base_u, candidate, max_units=MAX_UNITS):
     if not isinstance(candidate, dict) or set(candidate)-{'name', 'reason', 'changes'}:
         raise ValueError('Candidate must contain changes and optional name/reason')
     changes = candidate.get('changes')
-    if not isinstance(changes, list) or not 1 <= len(changes) <= 4:
-        raise ValueError('Candidate must edit between one and four units')
+    if not isinstance(changes, list) or not 1 <= len(changes) <= max_units:
+        raise ValueError(f'Candidate must edit between one and {max_units} units')
     return _apply_changes(base_u, changes, *base_u.shape)
 
 
@@ -206,8 +211,9 @@ def random_operator(d, scenarios, plan, seed, deadline):
 
 
 class Operator:
-    def __init__(self, whole, seed, source, scenario_fields=False):
+    def __init__(self, whole, seed, source, scenario_fields=False, max_units=MAX_UNITS):
         self.whole, self.seed, self.source = whole, seed, source
+        self.max_units = max_units
         self.scenario_fields = scenario_fields
         self.program, self.calls, self.empty, self.seconds = None, 0, 0, 0.
         self.generation_seconds = 0.
@@ -244,7 +250,7 @@ class Operator:
             for k, candidate in enumerate(candidates):
                 record = {'proposal_id': f'operator:{self.calls}:{k}'}
                 try:
-                    u = candidate_u(base_u, candidate)
+                    u = candidate_u(base_u, candidate, self.max_units)
                 except (ValueError, TypeError, KeyError) as error:
                     raise ProgramError('Invalid output: '+str(error)) from error
                 x = pack(whole.d, u)
@@ -341,7 +347,7 @@ def run_trial(name, arm, seed, seconds, reference, rounds=None, burst_calls=None
             whole = run.whole
             if arm != 'SA':
                 operator = Operator(whole, seed, PROGRAMS[arm].read_text(encoding='utf-8') if arm in PROGRAMS else None,
-                                    arm in SCENARIO_ARMS)
+                                    arm in SCENARIO_ARMS, ARM_MAX_UNITS.get(arm, MAX_UNITS))
             blocks, cross = partition(m, o.block_hours)
             prices = search_multipliers(m, cross, relaxation.prices[cross])
             run.searches = [search_core.BlockSearch(priced(b, prices), o, j+1, whole) for j, b in enumerate(blocks)]

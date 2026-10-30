@@ -88,6 +88,20 @@ def test_l118_proposes_on_the_multi_scenario_ieee118_initial_schedule():
 def test_programs_keep_their_registered_hashes():
     expected = dict(L118='df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373',
                     L24='4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c',
-                    L24r2='2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb')
+                    L24r2='2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb',
+                    L24x='d884c753b783eff263ef6c5b9e7093c7ca8b973db458d0049bf330bacd0762d8')
     assert {p.stem: hashlib.sha256(p.read_bytes()).hexdigest() for p in pilot.PROGRAMS.values()} == expected
-    assert pilot.ARMS == ('SA', 'SA+R', 'SA+L118', 'SA+L24r2', 'SA+L24')
+    assert pilot.ARMS == ('SA', 'SA+R', 'SA+L118', 'SA+L24r2', 'SA+L24', 'SA+L24x')
+
+
+# 接口上限可配置：默认 4 台不变，L24x 一组为 12 台。
+def test_unit_cap_defaults_to_four_and_l24x_uses_twelve():
+    base = np.zeros((16, 24))
+    edit = lambda n: {'changes': [{'unit': i, 'on_intervals': [{'start': 1, 'end': 24}]} for i in range(1, n+1)]}
+    with pytest.raises(ValueError):
+        pilot.candidate_u(base, edit(5))
+    assert pilot.candidate_u(base, edit(12), 12).sum() == 12*24
+    with pytest.raises(ValueError):
+        pilot.candidate_u(base, edit(13), 12)
+    assert pilot.ARM_MAX_UNITS == {'SA+L24x': 12} and pilot.MAX_UNITS == 4
+    check_source(pilot.L24x.read_text(encoding='utf-8'))
