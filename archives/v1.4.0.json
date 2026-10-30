@@ -1,0 +1,204 @@
+{
+  "version": "v1.4.0",
+  "date": "2026-10-30",
+  "release_url": "https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.4.0",
+  "changes": [
+    "programs/L24x.py added: P3a of the 2026-10-30 program-evolution training on RTS24 (seeded from L24, interface <=12 units)",
+    "offline_pilot gains arm SA+L24x; per-candidate unit cap is configurable (MAX_UNITS=4 default, ARM_MAX_UNITS={'SA+L24x': 12})",
+    "Training and validation scripts (run outside the repository) sealed in experiment-source-v1.4.0.zip; they run against the v1.3.0 experiment-source tree",
+    "results/evo-training-rts24-20261030-101731 and results/l24x-validation-20261030-120413 sealed in experiment-archive-v1.4.0.zip; both removed locally after download and byte-for-byte check"
+  ],
+  "findings": {
+    "evo_training": {
+      "directory": "results/evo-training-rts24-20261030-101731",
+      "diagnosis": [
+        "interface capped at 4 units",
+        "anchors never included the program's own stalls",
+        "J rewarded only early speed and one program was passed per round",
+        "feedback had no stall diagnostics"
+      ],
+      "design": {
+        "unit_cap": 12,
+        "anchor_roles": [
+          "initial",
+          "half",
+          "final",
+          "stall"
+        ],
+        "fitness": "mean J over the 4 anchor roles",
+        "archive": "MAP-Elites by median units per candidate: <=4 / 5-8 / 9-12",
+        "seed_population": [
+          "L24",
+          "L24r2",
+          "R"
+        ],
+        "llm": "gpt-6-astra, effort high, 490-975 s per round",
+        "stop": "min 3, max 6 rounds, patience 2"
+      },
+      "precheck_amendment": {
+        "file": "results/evo-training-rts24-20261030-101731/amendments/amendment-001.json",
+        "original_verdict": "FAIL (0 train stalls proven <=4-locked)",
+        "amended_rule": ">=2 train stalls with B8 saving >= 2x B4 saving",
+        "met_by": [
+          "train1",
+          "train3"
+        ],
+        "timing": "after precheck results, before any LLM call; post-hoc"
+      },
+      "best_validation_fitness": [
+        2.299,
+        2.706,
+        2.784,
+        2.807
+      ],
+      "stop": "CONVERGED after 3 rounds",
+      "chosen": "P3a",
+      "train_fitness_L24x": 3.077,
+      "checks": {
+        "E1": "PASS: minus s83 2.184->0.200%, s101 2.184->0.173% in 60 s from v1.2.0 stall points; base s17, plus s83 not escaped",
+        "E2": "PASS: 27-41% of candidates change >4 units; escapes come from them",
+        "E3": "PASS: cold start vs SA+L24, minus 3/3 wins, base 3/3 reach reference, median AUC reduction 80.6% (6 pairs run concurrently)"
+      }
+    },
+    "full_validation": {
+      "directory": "results/l24x-validation-20261030-120413",
+      "cases": {
+        "rts24-base": {
+          "seeds": [
+            17,
+            29
+          ],
+          "seconds": 600
+        },
+        "rts24-minus": {
+          "seeds": [
+            83,
+            101
+          ],
+          "seconds": 300
+        },
+        "rts24-plus": {
+          "seeds": [
+            83,
+            101
+          ],
+          "seconds": 300
+        }
+      },
+      "execution": "SA+L24x runs serial; 18 control runs 3 at a time (Threads=1 each), user-approved, protocol-amendment-parallel.json",
+      "final_gap_percent": {
+        "arms": [
+          "SA+R",
+          "SA+L118",
+          "SA+L24",
+          "SA+L24x"
+        ],
+        "rows": {
+          "rts24-base": {
+            "17": [
+              3.545,
+              0.531,
+              0.564,
+              0.006
+            ],
+            "29": [
+              3.545,
+              3.321,
+              0.571,
+              0.0
+            ]
+          },
+          "rts24-minus": {
+            "83": [
+              3.908,
+              2.24,
+              2.184,
+              0.0
+            ],
+            "101": [
+              3.908,
+              2.24,
+              2.184,
+              0.228
+            ]
+          },
+          "rts24-plus": {
+            "83": [
+              3.968,
+              3.71,
+              0.704,
+              0.095
+            ],
+            "101": [
+              3.968,
+              0.704,
+              0.704,
+              0.704
+            ]
+          }
+        }
+      },
+      "SA+L24x_vs": {
+        "SA+R": "6/6 wins, median AUC -89.5%",
+        "SA+L118": "5 wins 1 tie, -86.6%",
+        "SA+L24": "5 wins 1 tie, -54.9%"
+      },
+      "reference_reached": "3/6",
+      "control_drift": "none vs v1.2.0 archive",
+      "gurobi_ruler": "proven optimum in 92/83/42 s (base/minus/plus); SA+L24x reaches <=1% in about 4-5 s, <=0.01% in 44, 171, 474 s or not within the budget"
+    },
+    "limitations": [
+      "RTS24 only (32 units, 3 scenarios, load reshaping)",
+      "validation used for stop rule and final choice",
+      "precheck rule amended post hoc",
+      "E1 has 2 escape points; full validation 2 seeds; E3 concurrent"
+    ]
+  },
+  "program_hashes": {
+    "programs/L24x.py": {
+      "bytes_sha256": "d884c753b783eff263ef6c5b9e7093c7ca8b973db458d0049bf330bacd0762d8",
+      "lf_text_sha256_in_training_state": "f0cf20da9375a969a0e122fc1587b4c40250e0c82f166dfdfeb31f3dc5681d38"
+    }
+  },
+  "sealed": {
+    "results/evo-training-rts24-20261030-101731": "v1.4.0 experiment-archive-v1.4.0.zip",
+    "results/l24x-validation-20261030-120413": "v1.4.0 experiment-archive-v1.4.0.zip"
+  },
+  "assets": [
+    "core-source-v1.4.0.zip",
+    "experiment-source-v1.4.0.zip",
+    "experiment-archive-v1.4.0.zip",
+    "archive-manifest-v1.4.0.json",
+    "SHA256SUMS.txt"
+  ],
+  "runtime_source_sha256": {
+    "run_experiment.py": "db06feb4ccbe749f86f9c3001c61f975ecb33be5d69a3c565d50d3c594d60d71",
+    "run_suc.py": "bf7490809ee19d3ed16a3522291438c5f087db8bc1fd8f3e7a6da102d5e30728",
+    "suc_benders/__init__.py": "c34d4e3c72369eb64c22a073e4f831aed02719ac227c27ab0a5cd06112747199",
+    "suc_benders/advisor_request.py": "32e54fdc4d5b305413625d4a6d137d317137c33248d9e62e326d89bb187031cb",
+    "suc_benders/anneal.py": "9bf2aa35cf397e7f205288138acf2cb04f53e4b223a085308af54573b0c1954f",
+    "suc_benders/benders.py": "f94d7f50d1f96e21e27e0657773d72130d3495a5ccaeac30d2fa43c7d06a12d1",
+    "suc_benders/config.py": "59059b046819667f2c59d42e5d709dc15a02d992a74d53eeb4ede1349effbbdf",
+    "suc_benders/context.py": "4bd5696d26c091c5ab915d283bf273900599895d7b949e671c9ae34cbbeb3cd4",
+    "suc_benders/data.py": "2a036c1b1a8d745f9cd24861e15e3a8450bf9982ba4074fada104daa2eef0464",
+    "suc_benders/llm.py": "0d3e792b5aeca85aabe3f96c5a6aaaf0696e9c6df9604e0fd13a466bad09f55c",
+    "suc_benders/model.py": "bba90162aaf3d733d83ac3eddbb09730a8a9d5313202d9e53fe4019b3e72774c",
+    "suc_benders/optimization.py": "d03ac122f0c3c512f7adae8772f04566371aba4859f5e2c2719758922d6376cd",
+    "suc_benders/qubo.py": "090b23c4f4531e010e50df0fdc8ffa742bc7fe93f72ae0bf2aecc500d68356f4",
+    "suc_benders/reference.py": "804be0e02f42811e2fad3af9549c3e7ff51c9a17d702e4f9f920f6d2ad5a5775",
+    "suc_benders/search.py": "2312d4d1d2ce4cde624c1eff1711a4dc2123e71525e3e64a777d84d5bca3ea4e",
+    "suc_benders/solver.py": "89254e67694c3c0b1f6e37e83b0f60b1826e2e6e365578bc7dd0bf93c7a0a7c6",
+    "suc_benders/upper_advisor.py": "1abbdd7338203e3f5510aba449e715bfef44cbd41b7ebee67bc540c1038b166e",
+    "suc_benders/validation.py": "ece97e71e2f03e7383cac3ef820ee124668483082cccd18d68112325d16f8456",
+    "offline_pilot.py": "52c149f08f0a66b06e86001b0070e58b11f133249c2bc8b77a05a18c4cf649c4",
+    "offline_worker.py": "cc9ea782df126bd2f36f8caa484979ac007424869f2de73826cebec27ef359a6",
+    "programs/L118.py": "df7674289f2bef92fd38457a549711c6523b6bb9d6477cbce33ae487bd447373",
+    "programs/L24.py": "4b0d6318b08cec176746100bf0f7f29d48d3dffb1dac22dd5f09668a5581a92c",
+    "programs/L24r2.py": "2d39d418a91e6a1e97add2dea3eb413d2eb37f81ad24925a6f0c76b5b5ab13cb",
+    "neighbourhood_search.py": "130bdf02b88cb5653ae0a9265a252af7a7b0b6a58e1d7cd040e29ac5df6d48b9",
+    "run_neighbourhood_precheck.py": "023dcc2f8b4ca22d334650d68f980b922736d18fff2076aef159c649e77edce6",
+    "programs/L24x.py": "d884c753b783eff263ef6c5b9e7093c7ca8b973db458d0049bf330bacd0762d8"
+  },
+  "runtime_source_hash_format": "SHA256 of exact working-tree bytes at release time; Git source archive may normalize text line endings (programs/** is stored byte-exact)",
+  "validation_tests": "py -3.10 -m pytest -q tests: 164 passed"
+}

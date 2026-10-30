@@ -2,7 +2,7 @@
 
 Python 机组组合求解器：先用 Gurobi 求完整模型的参考方案，再由时间分块 D-Wave 开源 SA 搜索可行上界，LLM（Codex CLI 或流式 HTTP Responses）提供异步候选。全局评价采用相对参考成本的差距；项目不计算下界。
 
-v1.3.0 清理仓库：只保留求解器、离线程序算子、输入和测试；论文、训练、验证、作图与修复上限实验的脚本，以及尚未封存的实验结果，都移到 v1.3.0 Release 中，见下文“v1.3.0”一节。v1.2.0 在 RTS24 上做了 10 轮闭环程序训练，得到程序 L24，通过小型验证实验的三个预登记判据，并统一了方法与程序的命名，见下文“命名”与“v1.2.0”两节。v1.1.0 加入爬坡可达出力修复，以及多场景 IEEE118 和 RTS24 上 SA 与 SA+L118（发布时称 A 与 L+SA）的对比实验，见下文“v1.1.0”一节。v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
+v1.4.0 在 RTS24 上做程序演化训练（种子种群从 L24 起步，接口放宽到每个候选 ≤12 台），得到程序 L24x；2 种子完整验证中 SA+L24x 优于 SA+R、SA+L118 和 SA+L24，见下文“v1.4.0”一节。v1.3.0 清理仓库：只保留求解器、离线程序算子、输入和测试；论文、训练、验证、作图与修复上限实验的脚本，以及尚未封存的实验结果，都移到 v1.3.0 Release 中，见下文“v1.3.0”一节。v1.2.0 在 RTS24 上做了 10 轮闭环程序训练，得到程序 L24，通过小型验证实验的三个预登记判据，并统一了方法与程序的命名，见下文“命名”与“v1.2.0”两节。v1.1.0 加入爬坡可达出力修复，以及多场景 IEEE118 和 RTS24 上 SA 与 SA+L118（发布时称 A 与 L+SA）的对比实验，见下文“v1.1.0”一节。v1.0.0 删除了从未生效的跨块拉格朗日协调与外层循环，块搜索改为全程保留，见下文“v1.0.0”一节。v0.35.0 新增流式 HTTP 通道（`LLM_TRANSPORT="http"`），LLM 改为只输出改动机组的全天开机区间，由程序以提示中的 `incumbent_u` 还原矩阵；候选逐个校验，不合格者单独剔除并记录原因。v0.34.0 起固定采用**随机初态 SA＋修复**。当前保留原始候选评价／割学习、全天修复与物理校验，已删除透视割和独立强化证明进程；下方历史版本实验仍保留当时的认证口径。
 
 当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20，以及 10 场景的 ieee118s10），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
 
@@ -72,6 +72,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 | `SA+L118` | 加程序 L118（`programs/L118.py`），在 IEEE118 上经两轮生成 | `L+SA`、`L3+SA`；程序 `L3` |
 | `SA+L24` | 加程序 L24（`programs/L24.py`），RTS24 上 10 轮闭环训练的终选程序（第 9 轮的 P9b） | `LIT+SA`；程序 `LIT` |
 | `SA+L24r2` | 加程序 L24r2（`programs/L24r2.py`），同一训练第 2 轮的最佳程序（P2a） | `LIT1+SA`；程序 `LIT1` |
+| `SA+L24x` | 加程序 L24x（`programs/L24x.py`），v1.4.0 程序演化训练的终选程序（第 3 轮的 P3a）；每个候选可改 ≤12 台 | — |
 
 训练中的候选程序记为 `P{轮}{a|b}`，手写对照为 `R`、`H0`–`H3`；判据编号（论文实验的 M1／M2、验证实验的 T1–T3）和图号 F1–F6 不变。已归档的结果目录（`results/paper-*`、`results/lit-*`）及其中的报告、图和运行记录保留实验时的名称，用各自 `snapshot/` 中的代码复现。这些目录只在 Release 资产中，见“v1.3.0”一节的封存表。
 
@@ -85,9 +86,9 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 - `suc_benders/upper_advisor.py`：异步 LLM 建议调度（常规层批次与并行升级层）；`llm.py` 负责提示、输出 schema、流式传输与候选还原，`advisor_request.py` 负责 HTTP／Codex 工作进程与升级层的隔离 `CODEX_HOME`。
 - `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
 - `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20、ieee118s10 输入。
-- `offline_pilot.py`、`offline_worker.py`、`programs/`：离线 LLM 程序 L118、L24、L24r2 的沙箱调用，以及 SA、SA+R、SA+L118、SA+L24r2、SA+L24 的冷启动运行（`offline_pilot.run_trial`）；SA 与 SA+L118 与 v1.1.0 逐位一致。
+- `offline_pilot.py`、`offline_worker.py`、`programs/`：离线 LLM 程序 L118、L24、L24r2、L24x 的沙箱调用，以及 SA、SA+R、SA+L118、SA+L24r2、SA+L24、SA+L24x 的冷启动运行（`offline_pilot.run_trial`）；SA 与 SA+L118 与 v1.1.0 逐位一致。每个候选最多改动的机组数默认 `MAX_UNITS = 4`，`ARM_MAX_UNITS` 按方法覆盖（SA+L24x 为 12）。
 - `tests/`：求解器与离线程序算子的回归；执行 `py -3.10 -m pytest -q tests`。
-- 实验脚本（论文实验、程序训练与验证、作图、修复上限实验）自 v1.3.0 起不在仓库中，完整代码在 Release 资产 `experiment-source-v1.3.0.zip` 中，解压即可运行，见“v1.3.0”一节。
+- 实验脚本（论文实验、程序训练与验证、作图、修复上限实验）自 v1.3.0 起不在仓库中，完整代码在 Release 资产 `experiment-source-v1.3.0.zip` 中，解压即可运行，见“v1.3.0”一节；v1.4.0 程序演化训练与验证的脚本在 `experiment-source-v1.4.0.zip` 中。
 - `config.local.json`、`.local/*.lic`：仅本地保留的授权配置。
 
 主线顺序：输入建模 → 独立参考求解 → 连续松弛与初始可行解 → 固定价格的持久分块 SA 轮询 → 全天修复/调度/校验。LLM 异步提供候选；仅全天验证通过的方案能更新 UB。
@@ -99,6 +100,59 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 每批只有一个搜索 QUBO，直接由稀疏 Q 构造 BINARY BQM，合并 `Qij+Qji`，不生成稠密 Ising 矩阵。每条链由采样器根据种子生成随机初态，每次一个 read。退火终态恢复固定变量后，先进行原始块候选评价／割学习，再走既有全天修复、调度和独立校验；通过校验才可更新 UB。温度从 `sa_temperature*energy_unit` 起逐次乘 `sa_cooling`，严格高于 `sa_cutoff*energy_unit` 时执行，倒数作为自定义 beta；每级执行 `sa_sweeps` 次顺序 Metropolis 扫描。[采样器 API](https://docs.dwavequantum.com/en/latest/ocean/api_ref_samplers/generated/dwave.samplers.SimulatedAnnealingSampler.sample.html)
 
 建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
+
+## v1.4.0 RTS24 程序演化训练与完整验证
+
+2026-10-30。v1.2.0 的 L24 在 rts24-minus 上停在 2.184%。只把 L24 的接口放宽到 ≤8 台，就能在 60 秒内逃出，所以问题不在 LLM 写不出这个策略，而在 v1.2.0 的训练环境没给它学的机会：
+1. 提示和检查器把每个候选限制在 ≤4 台；
+2. 锚点全部取自 SA+R 的轨迹，从不包含程序自己的停滞点；
+3. J 只奖励前 10 秒的改善，每轮只把一个最佳程序往下传；
+4. 反馈里没有停滞诊断，也没有跨轮经验。
+
+### 训练
+
+结果目录 `results/evo-training-rts24-20261030-101731`。变体沿用 v1.2.0 的 train1–3 与 validation1–2，验证结果不给 LLM。
+- 接口：每个候选改 1..12 台，每次调用至多 4 个候选，0.5 秒截止；提示只陈述上限。
+- 锚点：initial、half、final（SA+R）之外加 **stall**，即当前最佳程序在训练变体上 30 秒无改进的停滞点，每有新的最佳程序就刷新；验证集的 stall 锚点在第 0 轮用 L24 固定。
+- 适应度为 4 种锚点 J 的均值。MAP-Elites 存档按候选改动台数的中位数分 ≤4、5–8、9–12 三格；每轮请求两个程序，分别从最佳精英和另一格出发。
+- 反馈加入每个 stall 锚点的停滞诊断（提议、拒绝原因、评估、改进数、候选台数分布），并保留 LLM 自写的 lessons。
+- 种子种群 L24、L24r2、R；LLM 为 gpt-6-astra（effort high），每轮 490–975 秒。停止规则：3–6 轮，耐心 2。
+
+**前检与修订**：原判据要求至少 2 个训练 stall 锚点被 ≤4 台尺子证明锁死（B4 无改进、B8 严格改进），结果 0 个满足，B4 仍有 0.06–0.81% 的小改进。看到结果后、调用 LLM 之前，经用户批准改为“B8 改进 ≥ 2×B4 改进”，train1（0.81% / 2.42%）和 train3（0.06% / 1.82%）满足。这是事后修订，见 `amendments/amendment-001.json`。
+
+**过程**：验证适应度 2.299（L24）→ 2.706 → 2.784 → 2.807，第 3 轮后 CONVERGED，终选 P3a 即 L24x。L24x 的训练适应度 3.077。第 1 轮的 lessons 在提示未建议的情况下提出跨出 2–4 台的改动。各程序的候选台数中位数都 ≤4（5–8、9–12 格为空），即小改动为主、夹杂 5–10 台的大改动。
+
+**训练后检查**（`evaluation/`，都通过）：
+- E1：从 v1.2.0 的停滞点出发，60 秒内 minus s83 从 2.184% 降到 0.200%，s101 降到 0.173%；base s17、plus s83 没有逃出。
+- E2：27–41% 的候选改动超过 4 台，逃出都来自这类候选。
+- E3：冷启动 SA+L24x 对 SA+L24，minus 3/3 胜（s83、s137 达到参考，s101 0.228%），base 3/3 达到参考（0.006%、0%、0%，SA+L24 约 0.57%），AUC 中位数降低 80.6%。这一组 6 对并发运行。
+
+### 完整验证
+
+结果目录 `results/l24x-validation-20261030-120413`。规格同 v1.2.0，但种子减为 2 个：rts24-base 种子 17、29 各 600 秒，rts24-minus、rts24-plus 种子 83、101 各 300 秒；对照 SA+R、SA+L118、SA+L24。6 个 SA+L24x 运行串行；之后按用户要求 18 个对照每次 3 个并发（各自 Threads=1），见 `protocol-amendment-parallel.json`，并发只可能拖慢对照。中断的 rts24-base-s17-SA+R 从冷启动重跑。对照的结果与 v1.2.0 归档逐次一致，没有漂移（图 V5）。
+
+最终差距 %／AUC：
+
+| 算例 | 种子 | SA+R | SA+L118 | SA+L24 | SA+L24x |
+|---|---:|---:|---:|---:|---:|
+| rts24-base | 17 | 3.545／3.564 | 0.531／1.058 | 0.564／0.603 | **0.006／0.070** |
+| rts24-base | 29 | 3.545／3.565 | 3.321／3.345 | 0.571／0.609 | **0.000／0.463** |
+| rts24-minus | 83 | 3.908／3.960 | 2.240／2.425 | 2.184／2.247 | **0.000／0.193** |
+| rts24-minus | 101 | 3.908／3.961 | 2.240／2.437 | 2.184／2.240 | **0.228／0.317** |
+| rts24-plus | 83 | 3.968／3.994 | 3.710／3.813 | 0.704／0.768 | **0.095／0.743** |
+| rts24-plus | 101 | 3.968／3.990 | 0.704／0.861 | 0.704／0.780 | 0.704／**0.762** |
+
+- SA+L24x 对 SA+R 6/6 胜，AUC 中位数降低 89.5%；对 SA+L118 5 胜 1 平，降低 86.6%；对 SA+L24 5 胜 1 平，降低 54.9%。平局都是 plus s101，几种 LLM 方法都停在 0.704%。
+- 3/6 次达到参考（REFERENCE_TARGET_REACHED）。
+- 图在 `figures/`：V1 收敛曲线、V2 最终差距、V3 相对 SA+R 的 AUC、V4 候选台数分布、V5 对照漂移、T1 训练学习曲线与 stall J、T2 训练候选台数，数据见 `data.json`。
+
+**与 Gurobi 的时间**（只作尺子）：Gurobi 在 base／minus／plus 上分别 92／83／42 秒证明最优。SA+L24x 约 4–5 秒到 ≤1%，到 ≤0.01% 需要 44、171、474 秒或在时限内达不到。在 RTS24 上它找最优解并不比 Gurobi 快。
+
+**局限**：
+- 训练、验证和测试都在 RTS24 上（32 台机组、3 个场景，只改负荷），跨系统的泛化没有检验。
+- 验证集同时用于停止规则和终选；验证 stall 锚点由 L24 固定。
+- 前检判据是事后修订的；E1 只有 2 个逃出点；完整验证只有 2 个种子，E3 是并发运行。
+- `programs/L24x.py` 按字节保存（CRLF），SHA256 为 `d884c753…0762d8`；训练记录中的 `f0cf20da…681d38` 是同一内容换成 LF 后的哈希。
 
 ## v1.3.0 清理与封存
 
@@ -158,6 +212,7 @@ with open("results/你的运行目录/result.json", encoding="utf-8") as f:
 | `results/lit-training-rts24-20261026-170730-82fb090e`、`results/lit-evaluation-rts24-20261026-213117-7bb610af`、`results/_lit_logs` | v1.2.0 `experiment-archive-v1.2.0.zip` |
 | `results/repair-headroom-20261028-112213-f5f97cef`（含更正） | v1.3.0 `experiment-archive-v1.3.0.zip` |
 | `results/figures-v1.1.0`、`results/figures-v1.2.0`：用统一名称重绘的 v1.1.0、v1.2.0 图和 `data.md` 数据表，由 `program_figures.py` 生成 | v1.3.0 `experiment-archive-v1.3.0.zip` |
+| `results/evo-training-rts24-20261030-101731`、`results/l24x-validation-20261030-120413` | v1.4.0 `experiment-archive-v1.4.0.zip`，脚本在 `experiment-source-v1.4.0.zip`，见 [v1.4.0 Release](https://github.com/SadPull/LLM-benders-SUC/releases/tag/v1.4.0) |
 
 删除本地 `results/` 之前，三个实验归档都从 GitHub 下载回来，逐个确认本地每个文件（`__pycache__` 除外）都在其中且字节一致。
 
