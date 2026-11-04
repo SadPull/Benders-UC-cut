@@ -36,6 +36,21 @@ def test_shortfall_uses_the_backward_shutdown_chain():
         dict(hour=3, reachable_mw=30., load_mw=50., shortfall_mw=20.)]
 
 
+def test_reachable_shortfall_reports_startup_ramp_and_shutdown_limits():
+    # 机组 1 初始开机、出力 50、爬坡 20；机组 2 初始停机，开机首小时受 pstart=30 限制，第 3 小时关机，关机前受 pshut=25 限制。
+    d = NS(n_units=2, horizon=3, pmax=np.array([100., 100.]), pstart=np.array([100., 30.]),
+           pshut=np.array([100., 25.]), ramp_up=np.array([20., 40.]), ramp_down=np.array([100., 100.]),
+           initial_output=np.array([50., 0.]), initial_on=np.array([1, 0]))
+    scenarios = [NS(load=np.array([101., 110., 99.])), NS(load=np.array([90., 115., 100.5]))]
+    u = np.array([[1, 1, 1], [1, 1, 0]])
+    # 可达上界：h1 = 70+30，h2 = 90+min(70, 25)，h3 = 100+0；负荷取各场景最大值。
+    assert reachable_shortfall(d, scenarios, u) == [
+        dict(hour=1, reachable_mw=100., load_mw=101., shortfall_mw=1.),
+        dict(hour=3, reachable_mw=100., load_mw=100.5, shortfall_mw=.5)]
+    assert reachable_shortfall(d, scenarios, np.ones((2, 3))) == [dict(hour=1, reachable_mw=100., load_mw=101.,
+                                                                      shortfall_mw=1.)]
+
+
 def test_repair_adds_units_until_ramp_limited_output_reaches_load(tiny):
     d, scenarios = tiny(2, 4)
     d.pstart[:] = d.pmax; d.ramp_up[:] = 20.

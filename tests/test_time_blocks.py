@@ -100,9 +100,9 @@ def test_round_rotation_retains_local_cuts_and_cache(tiny, options, monkeypatch)
     assert len(whole.diagnostics["local_evaluations"]) == evaluations
 
 
-def test_incomplete_round_neither_counts_nor_requests_advice(tiny, options, monkeypatch):
+def test_incomplete_round_is_not_counted(tiny, options, monkeypatch):
     d, s = tiny(2, 6); now = [0.]
-    options.time_limit = 10; options.llm_enabled = True; options.llm_patience = 1
+    options.time_limit = 10
     monkeypatch.setattr(search_core, "perf_counter", lambda: now[0])
     monkeypatch.setattr(solver, "perf_counter", lambda: now[0])
 
@@ -111,12 +111,11 @@ def test_incomplete_round_neither_counts_nor_requests_advice(tiny, options, monk
         return [], {"bits": 1}
 
     monkeypatch.setattr(search_core, "anneal", late)
-    monkeypatch.setattr("suc_benders.upper_advisor.advisor_request.AdvisorRequest", lambda *args: pytest.fail("incomplete round request"))
     r = solver.solve(d, s, options)
     assert r.status == "TIME_LIMIT" and r.diagnostics["complete_rounds"] == 0
     assert not r.diagnostics["rounds"][0]["complete"]
     assert [row["visits"] for row in r.diagnostics["blocks"]] == [1, 0]
-    assert r.llm_calls == 0 and r.validation["feasible"]
+    assert r.validation["feasible"]
 
 
 def test_exhausted_sa_budget_skips_search_without_waiting(tiny, options):

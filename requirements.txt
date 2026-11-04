@@ -4,4 +4,3 @@ gurobipy==13.0.1
 dwave-samplers==1.8.0
 dimod==0.12.22
 networkx==3.4.2
-tomli==2.4.1

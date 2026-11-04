@@ -1,7 +1,6 @@
 """Time-block SA and shared whole-day candidate evaluation."""
 # 分块搜索只产生候选；全天修复、调度和独立校验通过后才能更新 UB。
 import hashlib
-from copy import deepcopy
 from contextlib import contextmanager
 from time import perf_counter
 from types import SimpleNamespace as NS
@@ -11,17 +10,12 @@ from scipy import sparse
 
 from .anneal import anneal, SA_BACKEND, SA_INITIALIZATION
 from .benders import discrete_feasible, dispatch, hard_rows
-from .context import CandidateEvaluation, LLMContextInput, build_llm_context
-from .llm import MAX_CANDIDATES
-from .upper_advisor import UpperAdvisor, summarize
 from .model import fingerprint, relaxed_rows
 from .optimization import optimize
 from .qubo import search_qubo, fixed_binary
-from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, transition_violations, reachable_shortfall
+from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, reachable_shortfall
 
 
-# LLM 来源的可行方案池保留费用最低的 16 个。
-ADVISOR_POOL_SIZE = 16
 # 块搜索贯穿整个运行：每块至多保存 CUT_LIMIT 条块内割（先进先出），每个搜索 QUBO 只编码
 # anchor 处松弛量最小的 QUBO_FEASIBILITY_CUTS 条可行割，使 QUBO 规模与内存不随轮数增长。
 CUT_LIMIT = 4096
@@ -33,12 +27,12 @@ def _cache_key(x):
     return x.astype(np.uint8).tobytes()
 
 
-# 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，以便收尾已有 LLM 工作。
+# 辅助 SA 工作配额耗尽的内部信号；与整个求解时间耗尽区分，配额耗尽记为 SEARCH_EXHAUSTED。
 class SABudgetExhausted(Exception):
     pass
 
 
-# 各块共用的全天方案、调度缓存、数值反馈、预算和 LLM 管理状态。
+# 各块共用的全天方案、调度缓存、数值反馈和预算。
 class WholeDay:
     """Shared incumbent, measured feedback and deadline across all time blocks."""
 
@@ -46,19 +40,17 @@ class WholeDay:
     def __init__(self, m, full, o, deadline, result, started, progress=None):
         self.m, self.full, self.o, self.deadline = m, full, o, deadline
         self.d, self.scenarios, self.result, self.started = m.d, m.scenarios, result, started
-        self.best, self.dispatches = None, []
-        self.cache, self.advisor_pool = {}, []
-        self.feedback = None
+        self.best = None
+        self.cache = {}
         self.diagnostics = result.diagnostics
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
-                                local_evaluations=[], llm_background_seconds=0., blocks=[], rounds=[],
+                                local_evaluations=[], blocks=[], rounds=[],
                                 complete_rounds=0, timings={name: 0. for name in (
                                     "initialization", "qubo", "annealing", "repair",
-                                    "local_dispatch", "subproblems", "validation", "context", "llm")})
+                                    "local_dispatch", "subproblems", "validation")})
         self.timings = self.diagnostics["timings"]
         self.progress = progress
         self.diagnostics["model_fingerprint"] = fingerprint(m)
-        self.advice = UpperAdvisor(self)
         self.sa_started = None
         self.diagnostics['sa_budget_seconds_used'] = 0.
         self.diagnostics.update(search_mode='time_blocks', sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION)
@@ -182,8 +174,7 @@ class WholeDay:
 
     # 对全天原始 u 做形状/有限值检查及启停/容量修复，记录变化、来源和重复状态。
     # 返回重建的 u/v/w 向量或 None；修复可能涉及块外小时，之后仍须完成连续调度和验证。
-    # 每条记录只存统计所需的原始方案哈希与固定位违例数；只有 LLM 提议保留 raw_u/repaired_u 矩阵，
-    # 供下一次调用的反馈列出改动区间。
+    # 每条记录只存统计所需的原始方案哈希与固定位违例数，不保存方案矩阵。
     def prepare(self, raw, source, record):
         """Repair a whole-day u proposal; the caller then evaluates its block projection."""
         values = np.asarray(raw, dtype='<f8')
@@ -191,8 +182,6 @@ class WholeDay:
         record.update(origin=source, raw_sha256=hashlib.sha256(values.tobytes()).hexdigest(),
                       raw_fixed_bit_violations=int(np.count_nonzero(values[known] != self.fixed_u[known]))
                       if values.shape == self.fixed_u.shape else 0)
-        if source == 'llm':
-            record['raw_u'] = values.tolist()
         self.diagnostics["proposals"].append(record)
         if self.remaining() <= 0:
             record["outcome"] = "deadline"
@@ -201,8 +190,6 @@ class WholeDay:
         if raw.shape != (self.d.n_units, self.d.horizon) or not np.isfinite(raw).all():
             record["outcome"] = "invalid_matrix"
             return None
-        if source == 'llm' and np.isin(raw, [0, 1]).all():
-            record['raw_constraint_violations'] = transition_violations(self.d, raw)
         raw_x = pack(self.d, raw)
         z = commitment(self.d, raw_x)
         required = (1 + self.d.reserve_fraction) * np.max([s.load for s in self.scenarios], axis=0)
@@ -226,8 +213,6 @@ class WholeDay:
         record.update(commitment_id=commitment_hash(z),
                       hamming_u=int(np.count_nonzero(z.u != raw)), repaired_discrete_feasible=feasible,
                       duplicate=_cache_key(x) in self.cache, outcome="repaired")
-        if source == 'llm':
-            record['repaired_u'] = z.u.tolist()
         if not feasible:
             record["outcome"] = "repair_discrete_infeasible"
             return None
@@ -240,7 +225,7 @@ class WholeDay:
     def search_statistics(self):
         """Count whole-day proposals and first validations, never block feasibility."""
         statistics = {}
-        for source in ('sa', 'pool', 'llm', 'llm_rebase'):
+        for source in ('sa', 'pool'):
             proposals = [r for r in self.diagnostics['proposals'] if r['origin'] == source]
             evaluations = [r for r in self.diagnostics['evaluations'] if r['source'] == source]
             raw = {r['raw_sha256'] for r in proposals}
@@ -324,111 +309,15 @@ class WholeDay:
                           continuous_dispatch_completed=True, validation_completed=r.feasible)
         if improved:
             self._adopt_incumbent(r, plan, report)
-        if source in ("llm", "llm_rebase") and r.feasible:
-            self.advisor_pool.append((r.cost, x.copy()))
-            self.advisor_pool.sort(key=lambda item: item[0])
-            del self.advisor_pool[ADVISOR_POOL_SIZE:]
         self.emit("evaluation")
         return r.feasible
 
-    # 以已校验的可行解替换 incumbent，并保存各场景调度及按场景概率还原的平衡/备用对偶价格。
+    # 以已校验的可行解替换 incumbent（含各场景调度）。
     def _adopt_incumbent(self, r, plan, report):
         self.best = r
         for name in ("objective", "u", "v", "w", "scenarios"):
             setattr(self.result, name, getattr(plan, name))
         self.result.validation = report
-        # 联合 QP 的价格含场景概率，并采用 A*x <= rhs 的符号约定。
-        labels = np.asarray(self.full.labels)
-        balance = r.prices[labels == "balance"].reshape((-1, len(self.scenarios)))
-        reserve = r.prices[labels == "reserve"].reshape((-1, len(self.scenarios)))
-        self.dispatches = [NS(**vars(plan.scenarios[k]),
-            balance_dual=-balance[:, k] / s.probability,
-            reserve_dual=reserve[:, k] / s.probability) for k, s in enumerate(self.scenarios)]
-
-    # 按当前最好方案刷新费用、场景价格和上一轮反馈，返回 (上下文, 基础方案, 调用前快照)。
-    # 快照含 u、费用及已评估身份，用于区分本次候选的实测收益和历史缓存结果。
-    def upper_context(self):
-        phase = perf_counter()
-        measurements = self.diagnostics["evaluations"]
-        evaluations = [CandidateEvaluation(r["source"], r["objective"] if r["feasible"] else np.inf,
-            r["fixed_cost"], r["expected_fuel_cost"] if r["feasible"] else np.inf, r["feasible"])
-            for r in measurements]
-        context = build_llm_context(self.d, self.scenarios, LLMContextInput(
-            self.result, self.dispatches, evaluations,
-            [NS(**row) for row in self.diagnostics["iterations"]]))
-        context["previous_call_feedback"] = self.feedback
-        context['reachability'] = deepcopy(self.diagnostics['reachability'])
-        baseline_u = self.result.u.copy()
-        baseline = next(r for r in reversed(measurements) if r["commitment_hash"] == commitment_hash(self.result))
-        costs = dict(total=baseline["objective"], fixed=baseline["fixed_cost"], expected_fuel=baseline["expected_fuel_cost"])
-        prior_ids = {r["commitment_hash"] for r in measurements}
-        pool = sorted(((key, row) for key, row in self.cache.items() if row["feasible"]),
-                      key=lambda item: item[1]["objective"])[:MAX_CANDIDATES]
-        bases = [commitment(self.d, np.frombuffer(key, dtype=np.uint8)) for key, _ in pool]
-        self.timings["context"] += perf_counter() - phase
-        return context, bases, (baseline_u, costs, prior_ids)
-
-    # 修复并评估上界建议，通过全天验证的方案再投影到所有当前价格块，重新调度生成局部割。
-    # 全天割不能直接复制成局部割；最后按调用前快照汇总候选反馈。
-    def consume_upper(self, proposals, info, searches, baseline):
-        baseline_u, costs, prior_ids = baseline
-        if self.remaining() > 0:
-            for raw, record in proposals:
-                x = self.prepare(raw, "llm", record)
-                if x is None or self.remaining() <= 0:
-                    continue
-                if self.accept(x, "llm", record):
-                    projections = []
-                    for search in searches:
-                        if self.remaining() <= 0:
-                            break
-                        b = search.b
-                        projection = search.evaluate(x[b.cols[b.binary]], "llm")
-                        projections.append(dict(block=search.index, completed=projection is not None,
-                                                feasible=projection.feasible if projection is not None else None))
-                    record["block_projections"] = projections
-                    # 没有块搜索时没有局部调度，局部可行性未知，不能按空集记为可行。
-                    record["local_dispatch_completed"] = (bool(searches) and len(projections) == len(searches)
-                        and all(row["completed"] for row in projections))
-                    record["local_feasible"] = (all(row["feasible"] for row in projections)
-                        if record["local_dispatch_completed"] else None)
-        else:
-            for record in info.get("proposals", []):
-                record["outcome"] = "deadline"
-        rebased = (self.rebase(proposals, baseline_u)
-                   if self.remaining() > 0 and not np.array_equal(self.result.u, baseline_u) else [])
-        info["rebase"] = rebased
-        info["accepted"] = sum(p.get("outcome") == "accepted" for p in info.get("proposals", []))
-        self.feedback = summarize(info, baseline_u, costs, self.diagnostics["evaluations"], prior_ids,
-                                  shortfall=lambda u: reachable_shortfall(self.d, self.scenarios, u))
-        self.feedback["rebase"] = dict(attempts=len(rebased),
-            improved=sum(r.get("incumbent_decrease", 0.) > 0 for r in rebased),
-            incumbent_decrease=float(sum(r.get("incumbent_decrease", 0.) for r in rebased)))
-        info["feedback"] = self.feedback
-        self.diagnostics["upper_advice_feedback"] = self.feedback
-
-    # 建议基于请求时的快照生成，返回时 incumbent 可能已被搜索改写。把每个建议相对快照
-    # 改动的机组行移植到当前 incumbent：先整体移植，再逐台贪心移植；有改善即成为新的基准。
-    def rebase(self, proposals, baseline_u):
-        records = []
-        for raw, record in proposals:
-            raw = np.asarray(raw, float)
-            if raw.shape != baseline_u.shape or not np.isfinite(raw).all():
-                continue
-            raw = np.clip(np.rint(raw), 0, 1)
-            units = np.flatnonzero((raw != baseline_u).any(axis=1))
-            groups = [units, *([i] for i in units)] if len(units) > 1 else [units]
-            for k, group in enumerate(groups if len(units) else []):
-                if self.remaining() <= 0:
-                    return records
-                u = self.result.u.copy(); u[group] = raw[group]
-                if np.array_equal(u, self.result.u):
-                    continue
-                entry = {"proposal_id": f"{record['proposal_id']}:rebase:{k}",
-                         "rebased_from": record["proposal_id"], "units": [int(i) + 1 for i in group]}
-                self.accept(self.prepare(u, "llm_rebase", entry), "llm_rebase", entry)
-                records.append(entry)
-        return records
 
 
 # 一个时间块的原始邻域搜索，整个运行只建立一次。块费用按固定价格定价（只含被松弛的连续耦合行），

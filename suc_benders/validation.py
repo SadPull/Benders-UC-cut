@@ -15,34 +15,6 @@ def transition_allowed(d):
     return start, stop
 
 
-def transition_violations(d, u):
-    """Explain known raw timeline violations; unit/hour identifiers are one-based."""
-    start, stop = transition_allowed(d)
-    rows = []
-    for i in range(d.n_units):
-        state, duration = d.initial_on[i], d.initial_duration[i]
-        for t, target in enumerate(u[i]):
-            if target != state:
-                minimum = d.min_up[i] if state else d.min_down[i]
-                reasons = []
-                if duration < minimum:
-                    reasons.append(('minimum_up' if state else 'minimum_down',
-                                    dict(duration=float(duration), required=float(minimum))))
-                if not state and not start[i]:
-                    reasons.append(('startup_unreachable', dict(pmin=float(d.pmin[i]),
-                        startup_limit=float(min(d.pstart[i], d.ramp_up[i])))))
-                if state and not stop[i, t]:
-                    reasons.append(('shutdown_unreachable', dict(
-                        minimum_previous_output=float(d.initial_output[i] if t == 0 else d.pmin[i]),
-                        shutdown_limit=float(d.ramp_down[i] if t == 0 else min(d.pshut[i], d.ramp_down[i])))))
-                if state and t == d.horizon-1:
-                    reasons.append(('terminal_shutdown', {}))
-                rows.extend(dict(unit=i+1, hour=t+1, rule=rule, **detail) for rule, detail in reasons)
-            duration = duration+1 if target == state else 1
-            state = target
-    return rows
-
-
 # 与负荷无关的逐机组逐小时可达出力上界：前向链为开机首小时 <= min(pstart, ramp_up)、持续开机 <= 上一小时上界 + ramp_up
 # （初始开机机组从 initial_output 出发）；后向链为停机前最后一个开机小时 <= min(pshut, ramp_down)、再往前每小时可多 ramp_down；
 # 均不超过 pmax，关机小时为 0。两条链取较小者，一次前向加一次后向即为不动点。只是必要条件，备用不受爬坡约束，故不同于 capacity。

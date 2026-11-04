@@ -83,17 +83,6 @@ def test_numerical_dispatch_status_rejects_candidate_without_caching(tiny, optio
     assert whole.accept(x, 'sa', {})
 
 
-def test_llm_proposal_without_block_searches_has_unknown_local_feasibility(tiny, options):
-    whole = whole_day(tiny, options)
-    _, _, baseline = whole.upper_context()
-    record = {"proposal_id": "llm:1:0"}
-    info = dict(status="OK", proposals=[record])
-    whole.consume_upper([(np.array([[1, 1, 1], [0, 0, 0]]), record)], info, [], baseline)
-    assert record["outcome"] == "accepted"
-    assert record["local_dispatch_completed"] is False and record["local_feasible"] is None
-    assert whole.feedback["proposals"][0]["local_feasible"] is None
-
-
 def test_reachability_fixed_bits_reach_every_block_hard_rows(tiny, options):
     d, scenarios = tiny(1, 6)
     d.ramp_up[:] = 5.; scenarios[0].load[:] = 0.
@@ -109,27 +98,14 @@ def test_reachability_fixed_bits_reach_every_block_hard_rows(tiny, options):
     assert (hard_rows(full).A != before).nnz == 0
 
 
-def test_unknown_options_and_local_config_entries_are_rejected(tmp_path):
-    # 已删除的协调与拉格朗日选项同样视为未知，避免旧配置被静默忽略。
-    for name in ('not_an_option', 'max_outer', 'max_inner', 'lagrangian_time_limit', 'lagrangian_max_iterations'):
+def test_unknown_and_invalid_options_are_rejected():
+    # 已删除的协调、拉格朗日与 LLM 选项同样视为未知，避免旧配置被静默忽略。
+    for name in ('not_an_option', 'max_outer', 'max_inner', 'lagrangian_time_limit', 'lagrangian_max_iterations',
+                 'llm_enabled', 'llm_model'):
         with pytest.raises(ValueError, match='Unknown option'):
-            load_options({name: 1}, config_path=tmp_path/'absent.json')
+            load_options({name: 1})
     with pytest.raises(ValueError):
-        load_options({'max_rounds': 0}, config_path=tmp_path/'absent.json')
-    path = tmp_path/'config.json'
-    path.write_text('{"other": {"user_id": "unused"}}', encoding='utf-8')
-    with pytest.raises(ValueError, match='Unknown local configuration section'):
-        load_options(config_path=path)
-    path.write_text('{"llm": {"no_such_field": 1}}', encoding='utf-8')
-    with pytest.raises(ValueError, match='Unknown configuration option'):
-        load_options(config_path=path)
-
-
-def test_http_channel_requires_url_and_key_without_codex(tmp_path):
-    options = dict(llm_enabled=True, llm_model='m', llm_agent_directory=str(tmp_path))
-    with pytest.raises(ValueError, match='URL and API key'):
-        load_options(options, config_path=tmp_path/'absent.json')
-    assert load_options(dict(options, llm_url='http://x', llm_api_key='k'), config_path=tmp_path/'absent.json').llm_enabled
+        load_options({'max_rounds': 0})
 
 
 def test_initial_output_must_be_explicit(tmp_path):

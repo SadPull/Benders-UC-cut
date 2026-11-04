@@ -1,7 +1,7 @@
-"""Compute a reference, then run time-block search and upper advice."""
+"""Compute a reference, then run the time-block SA+Benders search."""
 # 主循环只安排各阶段的执行顺序、预算与结束状态；候选处理在 search 中。
 from dataclasses import dataclass, field
-from time import perf_counter, sleep
+from time import perf_counter
 from types import SimpleNamespace as NS
 
 import numpy as np
@@ -29,8 +29,6 @@ class Result:
     scenarios: list = field(default_factory=list)
     validation: dict | None = None
     history: list = field(default_factory=list)
-    llm_calls: int = 0
-    llm_history: list = field(default_factory=list)
     diagnostics: dict = field(default_factory=dict)
     elapsed_seconds: float = 0.
     total_elapsed_seconds: float = 0.
@@ -79,7 +77,7 @@ class _Run:
         return False
 
 
-# 主流程：独立参考 → 初始化 → 分块搜索/建议 → 收尾建议 → 整理结果。
+# 主流程：独立参考 → 初始化 → 分块搜索 → 整理结果。
 # 保留阶段名定位失败，并在最终返回前独立复核全天方案。
 def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file=None):
     # started_at 是整体调用起点；搜索预算在参考结束后重新起计。
@@ -100,13 +98,11 @@ def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file
             run.whole.diagnostics['search_stop_reason'] = 'SA_BUDGET'
             run.whole.emit('sa_budget_exhausted')
         if result.status != "REFERENCE_TARGET_REACHED":
-            _finish_advice(run)
+            _finish_search(run)
     except Exception as error:
         # 只有截止时间信号归为 TIME_LIMIT；截止前后抛出的其他异常都是真实失败，保留阶段名。
         result.status = "TIME_LIMIT" if isinstance(error, TimeoutError) else f"{run.stage}_FAILED"
         result.message = f"{type(error).__name__}: {error}"
-    finally:
-        _shutdown(run)
     _finalize(run, d, scenarios)
     return result
 
@@ -127,8 +123,7 @@ def _initialize(run, d, scenarios, progress):
     if whole.best is None:
         raise RuntimeError("No validated initial schedule")
     whole.emit("initialization")
-    if not run.target_reached():
-        whole.advice.kickoff()
+    run.target_reached()
     return m, relaxation
 
 
@@ -159,12 +154,10 @@ def _run_round(run, k):
     record = dict(round=k, complete=False, visited_blocks=[], started_seconds=perf_counter()-run.started)
     whole.diagnostics["rounds"].append(record)
     for j, search in enumerate(searches):
-        whole.advice.advance(searches)
         if run.target_reached():
             break
         run.require_time()
         _visit_block(run, j, search, k, record)
-        whole.advice.advance(searches)
     if result.status == 'REFERENCE_TARGET_REACHED':
         record.update(ended_seconds=perf_counter()-run.started, stop_reason='REFERENCE_TARGET_REACHED')
         whole.emit('reference_target_reached')
@@ -178,8 +171,7 @@ def _visit_block(run, j, search, k, record):
     with whole.sa_work():
         b = search.b
         run.stage = f"ROUND_{k}_BLOCK_{j + 1}"
-        seeds = [whole.best.point[b.cols[b.binary]], *(x[b.cols[b.binary]] for _, x in whole.advisor_pool)]
-        search.step(seeds, k)
+        search.step([whole.best.point[b.cols[b.binary]]], k)
         run.require_time()
         record["visited_blocks"].append(j + 1)
         if search.best_local is not None:
@@ -194,23 +186,15 @@ def _visit_block(run, j, search, k, record):
         run.require_time()
 
 
-# 完整遍历之后：更新 SA 轮计数、处理上界建议，最后刷新轮记录。
-# 迭代记录须在 after_round 之前写入（它会进入 LLM 提示）；建议阶段可能新增割和评估，因此轮末再统计一次。
+# 完整遍历之后：更新 SA 轮计数，记录本轮迭代进度并刷新轮记录。
 def _finish_round(run, k, start, record):
-    o, result, whole, searches = run.o, run.result, run.whole, run.searches
+    result, whole, searches = run.result, run.whole, run.searches
     record.update(complete=True, sa_completed_seconds=perf_counter()-run.started,
                   incumbent_before=start.upper, incumbent_after_sa=result.objective)
     whole.diagnostics["complete_rounds"] += 1
-    iteration = dict(iteration=len(whole.diagnostics["iterations"])+1, round=k,
-                     **_round_progress(run, start), llm_failed=False)
-    whole.diagnostics["iterations"].append(iteration)
-    run.stage = "ADVISOR"
-    whole.advice.after_round(start.upper, start.sa_calls, searches, k, k < o.max_rounds)
-    iteration.update(**_round_progress(run, start),
-                     llm_failed=any(row["status"] not in ("OK", "RUNNING", "CANCELLED")
-                                    for row in result.llm_history[start.llm_calls:]))
-    record.update(ended_seconds=perf_counter()-run.started, incumbent=result.objective,
-                  llm_calls=result.llm_calls-start.llm_calls)
+    whole.diagnostics["iterations"].append(dict(iteration=len(whole.diagnostics["iterations"])+1, round=k,
+                                                **_round_progress(run, start)))
+    record.update(ended_seconds=perf_counter()-run.started, incumbent=result.objective)
     whole.emit("round")
     for search in searches:
         search.summarize()
@@ -218,11 +202,11 @@ def _finish_round(run, k, start, record):
     return run.target_reached()
 
 
-# 一轮开始时的快照：UB、SA 调用数、评估数、LLM 调用数和两类割的累计数量。
+# 一轮开始时的快照：UB、SA 调用数、评估数和两类割的累计数量。
 def _round_start(run):
     optimality, feasibility = _cut_counts(run.searches)
     return NS(upper=run.result.objective, sa_calls=run.whole.diagnostics["sa_calls"],
-              evaluations=len(run.whole.diagnostics["evaluations"]), llm_calls=run.result.llm_calls,
+              evaluations=len(run.whole.diagnostics["evaluations"]),
               optimality=optimality, feasibility=feasibility)
 
 
@@ -238,26 +222,11 @@ def _cut_counts(searches):
             sum(search.cut_totals["feasibility"] for search in searches))
 
 
-# SA 用尽后只收尾已有批次及其升级请求，没有工作时不空等预算。
-def _finish_advice(run):
-    run.stage = "ADVISOR"
-    advice = run.whole.advice
-    while not run.target_reached():
+# 轮数、SA 配额用尽或 SA 关闭后结束搜索，不空等剩余预算。
+def _finish_search(run):
+    if not run.target_reached():
         run.require_time()
-        if (advice.state['batch'] is None and advice.regular.worker is None
-                and advice.escalation.worker is None and not advice.escalation_ready()):
-            run.result.status = "SEARCH_EXHAUSTED"
-            return
-        advice.advance(run.searches)
-        sleep(min(.05, max(0., run.remaining())))
-
-
-# 取消在途 LLM 请求。
-def _shutdown(run):
-    whole = run.whole
-    if whole is None:
-        return
-    whole.advice.close()
+        run.result.status = "SEARCH_EXHAUSTED"
 
 
 # 独立复核最终方案，参考差距由 Result 随当前方案计算。
@@ -277,7 +246,7 @@ def _finalize(run, d, scenarios):
         whole.diagnostics['search_statistics']['new_feasible_per_second'] = (
             whole.diagnostics['search_statistics']['new_feasible']/max(result.elapsed_seconds, 1e-9))
         whole.timings["other"] = max(0., result.elapsed_seconds - sum(whole.timings.values()))
-        result.diagnostics.update(evaluation_count=len(whole.cache), llm_call_count=result.llm_calls,
+        result.diagnostics.update(evaluation_count=len(whole.cache),
                                   time_limit_overshoot=max(0., result.elapsed_seconds-o.time_limit))
         whole.emit("final")
     if o.verbose:

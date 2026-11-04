@@ -1,12 +1,10 @@
-import json
 from types import SimpleNamespace as NS
 
 import numpy as np
 import pytest
 
 import run_suc as api
-from conftest import whole_day
-from suc_benders import llm, reference, solver, search
+from suc_benders import reference, solver, search
 from suc_benders.config import load_options
 
 
@@ -116,36 +114,7 @@ def test_only_optimal_reference_can_stop_at_initialization(tiny, options, monkey
     assert result.reference_gap_percent <= .001
 
 
-def test_reference_record_does_not_change_llm_prompt(tiny, options):
-    whole = whole_day(tiny, options)
-    def body():
-        context, bases, _ = whole.upper_context()
-        return llm.request_body(whole.d, whole.scenarios, whole.result, options, context, bases, 1)
-    before = body()
-    whole.result.reference = dict(record('TIME_LIMIT', 923456.789), u=[[0]], v=[[0]], w=[[0]])
-    assert body() == before
-    assert '923456.789' not in json.dumps(before)
-
-
-@pytest.mark.parametrize('lane', ['regular', 'escalation'])
-def test_exhausted_search_drains_pending_llm_work(tiny, options, monkeypatch, lane):
-    whole = whole_day(tiny, options)
-    run = solver._Run(options, whole.started, {}, whole.started)
-    run.whole, run.result = whole, whole.result
-    channel = getattr(whole.advice, lane)
-    channel.worker = object()
-    polls = []
-    def advance(searches):
-        polls.append(True)
-        if len(polls) == 2:
-            channel.worker = None
-    monkeypatch.setattr(whole.advice, 'advance', advance)
-    monkeypatch.setattr(solver, 'sleep', lambda seconds: None)
-    solver._finish_advice(run)
-    assert len(polls) == 2 and run.result.status == 'SEARCH_EXHAUSTED'
-
-
 @pytest.mark.parametrize('value', [0, -1, float('nan'), True])
-def test_reference_budget_validation(value, tmp_path):
+def test_reference_budget_validation(value):
     with pytest.raises(ValueError, match='reference_time_limit'):
-        load_options({'reference_time_limit': value}, config_path=tmp_path/'absent.json')
+        load_options({'reference_time_limit': value})

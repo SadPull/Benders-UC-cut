@@ -7,7 +7,6 @@ from suc_benders import search
 from suc_benders.benders import hard_rows
 from suc_benders.model import partition
 from suc_benders.qubo import search_qubo
-from suc_benders.validation import pack
 from conftest import make_whole
 
 
@@ -80,16 +79,3 @@ def test_cost_reference_does_not_attract_bits_without_cuts(tiny, options):
     z = search_qubo(m, b, [], 1 - first, [], options)
     assert (a.Q != z.Q).nnz == 0
 
-
-def test_stale_advice_is_rebased_onto_current_incumbent(tiny, options):
-    d, scenarios = tiny(2, 3)
-    baseline = np.ones((2, 3))
-    whole = make_whole(d, scenarios, options, baseline)
-    assert whole.accept(pack(d, np.array([[1, 1, 1], [0, 1, 1]])), "pool")
-    before = whole.result.objective
-    proposal = np.array([[1, 1, 1], [0, 0, 0]])
-    records = whole.rebase([(proposal, {"proposal_id": "llm:1:0"})], baseline)
-    assert [r["rebased_from"] for r in records] == ["llm:1:0"] and records[0]["units"] == [2]
-    assert whole.result.objective < before and whole.result.u[1].tolist() == [0, 0, 0]
-    assert whole.diagnostics["evaluations"][-1]["source"] == "llm_rebase"
-    assert whole.advisor_pool and whole.search_statistics()["llm_rebase"]["new_feasible"] == 1
