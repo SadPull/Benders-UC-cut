@@ -4,7 +4,7 @@ from typing import Callable, Protocol
 
 import numpy as np
 
-from .anneal import anneal
+from .anneal import anneal, SA_BACKEND, SA_INITIALIZATION
 from .constraints import cover_policy, legacy_square_policy
 
 
@@ -33,25 +33,44 @@ def recent_tight_selector(cuts, values, columns, optimality_limit, feasibility_l
     return chosen, selected_feasibility
 
 
-def coverage_selector(cuts, values, columns, optimality_limit, feasibility_limit):
-    """Prefer cuts with a different block slope after retaining the tightest cut."""
+def coverage_selector(cuts, values, columns, optimality_limit, feasibility_limit, *, point):
+    """Greedily close the pool/workset envelope gap at binary witness points."""
     optimality = [k for k, cut in enumerate(cuts) if cut.optimality]
     feasibility = [k for k, cut in enumerate(cuts) if not cut.optimality]
     chosen = []
-    if optimality:
-        chosen = [max(optimality, key=lambda k: values[k])]
-        while len(chosen) < optimality_limit:
-            remaining = [k for k in optimality if k not in chosen]
-            if not remaining:
+    if optimality and optimality_limit:
+        tight = max(range(len(optimality)), key=lambda j: values[optimality[j]])
+        slopes = np.asarray([cuts[k].beta[columns] for k in optimality], float)
+        intercepts = np.asarray([values[k] for k in optimality]) - slopes @ point
+        difference = slopes - slopes[tight]
+        upper = intercepts-intercepts[tight] + np.maximum(difference, 0).sum(axis=1)
+        witnesses = [j for j in np.argsort(-upper, kind='stable') if upper[j] > 1e-12][:64]
+        # shortcut: 用最多 64 个割见证点及锚点/端点评估增益；全盒域保证需要精确分离。
+        probes = np.unique(np.vstack([point, np.zeros(len(columns)), np.ones(len(columns)),
+                                      (difference[witnesses] > 0).astype(float)]), axis=0)
+        scores = intercepts[:, None] + slopes @ probes.T
+        pool_envelope = scores.max(axis=0)
+        selected = [tight]
+        envelope = scores[tight].copy()
+        while len(selected) < optimality_limit:
+            gain = np.minimum(pool_envelope-envelope, np.maximum(scores-envelope, 0)).sum(axis=1)
+            gain[selected] = -np.inf
+            candidate = max(range(len(optimality)), key=lambda j: (gain[j], values[optimality[j]], -optimality[j]))
+            if gain[candidate] <= 1e-12:
                 break
-            selected = np.asarray([cuts[k].beta[columns] for k in chosen], float)
-            candidate = max(remaining, key=lambda k: (
-                float(np.min(np.linalg.norm(selected - cuts[k].beta[columns], axis=1))),
-                float(values[k]),
-                -k))
-            chosen.append(candidate)
+            selected.append(candidate)
+            envelope = np.maximum(envelope, scores[candidate])
+        chosen = [optimality[j] for j in selected]
     selected_feasibility = sorted(feasibility, key=lambda k: -values[k])[:feasibility_limit]
     return chosen, selected_feasibility
+
+
+def sampler_metadata(sampler):
+    name = getattr(sampler, '__name__', type(sampler).__name__)
+    qualified = f"{getattr(sampler, '__module__', type(sampler).__module__)}.{name}"
+    return dict(sampler=name,
+                sa_backend=getattr(sampler, 'sa_backend', SA_BACKEND if sampler is anneal else qualified),
+                sa_initialization=getattr(sampler, 'sa_initialization', SA_INITIALIZATION if sampler is anneal else None))
 
 
 @dataclass(frozen=True)

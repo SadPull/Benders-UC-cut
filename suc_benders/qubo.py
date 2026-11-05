@@ -148,63 +148,6 @@ def search_qubo(m, b, cuts, point, boundary, o, *, constraint_policy=None, extra
     nv = len(free)
     offset = 0.
     slacks, feasibility_bounds = [], []
-    local_bound = max(1., float(np.abs(b.obj[b.binary][free]).sum(initial=0.)))
-    for cut in cuts:
-        local_bound += float(np.abs(cut.beta[free]).sum())
-
-    # 加入 weight*(a*x+c)^2 或 weight*max(0, a*x+c)^2；系数先按整行最大值归一化。
-    # 两自由位以内用精确真值表；可行性割的整数化只放松搜索罚项，不误罚真实可行点。
-    def penalty(js, values, rhs, equality, weight, step, kind='hard'):
-        nonlocal nv, offset
-        js, values = np.asarray(js, int), np.asarray(values, float)
-        scale = np.abs(values).max(initial=0.)
-        if not scale:
-            return
-        values, c, step = values / scale, -rhs / scale, step / scale
-        known = ~np.isnan(fixed[js])
-        c += values[known] @ fixed[js[known]]
-        ids, a = mapping[js[~known]], values[~known]
-        if not len(ids):
-            offset += weight * (c if equality else max(0., c)) ** 2
-            return
-        if not equality:
-            low, high = c + np.minimum(a, 0).sum(), c + np.maximum(a, 0).sum()
-            if high <= 1e-9:
-                return
-            if len(ids) <= 2:
-                e00 = max(0, c) ** 2
-                offset += weight * e00
-                e10 = max(0, c + a[0]) ** 2
-                qi.append(ids[0]); qj.append(ids[0]); qv.append(weight * (e10 - e00))
-                if len(ids) == 2:
-                    e01, e11 = max(0, c + a[1]) ** 2, max(0, c + a.sum()) ** 2
-                    mixed = weight * (e11 - e10 - e01 + e00) / 2
-                    qi.extend([ids[1], ids[0], ids[1]]); qj.extend([ids[1], ids[1], ids[0]])
-                    qv.extend([weight * (e01 - e00), mixed, mixed])
-                return
-            if kind == 'feasibility':
-                step = 1. / (64 * (len(ids)+1))
-                integer_a, integer_c = np.floor(a / step), np.floor(c / step)
-                low_integer, high_integer = _integer_bounds(integer_a, integer_c)
-                feasibility_bounds.append((len(ids)+1) * step)
-                if high_integer <= 0:
-                    return
-                a, c, low = step * integer_a, step * integer_c, step * low_integer
-            maximum = max(0, math.floor(-low / step + 1e-9))
-            weights = bit_weights(maximum)
-            auxiliary = np.arange(nv, nv + len(weights))
-            slacks.append(NS(ids=auxiliary, weights=weights, maximum=maximum, variables=ids,
-                             coefficients=a / step, constant=c / step, step=step, weight=weight, kind=kind))
-            ids, a = np.r_[ids, auxiliary], np.r_[a, step * weights]
-            nv += len(weights)
-        R.append((ids, np.sqrt(weight) * a)); constants.append(np.sqrt(weight) * c)
-
-    for js, values, rhs, equality, kind in rows:
-        if kind == "capacity":
-            _integer_bounds(np.asarray(values, dtype=int), int(-rhs))
-        penalty(js, values, rhs, equality, constraint_policy.weight(kind, local_bound, o), 1., kind)
-
-    # 基线割加非负修正 τ，避免把多条费用斜率相加；固定变量先代入截距。
     optimality = [c for c in cuts if c.optimality]
     cost = b.obj[b.binary].copy()
     base = max(optimality, key=lambda c: c.alpha + c.beta @ point) if optimality else None
@@ -228,6 +171,82 @@ def search_qubo(m, b, cuts, point, boundary, o, *, constraint_policy=None, extra
     for a, c in zip(integer_beta, integer_alpha):
         low, high = _integer_bounds(a, c)
         lows.append(low); highs.append(high)
+    maximum = max([0, *highs])
+    local_bound = max(1., float(np.abs(cost[free] / unit).sum()) + delta * maximum)
+    dominant = getattr(constraint_policy, 'dominant_penalties', False)
+    penalty_weights = {}
+
+    # 加入 weight*(a*x+c)^2 或 weight*max(0, a*x+c)^2；系数先按整行最大值归一化。
+    # 两自由位以内用精确真值表；可行性割的整数化只放松搜索罚项，不误罚真实可行点。
+    def penalty(js, values, rhs, equality, weight, step, kind='hard'):
+        nonlocal nv, offset
+        js, values = np.asarray(js, int), np.asarray(values, float)
+        scale = np.abs(values).max(initial=0.)
+        if not scale:
+            return
+        values, c, step = values / scale, -rhs / scale, step / scale
+        known = ~np.isnan(fixed[js])
+        c += values[known] @ fixed[js[known]]
+        ids, a = mapping[js[~known]], values[~known]
+        if len(ids) and not equality:
+            low, high = c + np.minimum(a, 0).sum(), c + np.maximum(a, 0).sum()
+            if high <= 1e-9:
+                return
+            if len(ids) > 2 and kind == 'feasibility':
+                step = 1. / (64 * (len(ids)+1))
+                integer_a, integer_c = np.floor(a / step), np.floor(c / step)
+                low_integer, high_integer = _integer_bounds(integer_a, integer_c)
+                feasibility_bounds.append((len(ids)+1) * step)
+                if high_integer <= 0:
+                    return
+                a, c, low = step * integer_a, step * integer_c, step * low_integer
+        minimum = step
+        if len(ids) <= 2:
+            residuals = np.asarray([c + a @ bits for bits in product((0, 1), repeat=len(ids))])
+            violations = np.abs(residuals) if equality else residuals
+            positive = violations[violations > 1e-9]
+            if dominant and not len(positive):
+                return
+            minimum = float(positive.min()) if len(positive) else step
+        if dominant:
+            # 一个有效编码违约的代价超过整个归一化费用代理的变化范围。
+            weight /= minimum ** 2
+        entry = penalty_weights.setdefault(kind, dict(rows=0, minimum_weight=np.inf,
+            maximum_weight=0., minimum_violation=np.inf, minimum_penalty=np.inf))
+        entry.update(rows=entry['rows']+1, minimum_weight=min(entry['minimum_weight'], weight),
+                     maximum_weight=max(entry['maximum_weight'], weight),
+                     minimum_violation=min(entry['minimum_violation'], minimum),
+                     minimum_penalty=min(entry['minimum_penalty'], weight * minimum ** 2))
+        if not len(ids):
+            offset += weight * (c if equality else max(0., c)) ** 2
+            return
+        if not equality:
+            if len(ids) <= 2:
+                e00 = max(0, c) ** 2
+                offset += weight * e00
+                e10 = max(0, c + a[0]) ** 2
+                qi.append(ids[0]); qj.append(ids[0]); qv.append(weight * (e10 - e00))
+                if len(ids) == 2:
+                    e01, e11 = max(0, c + a[1]) ** 2, max(0, c + a.sum()) ** 2
+                    mixed = weight * (e11 - e10 - e01 + e00) / 2
+                    qi.extend([ids[1], ids[0], ids[1]]); qj.extend([ids[1], ids[1], ids[0]])
+                    qv.extend([weight * (e01 - e00), mixed, mixed])
+                return
+            maximum = max(0, math.floor(-low / step + 1e-9))
+            weights = bit_weights(maximum)
+            auxiliary = np.arange(nv, nv + len(weights))
+            slacks.append(NS(ids=auxiliary, weights=weights, maximum=maximum, variables=ids,
+                             coefficients=a / step, constant=c / step, step=step, weight=weight, kind=kind))
+            ids, a = np.r_[ids, auxiliary], np.r_[a, step * weights]
+            nv += len(weights)
+        R.append((ids, np.sqrt(weight) * a)); constants.append(np.sqrt(weight) * c)
+
+    for js, values, rhs, equality, kind in rows:
+        if kind == "capacity":
+            _integer_bounds(np.asarray(values, dtype=int), int(-rhs))
+        penalty(js, values, rhs, equality, constraint_policy.weight(kind, local_bound, o), 1., kind)
+
+    # 基线割加非负修正 τ，避免把多条费用斜率相加；固定变量先代入截距。
     maximum = max([0, *highs])
     tau_weights = bit_weights(maximum)
     tau_ids = np.arange(nv, nv + len(tau_weights)); nv += len(tau_weights)
@@ -268,4 +287,4 @@ def search_qubo(m, b, cuts, point, boundary, o, *, constraint_policy=None, extra
               linear=linear, linear_offset=offset, feasibility_relaxation_bound=max(feasibility_bounds, default=0.),
               fixed=fixed, free=free, nx=nx, energy_unit=1.,
               constraint_policy=constraint_policy.name, constraint_rows=len(policy_rows),
-              local_objective_bound=local_bound)
+              local_objective_bound=local_bound, penalty_weights=penalty_weights)

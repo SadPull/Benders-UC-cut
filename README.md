@@ -1,6 +1,6 @@
 # Benders-UC-cut
 
-当前版本：**v2.1.0**（2026-11-05）。本版包含全天认证割共享与按块投影、多割最大值包络、辅助位精确校正与分段退火，以及割池淘汰和缓存失效联动。重构分支新增策略注入和覆盖约束候选；当前归档默认仍使用 `legacy_square`。现有 31 项回归测试通过，包含 8 个子断言；尚未进行长时性能验证。
+当前封存：**archive/post-review-20261105**（基于 v2.1.0，2026-11-05）。包含全天认证割共享与按块投影、多割最大值包络、辅助位精确校正、分段退火，以及经审核修复的策略接口；当前默认仍使用 `legacy_square`。39 项测试、40 个子断言通过。IEEE118 派生算例的 `cover + coverage` 实验已暂停，阶段费用差距为 2.823909%，未完成长时性能验收；变更、验证和实验边界见 [封存说明](ARCHIVE-20261105.md)。
 
 Python 随机机组组合（SUC）求解器。先用 Gurobi 求完整模型的参考方案，再通过时间分块、模拟退火（SA）与 Benders 割搜索低成本的全天可行方案。候选经过修复、连续调度和独立物理／费用校验后，才能更新可行上界（UB）。
 
@@ -20,7 +20,7 @@ py -3.10 run_experiment.py
 - 参考成本差距目标为 0.1%；仅通过校验且状态为 `OPTIMAL` 的参考允许按目标提前停止。
 - `CHECK_ONLY=True` 只检查输入，不执行求解或检查授权。
 
-参考方案只用于比较和停止判断，不用于初始化或候选生成。参考失败时仍继续搜索，参考成本和差距为空。Python 接口为 `from run_suc import run_suc`，通过参数字典覆盖 `suc_benders/config.py` 中的默认配置。`run_suc` 和 `solve` 还接受可选的 `strategies`，用于注入约束策略、割选择器和采样器；不传时保持默认行为。
+参考方案只用于比较和停止判断，不用于初始化或候选生成。参考失败时仍继续搜索，参考成本和差距为空。Python 接口为 `from run_suc import run_suc`，通过参数字典覆盖 `suc_benders/config.py` 中的默认配置。`run_suc` 和 `solve` 还接受可选的 `strategies`，用于注入约束策略、割选择器和采样器；不传时保持默认行为。旧的五参数割选择器继续可用；声明 `point` 参数的选择器额外收到当前块的二进制锚点。自定义采样器可通过 `sa_backend`／`sa_initialization` 属性声明身份，并通过返回诊断覆盖这两个值；未声明时记录其 Python 身份，初始化方式为空。`freeze_experiment(..., strategies=...)` 可记录同一组注入策略的采样器。
 
 ## 算例与输入
 
@@ -40,7 +40,7 @@ py -3.10 run_experiment.py
 每次运行自动创建独立的 `results/manual-seed.../` 目录：
 
 - `summary.json`：最终状态、成本、参考差距、可行性、耗时和搜索统计。
-- `result.json`：开停机安排、各场景调度、费用与精简运行记录。
+- `result.json`：开停机安排、各场景调度、费用与精简运行记录；`blocks` 保留各块最近一次 QUBO 的收益上界、实际罚项权重范围和最小编码违约代价。
 - `reference.json`、`reference-gurobi.log`：参考方案、校验结果和 Gurobi 日志。
 - `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、文件哈希、依赖版本及有效参数。
 - `progress.jsonl`、`latest-solution.json`：运行进度与最新可行方案。
@@ -54,7 +54,8 @@ py -3.10 run_experiment.py
 - `run_experiment.py`、`run_suc.py`：实验入口、结果记录和 Python 接口。
 - `suc_benders/config.py`、`data.py`：参数与输入校验。
 - `suc_benders/model.py`、`optimization.py`、`reference.py`：建模、Gurobi 调用和完整问题参考求解。
-- `suc_benders/solver.py`、`search.py`：初始化、时间块轮询、候选处理和预算管理。
+- `suc_benders/solver.py`、`search.py`：初始化、时间块轮询、提案和预算管理，保留 `WholeDay`／`BlockSearch` 入口。
+- `suc_benders/feedback.py`、`evaluation.py`：割池与缓存失效生命周期、全天候选修复／调度／校验和评估统计。
 - `suc_benders/benders.py`、`qubo.py`、`constraints.py`：割生成、搜索 QUBO 和可替换的约束编码策略。
 - `suc_benders/strategies.py`、`anneal.py`、`validation.py`：割选择/采样策略、模拟退火、修复与独立校验。
 
@@ -64,7 +65,9 @@ py -3.10 run_experiment.py
 
 每次 QUBO 选择当前点最紧最优性割，并按最新优先补足至多 8 条；可行性割按当前点违约程度选择至多 64 条。费用为基线割加共享非负修正 τ，约束 τ 不低于其余割与基线的差值，因此表示工作集的最大值。固定费用只计一次，保留硬约束、总容量和可行性割罚项；没有额外容量裕度。单机容量建模按启停降额条件去重，保留所有有效降额约束。
 
-重构分支提供两种约束策略：`legacy_square` 复现归档版本的平方罚项；`cover` 使用懒加载的 0/1 容量覆盖行，并在重复或离散不可行候选上追加 no-good 行。`sa_cover_weight` 与 `sa_feasibility_weight` 分开控制新策略的覆盖行和可行性割，旧的 `sa_capacity_weight` 仍供兼容策略使用。`sa_constraint_policy` 可取 `legacy_square` 或 `cover`，`sa_cut_selector` 可取 `recent_tight` 或 `coverage`。
+重构分支提供两种约束策略：`legacy_square` 复现归档版本的平方罚项；`cover` 使用懒加载的 0/1 容量覆盖行，针对停机子集按剩余需求计算覆盖阈值，并在重复或离散不可行候选上追加 no-good 行。块外二进制方案变化时，局部 no-good 行失效；全局有效的容量覆盖行继续保留。`sa_cover_weight`、`sa_feasibility_weight`、`sa_hard_weight` 分别提供新策略各类罚项的下限，再按归一化费用代理的变化上界和编码残差步长标定，使一个有效编码违约的罚项大于该上界。两自由位以内按真值表求最小有效违约；更多变量的可行性割按量化步长保守标定。旧的 `sa_capacity_weight` 仍供兼容策略使用。
+
+`sa_constraint_policy` 可取 `legacy_square` 或 `cover`，`sa_cut_selector` 可取 `recent_tight` 或 `coverage`。`coverage` 保留锚点最紧割，再按整个割池与工作集的包络差贪心补充；评估点包括锚点、全零／全一端点和最多 64 个割见证点，不给没有实测包络增益的割占用剩余名额。这是有限探测点上的信息增益启发式，不保证覆盖整个二进制盒域。
 
 基线总费用斜率和割差斜率统一归一化；代入固定位后，以 Δ=1/[64(n+1)] 量化割差（n 为自由位数），理论包络误差不超过 1/128 个归一化费用单位。τ 与逐割松弛采用整数二进制编码，残差平方权重为 2Δ；超过双精度精确整数范围时明确失败。诊断区分选入工作集的割、实际编码的割和量化后在整个自由变量盒域上被基线支配的割，并记录 τ／松弛位数、费用缩放、量化误差界和采样包络违约量。若其他割均被支配，只需编码基线，无需 τ 辅助位。
 

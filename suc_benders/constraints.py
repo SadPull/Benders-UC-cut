@@ -101,6 +101,7 @@ class CoverPolicy(LegacySquarePolicy):
     """Lazy 0/1 covers with no-good rows for repeated local assignments."""
 
     name = "cover"
+    dominant_penalties = True
 
     def rows(self, b, cuts, options, extra_rows=()):
         position = _position(b)
@@ -128,17 +129,20 @@ class CoverPolicy(LegacySquarePolicy):
                 if float(np.asarray(b.d.pmax) @ u) + 1e-6 >= required:
                     continue
                 off = np.flatnonzero(u == 0)
-                cover = _cover_for_capacity(units[:, t][off], np.asarray(b.d.pmax)[off], required)
+                remaining = required - float(np.asarray(b.d.pmax) @ u)
+                cover = _cover_for_capacity(units[:, t][off], np.asarray(b.d.pmax)[off], remaining)
                 if cover is not None:
                     rows.append(cover)
         return rows
 
     def weight(self, kind, local_bound, options):
         if kind in ("capacity_cover", "nogood"):
-            return max(options.sa_cover_weight, 1.1 * local_bound)
-        if kind == "feasibility":
-            return options.sa_feasibility_weight
-        return options.sa_hard_weight
+            baseline = options.sa_cover_weight
+        elif kind == "feasibility":
+            baseline = options.sa_feasibility_weight
+        else:
+            baseline = options.sa_hard_weight
+        return max(baseline, 1.1 * local_bound)
 
 
 legacy_square_policy = LegacySquarePolicy()

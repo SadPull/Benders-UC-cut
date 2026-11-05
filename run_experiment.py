@@ -13,9 +13,9 @@ from uuid import uuid4
 import numpy as np
 
 from run_suc import run_suc
-from suc_benders.anneal import SA_BACKEND, SA_INITIALIZATION
 from suc_benders.config import load_options
 from suc_benders.data import jsonable, load_data
+from suc_benders.strategies import sampler_metadata, strategies_for_options
 
 
 # 默认算例为 data/；切换算例改 DATA_DIR。以下只设置运行参数。
@@ -39,7 +39,7 @@ def save(path, value):
         stream.write("\n")
 
 
-def freeze_experiment(output, options):
+def freeze_experiment(output, options, *, strategies=None):
     paths = [PROJECT / name for name in ("run_experiment.py", "run_suc.py", "requirements.txt", "README.md")]
     paths += sorted((PROJECT / "suc_benders").glob("*.py"))
     folder = Path(options.data_file).resolve().parent
@@ -57,17 +57,20 @@ def freeze_experiment(output, options):
     save(output / "effective-options.json", effective)
     git_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=PROJECT, capture_output=True, text=True)
     git_status = subprocess.run(["git", "status", "--short"], cwd=PROJECT, capture_output=True, text=True)
-    save(output / "manifest.json", dict(
+    metadata = sampler_metadata((strategies or strategies_for_options(options)).sampler)
+    manifest = dict(
         created_at=datetime.now(timezone(timedelta(hours=8))).isoformat(),
         git_head=git_head.stdout.strip() if git_head.returncode == 0 else None,
         git_status=git_status.stdout if git_status.returncode == 0 else None,
         python=sys.version, executable=sys.executable,
-        sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION,
+        **metadata,
         dependencies={name: version(name) for name in
                       ("numpy", "scipy", "gurobipy", "dwave-samplers", "dimod", "networkx")},
         files=hashes, effective_options_sha256=hashlib.sha256(
             (output / "effective-options.json").read_bytes()).hexdigest(),
-        reference_usage="comparison_and_optimal_target_stop", reference_schedule_feedback=False))
+        reference_usage="comparison_and_optimal_target_stop", reference_schedule_feedback=False)
+    save(output / "manifest.json", manifest)
+    return manifest
 
 
 # 当前最好可行方案的快照，不是可恢复的搜索状态。
@@ -78,10 +81,12 @@ def solution_snapshot(result, elapsed):
                 reference_status=result.reference.get("status"), reference_gap_percent=result.reference_gap_percent,
                 sa_backend=result.diagnostics.get("sa_backend"),
                 sa_initialization=result.diagnostics.get("sa_initialization"),
+                sampler=result.diagnostics.get("sampler"),
                 constraint_policy=result.diagnostics.get("constraint_policy"),
                 cut_selector=result.diagnostics.get("cut_selector"),
                 elapsed_seconds=elapsed,
                 model_fingerprint=result.diagnostics.get("model_fingerprint"),
+                blocks=result.diagnostics.get("blocks", []),
                 sa_calls=result.diagnostics.get("sa_calls", 0))
 
 
@@ -134,6 +139,7 @@ def run_summary(result, progress, dimensions, solver_wall, final_save_seconds, s
     return dict(**dimensions, seed=SEED, status=result.status, message=result.message,
                 sa_backend=result.diagnostics.get("sa_backend"),
                 sa_initialization=result.diagnostics.get("sa_initialization"),
+                sampler=result.diagnostics.get("sampler"),
                 constraint_policy=result.diagnostics.get("constraint_policy"),
                 cut_selector=result.diagnostics.get("cut_selector"),
                 upper=result.objective, reference_gap_percent=result.reference_gap_percent,
@@ -202,7 +208,7 @@ def main():
 
     output.mkdir(parents=True, exist_ok=False)
     save(output / "options.json", options)
-    freeze_experiment(output, checked)
+    manifest = freeze_experiment(output, checked)
     progress = ExperimentProgress(output)
     print(f"结果目录：{output}", flush=True)
     print_run_settings()
@@ -217,6 +223,9 @@ def main():
         raise
     solver_wall = perf_counter() - started - result.reference["elapsed_seconds"]
     final_save_started = perf_counter()
+    manifest.update({key: result.diagnostics.get(key, manifest[key])
+                     for key in ('sampler', 'sa_backend', 'sa_initialization')})
+    save(output / "manifest.json", manifest)
     compact = solution_snapshot(result, result.elapsed_seconds)
     compact.update(timings=result.diagnostics.get("timings", {}),
                    search_statistics=result.diagnostics.get("search_statistics", {}),

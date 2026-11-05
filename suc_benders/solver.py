@@ -1,5 +1,5 @@
 """Compute a reference, then run the time-block SA+Benders search."""
-# 主循环只安排各阶段的执行顺序、预算与结束状态；候选处理在 search 中。
+# 主循环安排执行顺序、预算与结束状态；分块提案在 search，全天候选评估在 evaluation。
 from dataclasses import dataclass, field
 from time import perf_counter
 from types import SimpleNamespace as NS
