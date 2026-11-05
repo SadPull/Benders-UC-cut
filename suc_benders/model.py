@@ -3,7 +3,7 @@
 Variable ordering matches MATLAB: variable type, scenario, hour, unit.
 Internal indices and hours are zero based; schedule matrices are unit x hour.
 """
-# 模块职责：建立标准随机 UC 稀疏模型、计算模型指纹，按小时划分时间块，并提供跨块拉格朗日定价。
+# 模块职责：建立标准随机 UC 稀疏模型、计算模型指纹，并按小时划分提案时间块。
 # u/v/w 为开机/启动/停机，p/r 为场景出力/备用；矩阵索引从 0 开始，方案形状为机组 × 小时。
 from types import SimpleNamespace as NS
 import hashlib
@@ -77,12 +77,15 @@ def model(d, scenarios):
             for k in range(S):
                 p, r = ix.p[i, t, k], ix.r[i, t, k]
                 add([u, p], [d.pmin[i], -1], 0, label="pmin")
-                add([p, r, u, v], [1, 1, -d.pmax[i], d.pmax[i] - d.pstart[i]], 0, label="startup_capacity")
-                add([p, r, u], [1, 1, -d.pmax[i]], 0, label="envelope")
-                if t < T - 1:
+                startup = d.pstart[i] < d.pmax[i]
+                shutdown = t < T - 1 and d.pshut[i] < d.pmax[i]
+                # 降额行已蕴含额定容量上界；没有降额时只需一条额定容量行。
+                if startup:
+                    add([p, r, u, v], [1, 1, -d.pmax[i], d.pmax[i] - d.pstart[i]], 0, label="startup_capacity")
+                if shutdown:
                     add([p, r, u, ix.w[i, t + 1]], [1, 1, -d.pmax[i], d.pmax[i] - d.pshut[i]], 0, label="shutdown_capacity")
-                else:
-                    add([p, r, u], [1, 1, -d.pmax[i]], 0, label="shutdown_capacity")
+                if not startup and not shutdown:
+                    add([p, r, u], [1, 1, -d.pmax[i]], 0, label="envelope")
                 if t == 0:
                     add(p, 1, d.ramp_up[i] + d.initial_output[i], label="ramp_up")
                     add(p, -1, d.ramp_down[i] - d.initial_output[i], label="ramp_down")
@@ -115,8 +118,7 @@ def fingerprint(m):
     return digest.hexdigest()
 
 
-# 按变量所属小时划分块，返回未定价的块模型列表及跨块约束行号；定价只经 priced()。
-# 跨块行的右端只记入首个涉及块（crossrhs），各块汇总时没有重复或漏计。
+# 按变量所属小时划分提案块，返回块模型列表及跨块约束行号。
 def partition(m, hours):
     owner = m.time // hours
     row, col = m.A.nonzero()
@@ -134,8 +136,7 @@ def partition(m, hours):
         b = NS(A=m.A[rows][:, cols], rhs=m.rhs[rows], eq=m.eq[rows], obj=m.obj[cols].copy(),
                q=m.q[cols], lb=m.lb[cols], ub=m.ub[cols], cols=cols, rows=rows,
                time=m.time[cols], times=times, d=m.d, scenarios=m.scenarios, constant=0.,
-               crossA=m.A[cross][:, cols], crossrhs=m.rhs[cross] * (first[cross] == j),
-               crosseq=m.eq[cross], original_obj=m.obj[cols], labels=[m.labels[k] for k in rows], cross=cross)
+               labels=[m.labels[k] for k in rows], cross=cross)
         b.binary = np.flatnonzero(np.isin(cols, m.binary))
         b.continuous = np.flatnonzero(~np.isin(cols, m.binary))
         mapping = np.full(len(m.obj), -1); mapping[cols] = np.arange(len(cols))
@@ -145,25 +146,8 @@ def partition(m, hours):
     return blocks, cross
 
 
-# 返回块 b 按跨块乘子 lam（长度同 cross）定价后的副本：各块之和等于 f(x) + lam·(A_cross x - rhs_cross)。
-# 不等式乘子必须非负；数值噪声级的负值截为 0，明显为负则报错。副本的 lam 是实际使用的乘子。
-def priced(b, lam):
-    lam = np.asarray(lam, float).copy()
-    if lam.shape != b.crosseq.shape:
-        raise ValueError("Multipliers must match the cross rows")
-    if (lam[~b.crosseq] < -1e-10).any():
-        raise ValueError("Inequality multipliers must be nonnegative")
-    lam[~b.crosseq] = np.maximum(0, lam[~b.crosseq])
-    return NS(**{**vars(b), "obj": b.original_obj + b.crossA.T @ lam, "constant": -float(b.crossrhs @ lam), "lam": lam})
-
-
-# 标出含连续列的跨块行：块搜索不强制这些行（爬坡、块末停机容量、冷启动窗口），只能靠价格；
+# 标出含连续列的跨块行：这些行由全天调度及其割反馈处理；
 # 其余跨块行只含二进制列，由块搜索代入 incumbent 后作为硬边界行。
 def relaxed_rows(m, cross):
     continuous = np.ones(m.A.shape[1], bool); continuous[m.binary] = False
     return m.A[cross][:, continuous].getnnz(axis=1) > 0
-
-
-# 块搜索使用的价格：只保留被松弛跨块行上的乘子，纯二进制跨块行价格为 0。
-def search_multipliers(m, cross, lam):
-    return np.where(relaxed_rows(m, cross), np.asarray(lam, float), 0.)

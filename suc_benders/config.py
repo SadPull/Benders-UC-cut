@@ -22,7 +22,7 @@ class Options:
     reference_time_limit: float = 120
     seed: int = 7
     verbose: bool = True
-    # 搜索 QUBO 以"单个位的最大归一化成本"为能量单位；以下权重、温度均以该单位计。
+    # 基线总费用及割差斜率按最大绝对值归一化；以下权重、温度均以该单位计。
     # sa_reads 为独立退火链数，sa_sweeps 为每个温度对全部位的扫描次数。
     sa_hard_weight: float = 8
     sa_capacity_weight: float = 4
@@ -31,7 +31,7 @@ class Options:
     # 辅助工作配额独立于搜索 time_limit；耗尽后结束搜索，None 表示不另设此配额。
     sa_budget_seconds: float | None = None
     sa_sweeps: int = 4
-    sa_temperature: float = 4
+    sa_temperature: float = 4  # 自适应起温的下限；实际起温还覆盖原始自由位的典型单比特能垒。
     sa_cooling: float = .95
     sa_cutoff: float = .05
 

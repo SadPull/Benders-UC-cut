@@ -6,7 +6,7 @@ from types import SimpleNamespace as NS
 
 import numpy as np
 
-from .model import model, partition, priced, search_multipliers
+from .model import model, partition
 from .optimization import optimize
 from .reference import solve_reference
 from .search import BlockSearch, WholeDay, SABudgetExhausted
@@ -90,9 +90,9 @@ def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file
     run = _Run(o, perf_counter(), reference, total_started)
     result = run.result
     try:
-        m, relaxation = _initialize(run, d, scenarios, progress)
+        m = _initialize(run, d, scenarios, progress)
         try:
-            _search(run, m, relaxation)
+            _search(run, m)
         except SABudgetExhausted:
             run.whole.diagnostics['sa_budget_exhausted'] = True
             run.whole.diagnostics['search_stop_reason'] = 'SA_BUDGET'
@@ -107,7 +107,7 @@ def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file
     return result
 
 
-# 连续松弛只用于初始化和块搜索的跨块价格；初始方案不使用参考解。
+# 连续松弛只用于初始化；初始方案不使用参考解。
 def _initialize(run, d, scenarios, progress):
     o, result = run.o, run.result
     m = model(d, scenarios)
@@ -124,12 +124,11 @@ def _initialize(run, d, scenarios, progress):
         raise RuntimeError("No validated initial schedule")
     whole.emit("initialization")
     run.target_reached()
-    return m, relaxation
+    return m
 
 
-# 块搜索：按小时分块；块费用只对含连续变量的跨块行按连续松弛的对偶价格定价，纯二进制跨块行由 incumbent 代入。
-# 每块建立一个持久 BlockSearch，按轮依次访问全部块，至多 max_rounds 轮；价格固定，块内割和缓存一直有效。
-def _search(run, m, relaxation):
+# 按轮访问各提案块；全天割共享，块外方案每批固定。
+def _search(run, m):
     o, whole = run.o, run.whole
     if not o.sa_enabled:
         whole.diagnostics['search_stop_reason'] = 'SA_DISABLED'
@@ -138,9 +137,8 @@ def _search(run, m, relaxation):
         return
     with whole.sa_work():
         run.stage = "SEARCH_SETUP"
-        blocks, cross = partition(m, o.block_hours)
-        prices = search_multipliers(m, cross, relaxation.prices[cross])
-        run.searches = [BlockSearch(priced(b, prices), o, j + 1, whole) for j, b in enumerate(blocks)]
+        blocks, _ = partition(m, o.block_hours)
+        run.searches = [BlockSearch(b, o, j + 1, whole) for j, b in enumerate(blocks)]
     for k in range(1, o.max_rounds + 1):
         if _run_round(run, k):
             return
@@ -165,20 +163,14 @@ def _run_round(run, k):
     return _finish_round(run, k, start, record)
 
 
-# 在一个 SA 工作配额作用域内完成单块访问：块搜索，再把块内定价费用最低的块点拼回全天做 pool 候选。
+# 在一个 SA 工作配额作用域内完成单块提案、全天评估及割学习。
 def _visit_block(run, j, search, k, record):
     o, result, whole = run.o, run.result, run.whole
     with whole.sa_work():
-        b = search.b
         run.stage = f"ROUND_{k}_BLOCK_{j + 1}"
-        search.step([whole.best.point[b.cols[b.binary]]], k)
+        search.step(k)
         run.require_time()
         record["visited_blocks"].append(j + 1)
-        if search.best_local is not None:
-            raw = result.u.copy(); raw[:, b.times] = search.best_local.point[b.u]
-            proposal = {"proposal_id": f"pool:{k}:{j+1}", "round": k, "block": j + 1}
-            x = whole.prepare(raw, "pool", proposal)
-            whole.accept(x, "pool", proposal)
         if o.verbose:
             print(f"[分块进度] 轮次={k} 时间块={j + 1}/{len(run.searches)} "
                   f"全天可行成本(UB)={result.objective:.6f} "
@@ -188,7 +180,7 @@ def _visit_block(run, j, search, k, record):
 
 # 完整遍历之后：更新 SA 轮计数，记录本轮迭代进度并刷新轮记录。
 def _finish_round(run, k, start, record):
-    result, whole, searches = run.result, run.whole, run.searches
+    result, whole = run.result, run.whole
     record.update(complete=True, sa_completed_seconds=perf_counter()-run.started,
                   incumbent_before=start.upper, incumbent_after_sa=result.objective)
     whole.diagnostics["complete_rounds"] += 1
@@ -196,30 +188,23 @@ def _finish_round(run, k, start, record):
                                                 **_round_progress(run, start)))
     record.update(ended_seconds=perf_counter()-run.started, incumbent=result.objective)
     whole.emit("round")
-    for search in searches:
-        search.summarize()
     run.require_time()
     return run.target_reached()
 
 
 # 一轮开始时的快照：UB、SA 调用数、评估数和两类割的累计数量。
 def _round_start(run):
-    optimality, feasibility = _cut_counts(run.searches)
+    optimality, feasibility = run.whole.cut_totals['optimality'], run.whole.cut_totals['feasibility']
     return NS(upper=run.result.objective, sa_calls=run.whole.diagnostics["sa_calls"],
-              evaluations=len(run.whole.diagnostics["evaluations"]),
+              evaluations=len(run.whole.evaluated_commitments),
               optimality=optimality, feasibility=feasibility)
 
 
 def _round_progress(run, start):
-    optimality, feasibility = _cut_counts(run.searches)
+    optimality, feasibility = run.whole.cut_totals['optimality'], run.whole.cut_totals['feasibility']
     return dict(incumbent=run.result.objective, optimality_cuts_added=optimality-start.optimality,
                 feasibility_cuts_added=feasibility-start.feasibility,
-                new_candidates=len(run.whole.diagnostics["evaluations"])-start.evaluations)
-
-
-def _cut_counts(searches):
-    return (sum(search.cut_totals["optimality"] for search in searches),
-            sum(search.cut_totals["feasibility"] for search in searches))
+                new_candidates=len(run.whole.evaluated_commitments)-start.evaluations)
 
 
 # 轮数、SA 配额用尽或 SA 关闭后结束搜索，不空等剩余预算。
@@ -232,8 +217,6 @@ def _finish_search(run):
 # 独立复核最终方案，参考差距由 Result 随当前方案计算。
 def _finalize(run, d, scenarios):
     o, result, whole = run.o, run.result, run.whole
-    for search in run.searches:
-        search.summarize()
     if np.isfinite(result.objective):
         result.validation = validate(d, scenarios, result)
         if not result.validation['feasible']:
@@ -246,7 +229,8 @@ def _finalize(run, d, scenarios):
         whole.diagnostics['search_statistics']['new_feasible_per_second'] = (
             whole.diagnostics['search_statistics']['new_feasible']/max(result.elapsed_seconds, 1e-9))
         whole.timings["other"] = max(0., result.elapsed_seconds - sum(whole.timings.values()))
-        result.diagnostics.update(evaluation_count=len(whole.cache),
+        result.diagnostics.update(evaluation_count=len(whole.diagnostics['evaluations']), cache_size=len(whole.cache),
+                                  unique_evaluation_count=len(whole.evaluated_commitments),
                                   time_limit_overshoot=max(0., result.elapsed_seconds-o.time_limit))
         whole.emit("final")
     if o.verbose:

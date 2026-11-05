@@ -23,6 +23,49 @@ def bit_weights(maximum):
     return np.asarray([2 ** j for j in range(n - 1)] + [maximum - (2 ** (n - 1) - 1)], float)
 
 
+def _integer_bounds(a, c):
+    if not np.isfinite(c) or not np.isfinite(a).all():
+        raise ValueError("Integer encoding exceeds exact double range")
+    if abs(int(c)) + sum(abs(int(v)) for v in a) > 2 ** 53:
+        raise ValueError("Integer encoding exceeds exact double range")
+    return (int(c) + sum(int(v) for v in a if v < 0),
+            int(c) + sum(int(v) for v in a if v > 0))
+
+
+def encode_integer(value, weights):
+    """Canonical representation for bit_weights, including its non-power-of-two last bit."""
+    if not np.isfinite(value) or value != int(value) or not 0 <= value <= sum(weights):
+        raise ValueError("Auxiliary value is outside its integer encoding")
+    if not len(weights):
+        return np.empty(0, dtype=np.uint8)
+    value = int(value)
+    last = int(value > 2 ** (len(weights)-1)-1)
+    value -= last * int(weights[-1])
+    return np.asarray([(value >> j) & 1 for j in range(len(weights)-1)] + [last], dtype=np.uint8)
+
+
+def polish_auxiliaries(q, sample):
+    """Minimize over every auxiliary bit, keeping all original free bits unchanged."""
+    sample = np.asarray(sample)
+    if sample.shape != (q.Q.shape[0],) or not np.isin(sample, [0, 1]).all():
+        raise ValueError("Auxiliary correction requires a complete binary sample")
+    x = sample.astype(np.uint8, copy=True)
+    e = q.envelope
+    tau = max(0., float((e.integer_alpha + e.integer_beta @ x[:len(q.free)]).max(initial=0.)))
+    x[e.tau_ids] = encode_integer(tau, e.tau_weights)
+    for row in q.slacks:
+        target = -row.constant - row.coefficients @ x[row.variables]
+        value = np.clip(np.rint(target), 0, row.maximum)
+        x[row.ids] = encode_integer(value, row.weights)
+    return x
+
+
+def qubo_energy(q, sample):
+    """Evaluate squared residuals before summing, avoiding cancellation in x.T Q x."""
+    residual = q.penalty_matrix @ sample + q.penalty_constants
+    return float(q.linear @ sample + q.linear_offset + sample @ q.direct @ sample + residual @ residual)
+
+
 # 反复穷举至多四个变量的硬约束行（m 为 hard_rows 的结果），包含跨小时状态转移；只固定所有合法组合共有的值。
 # 未确定值使用 NaN 标记；无满足组合说明硬约束不一致。
 def fixed_binary(m):
@@ -70,9 +113,8 @@ def _fixed_binary(m, binary):
     return fixed
 
 
-# 搜索专用 QUBO：只含 u/v/w 和容量/可行性割松弛位，能量单位为一个归一化成本单位。
-# 成本取当前方案处最紧最优性割的线性代理；硬约束按行最大系数归一化后统一加权，容量只用 u 列，
-# 避免 v/w 充当容量补偿位。能量只用于搜索，不能作为任何界。
+# 搜索 QUBO 编码全天割投影的最大值；τ 与松弛位只服务搜索，不属于物理方案。
+# 硬约束按行归一化，容量只用 u 列。能量包含罚项和量化误差，不能作为任何界。
 # m 为块的 hard_rows 结果。
 def search_qubo(m, b, cuts, point, boundary, o):
     nx = m.nx
@@ -91,11 +133,13 @@ def search_qubo(m, b, cuts, point, boundary, o):
     mapping = np.full(nx, -1); mapping[free] = np.arange(len(free))
     qi, qj, qv, R, constants = [], [], [], [], []
     nv = len(free)
+    offset = 0.
+    slacks, feasibility_bounds = [], []
 
     # 加入 weight*(a*x+c)^2 或 weight*max(0, a*x+c)^2；系数先按整行最大值归一化。
-    # 至多两个自由位的不等式用精确真值表，其余不等式在 step 格点上用非负松弛位。
-    def penalty(js, values, rhs, equality, weight, step):
-        nonlocal nv
+    # 两自由位以内用精确真值表；可行性割的整数化只放松搜索罚项，不误罚真实可行点。
+    def penalty(js, values, rhs, equality, weight, step, kind='hard'):
+        nonlocal nv, offset
         js, values = np.asarray(js, int), np.asarray(values, float)
         scale = np.abs(values).max(initial=0.)
         if not scale:
@@ -105,6 +149,7 @@ def search_qubo(m, b, cuts, point, boundary, o):
         c += values[known] @ fixed[js[known]]
         ids, a = mapping[js[~known]], values[~known]
         if not len(ids):
+            offset += weight * (c if equality else max(0., c)) ** 2
             return
         if not equality:
             low, high = c + np.minimum(a, 0).sum(), c + np.maximum(a, 0).sum()
@@ -112,6 +157,7 @@ def search_qubo(m, b, cuts, point, boundary, o):
                 return
             if len(ids) <= 2:
                 e00 = max(0, c) ** 2
+                offset += weight * e00
                 e10 = max(0, c + a[0]) ** 2
                 qi.append(ids[0]); qj.append(ids[0]); qv.append(weight * (e10 - e00))
                 if len(ids) == 2:
@@ -120,9 +166,21 @@ def search_qubo(m, b, cuts, point, boundary, o):
                     qi.extend([ids[1], ids[0], ids[1]]); qj.extend([ids[1], ids[1], ids[0]])
                     qv.extend([weight * (e01 - e00), mixed, mixed])
                 return
-            slack = step * bit_weights(max(0, math.floor(-low / step + 1e-9)))
-            ids, a = np.r_[ids, np.arange(nv, nv + len(slack))], np.r_[a, slack]
-            nv += len(slack)
+            if kind == 'feasibility':
+                step = 1. / (64 * (len(ids)+1))
+                integer_a, integer_c = np.floor(a / step), np.floor(c / step)
+                low_integer, high_integer = _integer_bounds(integer_a, integer_c)
+                feasibility_bounds.append((len(ids)+1) * step)
+                if high_integer <= 0:
+                    return
+                a, c, low = step * integer_a, step * integer_c, step * low_integer
+            maximum = max(0, math.floor(-low / step + 1e-9))
+            weights = bit_weights(maximum)
+            auxiliary = np.arange(nv, nv + len(weights))
+            slacks.append(NS(ids=auxiliary, weights=weights, maximum=maximum, variables=ids,
+                             coefficients=a / step, constant=c / step, step=step, weight=weight, kind=kind))
+            ids, a = np.r_[ids, auxiliary], np.r_[a, step * weights]
+            nv += len(weights)
         R.append((ids, np.sqrt(weight) * a)); constants.append(np.sqrt(weight) * c)
 
     for js, values, rhs, equality in rows:
@@ -132,30 +190,77 @@ def search_qubo(m, b, cuts, point, boundary, o):
     # 容量行只保留 pmax*u；启停降额由全天修复与独立校验复核。格点取各 pmax 的最大公约数。
     pmax = [Fraction(str(v)) for v in b.d.pmax]
     denominator = math.lcm(*(v.denominator for v in pmax))
-    step = float(Fraction(math.gcd(*(int(v * denominator) for v in pmax)), denominator))
+    step = Fraction(math.gcd(*(int(v * denominator) for v in pmax)), denominator)
+    capacity_units = np.asarray([int(v / step) for v in pmax], float) if step else np.zeros(len(pmax))
     for t, hour in enumerate(b.times):
         required = (1 + b.d.reserve_fraction) * max(s.load[hour] for s in b.scenarios)
-        penalty(units[:, t], -b.d.pmax, -required, False, o.sa_capacity_weight, step)
+        required_units = math.ceil(Fraction(str(required)) / step) if step else 0
+        _integer_bounds(-capacity_units, required_units)
+        penalty(units[:, t], -capacity_units, -required_units, False, o.sa_capacity_weight, 1., 'capacity')
     for c in cuts:
         if not c.optimality:
-            penalty(np.arange(nx), c.beta, -c.alpha, False, o.sa_capacity_weight,
-                    np.abs(c.beta).max(initial=1.) / 64)
+            penalty(np.arange(nx), c.beta, -c.alpha, False, o.sa_capacity_weight, 1., 'feasibility')
 
-    # 当前方案仅用于选择费用代理，不添加邻近惩罚。
+    # 基线割加非负修正 τ，避免把多条费用斜率相加；固定变量先代入截距。
     optimality = [c for c in cuts if c.optimality]
     cost = b.obj[b.binary].copy()
+    base = max(optimality, key=lambda c: c.alpha + c.beta @ point) if optimality else None
+    known = np.flatnonzero(~np.isnan(fixed))
+    differences, intercepts = [], []
     if optimality:
-        cost += max(optimality, key=lambda c: c.alpha + c.beta @ point).beta
-    unit = max(float(np.abs(cost[free]).max(initial=0.)), 1e-9)
+        cost += base.beta
+        for cut in optimality:
+            if cut is base:
+                continue
+            beta = cut.beta - base.beta
+            differences.append(beta[free])
+            intercepts.append(cut.alpha - base.alpha + beta[known] @ fixed[known])
+    differences = np.asarray(differences).reshape(len(intercepts), len(free))
+    unit = max(float(np.abs(cost[free]).max(initial=0.)),
+               float(np.abs(differences).max(initial=0.)), 1e-9)
+    differences, intercepts = differences / unit, np.asarray(intercepts) / unit
+    delta = 1. / (64 * (len(free) + 1))
+    integer_beta, integer_alpha = np.rint(differences / delta), np.rint(intercepts / delta)
+    lows, highs = [], []
+    for a, c in zip(integer_beta, integer_alpha):
+        low, high = _integer_bounds(a, c)
+        lows.append(low); highs.append(high)
+    maximum = max([0, *highs])
+    tau_weights = bit_weights(maximum)
+    tau_ids = np.arange(nv, nv + len(tau_weights)); nv += len(tau_weights)
+    slack_bits = 0
+    for a, c, low, high in zip(integer_beta, integer_alpha, lows, highs):
+        if high <= 0:
+            continue
+        slack = bit_weights(maximum - low)
+        variables = np.r_[np.arange(len(free)), tau_ids]
+        auxiliary = np.arange(nv, nv + len(slack))
+        slacks.append(NS(ids=auxiliary, weights=slack, maximum=maximum-low, variables=variables,
+                         coefficients=np.r_[a, -tau_weights], constant=c, step=1., weight=2*delta, kind='optimality'))
+        ids = np.r_[variables, auxiliary]
+        # 整数违约至少为 1；2Δ*k² > Δ*k，故固定原始位后最优辅助位不会低估量化包络。
+        R.append((ids, np.sqrt(2 * delta) * np.r_[a, -tau_weights, slack]))
+        constants.append(np.sqrt(2 * delta) * c)
+        nv += len(slack); slack_bits += len(slack)
+    offset += ((base.alpha if base is not None else 0.) + cost[known] @ fixed[known]) / unit
     linear = np.zeros(nv)
     linear[:len(free)] = cost[free] / unit
+    linear[tau_ids] = delta * tau_weights
     I = [k for k, (ids, _) in enumerate(R) for _ in ids]
     J = [j for ids, _ in R for j in ids]
     V = [v for _, values in R for v in values]
     A = sparse.coo_matrix((V, (I, J)), shape=(len(R), nv)).tocsr()
     c = np.asarray(constants)
-    Q = sparse.coo_matrix((qv, (qi, qj)), shape=(nv, nv)).tocsr()
-    Q = Q + A.T @ A + sparse.diags(2 * (A.T @ c) + linear)
+    direct = sparse.coo_matrix((qv, (qi, qj)), shape=(nv, nv)).tocsr()
+    Q = direct + A.T @ A + sparse.diags(2 * (A.T @ c) + linear)
     Q.eliminate_zeros()
-    return NS(Q=Q.tocsr(), cost=cost, cost_unit=unit,
+    if not np.isfinite(Q.data).all():
+        raise ValueError("Nonfinite search QUBO coefficients")
+    envelope = NS(beta=differences, alpha=intercepts, integer_beta=integer_beta,
+                  integer_alpha=integer_alpha, delta=delta, tau_ids=tau_ids, tau_weights=tau_weights,
+                  slack_bits=slack_bits, cuts=int(bool(optimality)) + sum(high > 0 for high in highs),
+                  error_bound=(len(free) + 1) * delta / 2 if len(intercepts) else 0.)
+    return NS(Q=Q.tocsr(), cost=cost, cost_unit=unit, offset=offset + float(c @ c), envelope=envelope,
+              slacks=slacks, penalty_matrix=A, penalty_constants=c, direct=direct,
+              linear=linear, linear_offset=offset, feasibility_relaxation_bound=max(feasibility_bounds, default=0.),
               fixed=fixed, free=free, nx=nx, energy_unit=1.)

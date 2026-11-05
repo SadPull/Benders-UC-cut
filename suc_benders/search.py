@@ -16,10 +16,11 @@ from .qubo import search_qubo, fixed_binary
 from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, reachable_shortfall
 
 
-# 块搜索贯穿整个运行：每块至多保存 CUT_LIMIT 条块内割（先进先出），每个搜索 QUBO 只编码
-# anchor 处松弛量最小的 QUBO_FEASIBILITY_CUTS 条可行割，使 QUBO 规模与内存不随轮数增长。
+# 全天割池先进先出；每个块只编码小工作集，控制辅助位和稠密耦合规模。
 CUT_LIMIT = 4096
 QUBO_FEASIBILITY_CUTS = 64
+# shortcut: 仅搜索 8 条割的子集包络；若旧候选反复被低估，再评估更大的工作集。
+QUBO_OPTIMALITY_CUTS = 8
 
 
 # 全天 u/v/w 二进制向量的缓存键。
@@ -42,12 +43,18 @@ class WholeDay:
         self.d, self.scenarios, self.result, self.started = m.d, m.scenarios, result, started
         self.best = None
         self.cache = {}
+        self.cuts = []
+        self.cut_cache_keys = {}
+        self.evaluated_commitments = set()
+        self.cut_totals = dict(optimality=0, feasibility=0)
         self.diagnostics = result.diagnostics
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
-                                local_evaluations=[], blocks=[], rounds=[],
+                                blocks=[], rounds=[], cuts_dropped=0, stored_cuts=0,
+                                cache_invalidations=0, re_evaluations=0,
+                                cut_totals=self.cut_totals,
                                 complete_rounds=0, timings={name: 0. for name in (
                                     "initialization", "qubo", "annealing", "repair",
-                                    "local_dispatch", "subproblems", "validation")})
+                                    "subproblems", "validation")})
         self.timings = self.diagnostics["timings"]
         self.progress = progress
         self.diagnostics["model_fingerprint"] = fingerprint(m)
@@ -64,6 +71,26 @@ class WholeDay:
             fixed_u=np.where(np.isfinite(fixed_u), fixed_u, -1).astype(int).tolist(),
             fixed_u_unknown=-1, startup_allowed=start.tolist(), shutdown_allowed=stop.tolist())
         self.timings['qubo'] += perf_counter()-phase
+
+    def add_cut(self, cut, cache_key=None, *, protected=None):
+        if not cut.certified or cut.beta.shape != (len(self.full.binary),) or not (
+                np.isfinite(cut.alpha) and np.isfinite(cut.beta).all()):
+            raise ValueError("Whole-day search requires a finite certified full-day cut")
+        self.cuts.append(cut)
+        self.cut_cache_keys[id(cut)] = cache_key
+        self.cut_totals["optimality" if cut.optimality else "feasibility"] += 1
+        if protected is None and self.best is not None:
+            protected = self.best.cut
+        if len(self.cuts) > CUT_LIMIT:
+            index = next(k for k, old in enumerate(self.cuts) if old is not protected)
+            dropped = self.cuts.pop(index)
+            owner = self.cut_cache_keys.pop(id(dropped))
+            if owner in self.cache:
+                del self.cache[owner]
+                self.diagnostics['cache_invalidations'] += 1
+            self.diagnostics["cuts_dropped"] += 1
+        self.diagnostics["stored_cuts"] = len(self.cuts)
+        return id(cut) in self.cut_cache_keys
 
     # 返回已记账的 SA 辅助工作秒数，加上当前尚未退出计时作用域的耗时。
     def sa_used(self):
@@ -176,7 +203,7 @@ class WholeDay:
     # 返回重建的 u/v/w 向量或 None；修复可能涉及块外小时，之后仍须完成连续调度和验证。
     # 每条记录只存统计所需的原始方案哈希与固定位违例数，不保存方案矩阵。
     def prepare(self, raw, source, record):
-        """Repair a whole-day u proposal; the caller then evaluates its block projection."""
+        """Repair a whole-day u proposal before full-day dispatch and validation."""
         values = np.asarray(raw, dtype='<f8')
         known = np.isfinite(self.fixed_u)
         record.update(origin=source, raw_sha256=hashlib.sha256(values.tobytes()).hexdigest(),
@@ -225,7 +252,7 @@ class WholeDay:
     def search_statistics(self):
         """Count whole-day proposals and first validations, never block feasibility."""
         statistics = {}
-        for source in ('sa', 'pool'):
+        for source in ('sa_raw', 'sa'):
             proposals = [r for r in self.diagnostics['proposals'] if r['origin'] == source]
             evaluations = [r for r in self.diagnostics['evaluations'] if r['source'] == source]
             raw = {r['raw_sha256'] for r in proposals}
@@ -242,7 +269,7 @@ class WholeDay:
                 repair_bits=sum(r.get('hamming_u', 0) for r in proposals),
                 duplicate_rate=outcomes.get('duplicate', 0)/len(proposals) if proposals else 0.,
                 outcomes=outcomes,
-                new_feasible=sum(r['feasible'] for r in evaluations),
+                new_feasible=sum(r['feasible'] and not r['reevaluated'] for r in evaluations),
                 incumbent_decrease=sum(r['incumbent_before']-r['incumbent'] for r in evaluations
                                        if r['improved'] and np.isfinite(r['incumbent_before'])))
         statistics['new_feasible'] = sum(row['new_feasible'] for row in statistics.values())
@@ -293,16 +320,23 @@ class WholeDay:
                 record["outcome"] = "validation_deadline"
             return False
         improved = r.feasible and plan.objective < before
+        # 先保护即将采用的新割；上限为 1 时也不能淘汰新 incumbent 的反馈。
+        retained = r.cut is None or self.add_cut(r.cut, key, protected=r.cut if improved else None)
+        identity = commitment_hash(plan)
+        reevaluated = identity in self.evaluated_commitments
         entry = dict(source=source, feasible=r.feasible, dispatch_status=r.status,
                      objective=plan.objective if r.feasible else None,
                      fixed_cost=binary_cost, expected_fuel_cost=plan.objective-binary_cost if r.feasible else None,
-                     scenario_costs=scenario_costs, commitment_hash=commitment_hash(plan),
+                     scenario_costs=scenario_costs, commitment_hash=identity, reevaluated=reevaluated,
                      incumbent_before=before, incumbent=min(before, r.cost), improved=improved,
                      elapsed_seconds=perf_counter()-self.started, sa_calls=self.diagnostics["sa_calls"])
         if record is not None:
             entry["proposal_id"] = record.get("proposal_id")
             record["incumbent_decrease"] = float(before-plan.objective) if improved and np.isfinite(before) else 0.
-        self.cache[key] = entry
+        if retained:
+            self.cache[key] = entry
+        self.evaluated_commitments.add(identity)
+        self.diagnostics['re_evaluations'] += int(reevaluated)
         self.diagnostics["evaluations"].append(entry)
         if record is not None:
             record.update(outcome="accepted" if r.feasible else "infeasible", feasible=r.feasible,
@@ -320,130 +354,71 @@ class WholeDay:
         self.result.validation = report
 
 
-# 一个时间块的原始邻域搜索，整个运行只建立一次。块费用按固定价格定价（只含被松弛的连续耦合行），
-# 跨块纯二进制行代入当前 incumbent 作为硬边界行；跨轮保存块内 Benders 割、调度缓存和定价费用最低的块点。
+# 时间块仅产生候选；费用与可行性反馈来自共享全天割池。
 class BlockSearch:
-    """Persistent primal neighbourhood search of one time block at fixed prices."""
+    """Block proposals using full-day cuts projected at a frozen incumbent."""
 
-    # 绑定定价后的块，建立块内硬约束行、跨块边界行和局部诊断。
     def __init__(self, b, o, index, whole):
         self.b, self.o, self.index, self.whole = b, o, index, whole
-        # 全天推出的块内固定位，与块内硬约束行一起进入搜索 QUBO；价格固定，硬约束行只需建立一次。
-        self.fixed = whole.fixed[b.cols[b.binary]].copy()
+        self.columns = b.cols[b.binary]
+        self.fixed = whole.fixed[self.columns].copy()
         self.hard = hard_rows(b, fixed=self.fixed)
-        self.best_local = None
-        self.cuts, self.cache, self.history = [], {}, []
-        self.cut_totals = dict(optimality=0, feasibility=0)
-        # 跨块纯二进制行（relaxed_rows 的补集）：块外列代入当前 incumbent 后成为块内硬约束，只进入搜索 QUBO。
         m = whole.m
         rows = m.A[b.cross].tocsr()
-        inside = np.zeros(rows.shape[1], bool); inside[b.cols[b.binary]] = True
+        inside = np.zeros(rows.shape[1], bool); inside[self.columns] = True
         keep = ~relaxed_rows(m, b.cross) & (rows[:, inside].getnnz(axis=1) > 0)
         rows = rows[keep]
-        self.boundary = NS(inner=rows[:, b.cols[b.binary]].tocsr(),
+        self.boundary = NS(inner=rows[:, self.columns].tocsr(),
                            outer=(rows @ sparse.diags((~inside).astype(float))).tocsr(),
                            rhs=m.rhs[b.cross][keep], eq=m.eq[b.cross][keep])
         self.diagnostic = dict(block=index, hours=(b.times + 1).tolist(), visits=0,
-                               sa_calls=0, first_visit_seconds=None, cuts_dropped=0)
+                               sa_calls=0, first_visit_seconds=None)
         whole.diagnostics["blocks"].append(self.diagnostic)
-        self.summarize()
 
-    # 返回跨块边界行在当前 incumbent 下的块内形式：(块内二进制序号, 系数, 右端, 是否等式)。
-    def boundary_rows(self):
+    def boundary_rows(self, point):
         ring = self.boundary
-        rhs = ring.rhs - ring.outer @ self.whole.best.point
+        rhs = ring.rhs - ring.outer @ point
         return [(ring.inner.indices[ring.inner.indptr[k]:ring.inner.indptr[k+1]],
                  ring.inner.data[ring.inner.indptr[k]:ring.inner.indptr[k+1]], rhs[k], ring.eq[k])
                 for k in range(len(rhs))]
 
-    # 刷新本块的最好定价费用、累计学到的两类割数、当前保存的割数与缓存规模，供进度与终态诊断读取。
-    def summarize(self):
-        self.diagnostic.update(
-            best_local_cost=self.best_local.cost if self.best_local is not None else None,
-            optimality_cuts=self.cut_totals["optimality"], feasibility_cuts=self.cut_totals["feasibility"],
-            stored_cuts=len(self.cuts), cache_size=len(self.cache))
+    def qubo_cuts(self, point):
+        cuts = self.whole.cuts
+        anchor = point[self.whole.full.binary]
+        values = [c.alpha + c.beta @ anchor for c in cuts]
+        optimality = [k for k, c in enumerate(cuts) if c.optimality]
+        feasibility = [k for k, c in enumerate(cuts) if not c.optimality]
+        chosen = []
+        if optimality:
+            chosen = [max(optimality, key=lambda k: values[k])]
+            chosen += [k for k in reversed(optimality) if k != chosen[0]][:QUBO_OPTIMALITY_CUTS-1]
+        selected_feasibility = sorted(feasibility, key=lambda k: -values[k])[:QUBO_FEASIBILITY_CUTS]
+        # 原始全天割不变；每批按块外快照重新投影截距。
+        outside = anchor.copy(); outside[self.columns] = 0.
+        projected = [NS(alpha=cuts[k].alpha + cuts[k].beta @ outside,
+                        beta=cuts[k].beta[self.columns], optimality=cuts[k].optimality,
+                        certified=cuts[k].certified) for k in chosen + selected_feasibility]
+        counts = dict(optimality_cuts_stored=len(optimality), optimality_cuts_selected=len(chosen),
+                      feasibility_cuts_stored=len(feasibility), feasibility_cuts_encoded=len(selected_feasibility))
+        return projected, counts
 
-    # 收录一条块内割；超过 CUT_LIMIT 时丢弃最早的一条并计数。累计数不因丢弃而减少。
-    def add_cut(self, cut):
-        self.cuts.append(cut)
-        self.cut_totals["optimality" if cut.optimality else "feasibility"] += 1
-        if len(self.cuts) > CUT_LIMIT:
-            del self.cuts[0]
-            self.diagnostic["cuts_dropped"] += 1
-
-    # 交给搜索 QUBO 的割：全部最优性割（QUBO 只取 anchor 处最紧的一条作费用代理），以及 anchor 处
-    # 松弛量最小（alpha + beta·anchor 最大）的至多 QUBO_FEASIBILITY_CUTS 条可行割；保持原有顺序。
-    def qubo_cuts(self, anchor):
-        feasibility = [k for k, c in enumerate(self.cuts) if not c.optimality]
-        chosen = set(feasibility)
-        if len(feasibility) > QUBO_FEASIBILITY_CUTS:
-            values = np.array([self.cuts[k].alpha + self.cuts[k].beta @ anchor for k in feasibility])
-            chosen = {feasibility[k] for k in np.argsort(-values, kind="stable")[:QUBO_FEASIBILITY_CUTS]}
-        return [c for k, c in enumerate(self.cuts) if c.optimality or k in chosen], len(feasibility), len(chosen)
-
-    # 以 anchor 处选出的割和给定边界行建立本块的搜索 QUBO，返回 (QUBO, 已存可行割数, 编码可行割数)。
-    def build_qubo(self, anchor, boundary):
-        cuts, stored, encoded = self.qubo_cuts(anchor)
-        return search_qubo(self.hard, self.b, cuts, anchor, boundary, self.o), stored, encoded
-
-    # 在固定价格下评估精确二进制块点（块内约束，跨块行松弛），缓存调度并学习块内割。
-    # 超时或数值状态不缓存；定价费用只用于块内比较和 QUBO 代理，不能替代全天原始费用。
-    def evaluate(self, x, source):
-        b, whole = self.b, self.whole
-        key = np.asarray(x, np.uint8).tobytes()
-        if whole.remaining() <= 0:
-            return
-        if key in self.cache:
-            return self.cache[key]
-        phase = perf_counter()
-        r = dispatch(b, x, whole.remaining())
-        whole.timings["local_dispatch"] += perf_counter() - phase
-        if whole.remaining() <= 0:
-            return
-        if r.feasible:
-            residual = b.A @ r.point - b.rhs
-            residual[b.eq] = np.abs(residual[b.eq])
-            if residual.max(initial=0) > 1e-5:
-                raise RuntimeError("Local dispatch validation failed")
-        elif r.status not in ("INFEASIBLE", "DISCRETE_INFEASIBLE"):
-            # 与全天调度相同：数值状态按未完成处理，不缓存。
-            whole.diagnostics["dispatch_failures"] = whole.diagnostics.get("dispatch_failures", 0) + 1
-            return
-        if whole.remaining() <= 0:
-            return
-        # 缓存只保留紧凑记录；完整调度结果只为定价费用最低的块点保留。
-        record = self.cache[key] = NS(feasible=r.feasible, status=r.status, cost=r.cost)
-        if r.cut is not None:
-            self.add_cut(r.cut)
-        if r.feasible and (self.best_local is None or r.cost < self.best_local.cost):
-            self.best_local = r
-        whole.diagnostics["local_evaluations"].append(dict(block=self.index, source=source,
-            feasible=r.feasible, cost=r.cost if r.feasible else None))
-        return record
-
-    # 完成本块的一次访问：先评估种子，再采样一批 SA，评估原始块候选并把修复后的全天方案交给全天校验。
-    # 整批候选共享采样前的全天方案快照。
-    def step(self, seeds, k):
+    def step(self, k):
         b, o, whole = self.b, self.o, self.whole
         if whole.remaining() <= 0:
             return
         self.diagnostic["visits"] += 1
         if self.diagnostic["first_visit_seconds"] is None:
             self.diagnostic["first_visit_seconds"] = perf_counter() - whole.started
-        for seed in seeds:
-            self.evaluate(seed, "initial")
-        if whole.remaining() <= 0:
-            return
-        if self.best_local is None:
-            raise RuntimeError("No feasible block seed")
-        baseline_u = whole.result.u.copy()
+        baseline = whole.best.point.copy()
         anchor_id, anchor_cost = commitment_hash(whole.result), whole.result.objective
         phase = perf_counter()
-        columns = b.cols[b.binary]
-        boundary = self.boundary_rows()
-        anchor = whole.best.point[columns]
-        q, stored, encoded = self.build_qubo(anchor, boundary)
+        boundary = self.boundary_rows(baseline)
+        cuts, counts = self.qubo_cuts(baseline)
+        q = search_qubo(self.hard, b, cuts, baseline[self.columns], boundary, o)
+        counts.update(optimality_cuts_encoded=q.envelope.cuts,
+                      optimality_cuts_dominated=counts['optimality_cuts_selected']-q.envelope.cuts)
         whole.timings["qubo"] += perf_counter() - phase
+        self.diagnostic.update(counts)
         if whole.progress is not None:
             whole.diagnostics["pending_qubo"] = dict(bits=q.Q.shape[0], nonzeros=q.Q.nnz,
                 max_coefficient=float(np.abs(q.Q.data).max(initial=0.)))
@@ -453,40 +428,39 @@ class BlockSearch:
         phase = perf_counter()
         whole.diagnostics["sa_calls"] += 1
         self.diagnostic["sa_calls"] += 1
-        # 每条链的种子由配置种子、全局调用序号和链号派生：可复现且互不相同。
         sample_seeds = [int(np.random.SeedSequence([o.seed, whole.diagnostics["sa_calls"], j]).generate_state(1)[0])
                         for j in range(o.sa_reads)]
         proposals, sampling = anneal(q, o, whole.remaining(), sample_seeds)
         whole.timings["annealing"] += perf_counter() - phase
-        # 采样诊断只保留标量与哈希；anchor 是本批共享的 incumbent 身份。
         sampling.update(block=self.index, round=k, seed=sample_seeds, boundary_rows=len(boundary),
-                        feasibility_cuts_stored=stored, feasibility_cuts_encoded=encoded,
-                        anchor=anchor_id, anchor_cost=anchor_cost,
+                        **counts, anchor=anchor_id, anchor_cost=anchor_cost,
                         raw_candidates=len(proposals), raw_discrete_feasible=sum(discrete_feasible(b, x) for x in proposals),
                         unique_uvw=len({x.astype(np.uint8).tobytes() for x in proposals}))
         whole.diagnostics["sampling"].append(sampling)
         whole.emit("sampling")
         del q
-        if whole.remaining() <= 0:
-            return
-        # 整批候选都拼接到采样前的 incumbent 快照上，不受本批中途的改进影响。
+        # 整批都拼接到采样前快照；中途更新 UB 不改变后续候选的块外方案。
         for j, x in enumerate(proposals):
             if whole.remaining() <= 0:
                 return
-            self.evaluate(x, 'sa_raw')  # 原始块候选也参与局部割学习
-            block_x = np.zeros(len(b.obj)); block_x[b.binary] = x
-            raw = baseline_u.copy(); raw[:, b.times] = block_x[b.u]
-            record = {"proposal_id": f"sa:{whole.diagnostics['sa_calls']}:{j}", "block": self.index, "round": k}
-            repaired = whole.prepare(raw, "sa", record)
-            if repaired is not None and whole.remaining() > 0:
-                repaired_eval = self.evaluate(repaired[columns], "sa")
-                record.update(local_dispatch_completed=repaired_eval is not None,
-                              local_feasible=repaired_eval.feasible if repaired_eval is not None else None)
-                whole.accept(repaired, "sa", record)
+            candidate = baseline[whole.full.binary].copy(); candidate[self.columns] = x
+            z = commitment(whole.d, candidate)
+            known = np.isfinite(whole.fixed)
+            discrete = bool(discrete_feasible(whole.full, candidate)
+                            and np.array_equal(candidate[known], whole.fixed[known]))
+            proposal_id = f"sa:{whole.diagnostics['sa_calls']}:{j}"
+            record = dict(proposal_id=proposal_id, block=self.index, round=k, origin='sa_raw',
+                          raw_sha256=hashlib.sha256(np.asarray(z.u, dtype='<f8').tobytes()).hexdigest(),
+                          raw_fixed_bit_violations=int(np.count_nonzero(candidate[known] != whole.fixed[known])),
+                          raw_discrete_feasible=discrete, outcome='discrete_infeasible')
+            whole.diagnostics['proposals'].append(record)
+            if discrete and whole.accept(candidate, 'sa_raw', record):
+                continue
+            repaired_record = dict(proposal_id=proposal_id + ':repair', block=self.index, round=k)
+            repaired = whole.prepare(z.u, 'sa', repaired_record)
+            whole.accept(repaired, 'sa', repaired_record)
         if whole.remaining() <= 0:
             return
-        self.history.append(dict(block=self.index, round=k, best_local_cost=self.best_local.cost,
-                                 optimality_cuts=self.cut_totals["optimality"],
-                                 feasibility_cuts=self.cut_totals["feasibility"], sampling=sampling))
-        whole.result.history.append(self.history[-1])
-        self.summarize()
+        whole.result.history.append(dict(block=self.index, round=k, incumbent=whole.result.objective,
+                                         optimality_cuts=whole.cut_totals['optimality'],
+                                         feasibility_cuts=whole.cut_totals['feasibility'], sampling=sampling))

@@ -1,77 +1,76 @@
-# SA-Benders SUC
+# Benders-UC-cut
 
-Python 随机机组组合（SUC）求解器：先用 Gurobi 求完整模型的参考方案，再由时间分块的 D-Wave 开源 SA 与块内 Benders 割搜索可行上界；候选一律经全天修复、连续调度和独立物理／费用校验后才能更新 UB。全局评价采用相对参考成本的差距；项目不计算下界。
+当前版本：**v2.1.0**（2026-11-05）。本版包含全天认证割共享与按块投影、多割最大值包络、辅助位精确校正与分段退火，以及割池淘汰和缓存失效联动。现有 26 项回归测试通过；尚未进行长时性能验证。
 
-v2.0.0 删除了全部 LLM 组件（在线上界顾问、离线 LLM 程序及基于它们的实验脚本），只保留 SA+Benders 求解核心，见文末“历史”一节。
+Python 随机机组组合（SUC）求解器。先用 Gurobi 求完整模型的参考方案，再通过时间分块、模拟退火（SA）与 Benders 割搜索低成本的全天可行方案。候选经过修复、连续调度和独立物理／费用校验后，才能更新可行上界（UB）。
 
-当前默认输入为 Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**；启动费按 `fixedCost` 列映射为零。只修改 `data/units.json` 和 `data/stochastic.json` 即可更换输入，来源与费用口径见 `data/provenance.json`。其他算例在 `instances/<名称>`（classic10、rts24、rcuc20，以及 10 场景的 ieee118s10），把 `run_experiment.py` 的 `DATA_DIR` 改为对应目录即可。
+## 安装与运行
 
-## 运行
-
-环境：Windows 64 位、Python 3.10、Gurobi 许可证。SA 使用 Apache-2.0 开源的 `dwave-samplers==1.8.0`（`dimod==0.12.22`、`networkx==3.4.2`），在本地 CPU 运行，无需 Kaiwu 授权、D-Wave 云账户或量子硬件。
+环境：Windows 64 位、Python 3.10、有效的 Gurobi 许可证。模拟退火使用 D-Wave 开源采样器，在本地 CPU 上运行。
 
 ```powershell
 py -3.10 -m pip install -r requirements.txt
+py -3.10 run_experiment.py
 ```
 
-在 VS Code 中直接运行 `run_experiment.py`。预算、种子、分块等参数位于文件顶部；`CHECK_ONLY=True` 只检查输入。
+也可在 VS Code 中运行 `run_experiment.py`。运行参数位于入口文件顶部：
 
-入口每次从零开始，先用最多 120 秒独立预算求参考解，再给搜索完整的 7200 秒预算，seed 17、目标参考成本差距 0.1%。参考方案经过独立物理与费用校验；只有状态为 `OPTIMAL` 的有效参考才允许提前停止。仅有未证最优的可行参考时只比较、不据此提前停止；参考失败或没有有效方案时仍继续搜索，参考成本和差距为空。参考方案不用于初始化和候选注入。v0.36.0 起删除了续跑（`RESUME_FROM`），续跑旧实验请使用对应归档版本。
+- Gurobi 参考预算 120 秒，随后独立计算搜索预算 7200 秒。
+- 随机种子 17，每块 12 小时，每个退火温度执行 16 次扫描。
+- 参考成本差距目标为 0.1%；仅通过校验且状态为 `OPTIMAL` 的参考允许按目标提前停止。
+- `CHECK_ONLY=True` 只检查输入，不执行求解或检查授权。
 
-参考差距为 `100 × (UB - reference_cost) / abs(reference_cost)`，允许负数；参考成本为零时百分比为空。停止要求有效 `OPTIMAL` 参考，且 `UB - reference_cost <= 1e-5 + tolerance × abs(reference_cost)`；零参考成本只用绝对容差。达到目标记为 `REFERENCE_TARGET_REACHED`，搜索轮次或 SA 配额耗尽后记为 `SEARCH_EXHAUSTED`（`search_stop_reason` 为 `MAX_ROUNDS`、`SA_BUDGET` 或 `SA_DISABLED`），只有截止时间信号（`TimeoutError`）记为 `TIME_LIMIT`；其他异常无论是否已过截止时间都记为 `<阶段>_FAILED`（阶段为 `INITIALIZATION`、`SEARCH_SETUP`、`ROUND_<k>_BLOCK_<j>`）。没有待处理工作时不空等剩余预算。
+参考方案只用于比较和停止判断，不用于初始化或候选生成。参考失败时仍继续搜索，参考成本和差距为空。Python 接口为 `from run_suc import run_suc`，通过参数字典覆盖 `suc_benders/config.py` 中的默认配置。
 
-初始化后每块建立一个持久块搜索，整个运行不重建，块内割与调度缓存跨轮保留；每轮遍历全部时间块，每块采样一批 SA（`max_rounds` 限制轮数，入口不限）：一批为 `sa_reads` 条独立退火链，种子由配置种子、调用序号和链号派生，再取模 `2**31` 传给 D-Wave；诊断同时保留派生种子和实际采样种子。候选拼接使用该批开始时的当前最优全天方案；保留调度去重。全天或局部调度出现 SUBOPTIMAL 等数值状态时只拒绝该候选（计入 `dispatch_failures`），不中止运行。
+## 算例与输入
 
-结果自动写入新建的 `results/manual-seed.../`：
+入口的 `DATA_DIR` 默认指向 `data`：Pisa IEEE118 派生的 **54 机组、24 小时、单场景、零备用**算例。启动费按原始 `fixedCost` 列映射为零，来源和费用口径见 `data/provenance.json`。
 
-- `summary.json`：状态、UB、参考元数据、`reference_gap_percent`、耗时和统计，以及 `complete_rounds`、`search_stop_reason`、`sa_budget_exhausted`。
-- `result.json`：精简主结果、最终方案、计时与搜索统计。
-- `reference.json`：先行参考求解的状态、完整方案、校验和独立耗时；失败时保留原因。`gurobi_bound`／`gurobi_gap_percent` 是 Gurobi 自身的界与间隙，只说明参考离最优多远，不参与停止判断。
-- `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、SHA256、依赖版本和完整有效配置。
-- `progress.jsonl`、`latest-solution.json`：轻量进度与原子更新的最新可行方案；最新方案不含搜索状态。
+其他算例完整保留在以下目录，修改 `DATA_DIR` 即可切换：
 
-不保存全量检查点，也不序列化全部历史采样；记录开销与最终保存耗时单列。
+- `instances/classic10`
+- `instances/rts24`
+- `instances/rcuc20`
+- `instances/ieee118s10`（10 场景）
 
-当前主结果删除全局 `lower_bound`／`lower`、`relative_gap`／`gap_percent` 和 `certification_history`，不计算下界：SA 只能给出上界，项目历史上的各种下界（连续松弛、精确 Benders 主问题、拉格朗日）都由 Gurobi 求得，评价直接使用 Gurobi 参考成本。`Result.reference` 保留完整参考记录，`reference_cost` 与 `reference_gap_percent` 是随当前已验证方案计算的只读属性。进度和最新方案同时带有 `reference_status`。`elapsed_seconds`／`solver_elapsed_seconds` 只计搜索，`reference_elapsed_seconds` 单列参考耗时，`total_elapsed_seconds` 计两段总耗时。历史 `results/`、`archives/` 和源码快照不迁移，旧分析脚本需适配新字段与状态。
+每个算例使用 `units.json` 和 `stochastic.json`；保留的 `deterministic.json` 是部分算例的其他输入文件。机组输入必须明确提供 `initial_output`。`provenance.json` 与已有的 `sources/` 保存来源、映射说明和原始数据。
 
-manifest、精简结果及运行诊断记录 `sa_backend` 与 `sa_initialization`（当前为 `random_sa_repair_v1`）。采样诊断包含 beta 序列，以及每条链的原始／实际种子、退火终态与 QUBO 能量；全天提议记录只保存原始方案的 SHA256 与固定位违例数。这些诊断可经 `run_suc` 返回对象读取，不自动全量落盘。
+## 输出
 
-读取精简结果：
+每次运行自动创建独立的 `results/manual-seed.../` 目录：
 
-```python
-import json
-with open("results/你的运行目录/result.json", encoding="utf-8") as f:
-    result = json.load(f)
-```
+- `summary.json`：最终状态、成本、参考差距、可行性、耗时和搜索统计。
+- `result.json`：开停机安排、各场景调度、费用与精简运行记录。
+- `reference.json`、`reference-gurobi.log`：参考方案、校验结果和 Gurobi 日志。
+- `snapshot/`、`manifest.json`、`effective-options.json`：实际源码与输入快照、文件哈希、依赖版本及有效参数。
+- `progress.jsonl`、`latest-solution.json`：运行进度与最新可行方案。
 
-直接运行 `run_experiment.py`；`run_suc.py` 提供 `from run_suc import run_suc` 的 Python 接口，同样只计算一次先行参考。配置 `reference_time_limit` 默认 120 秒，对应入口顶部 `REFERENCE_TIME_LIMIT_SECONDS`；`time_limit` 为独立搜索预算。可选关键字 `reference_log_file` 指定参考日志；`started_at` 是整体调用的计时起点，不扣减参考结束后新建的搜索预算。旧命令行参数及 `--output` JSON 输出入口已删除。
+参考差距为 `100 × (UB - reference_cost) / abs(reference_cost)`，允许为负；缺少有效参考或参考成本为零时不计算。搜索耗时与参考耗时分别记录，总耗时包含两者。`gurobi_bound` 和 `gurobi_gap_percent` 只描述参考求解自身的界与间隙。
 
-机组输入必须明确提供 `initial_output`。运行环境固定为上述 Windows／Python 3.10。
+达到目标时状态为 `REFERENCE_TARGET_REACHED`；轮数或 SA 配额耗尽时为 `SEARCH_EXHAUSTED`；搜索超时为 `TIME_LIMIT`；其他异常按失败阶段记录。运行入口在求解失败或未得到可行方案时返回非零退出码。
 
-## 核心文件
+## 核心结构与算法限制
 
-- `suc_benders/solver.py`：结果类型与主循环，安排参考、初始化和分块轮询。
-- `suc_benders/model.py`：稀疏模型、按小时分块（`partition`）、跨块定价（`priced`、`relaxed_rows`、`search_multipliers`）。
-- `suc_benders/search.py`：持久的原始块搜索及共享的全天候选修复、调度、校验、去重和预算。
-- `suc_benders/benders.py`：离散可行性检查、固定二进制后的连续调度与 Benders 割、块内硬约束行（`hard_rows`）。
-- `suc_benders/reference.py`：Gurobi 完整模型参考求解及独立方案校验。
-- `suc_benders/qubo.py`、`anneal.py`：块搜索 QUBO 与 D-Wave SA 采样；`validation.py`：修复、可达出力与独立校验。
-- `run_suc.py`、`run_experiment.py`：程序接口与一键运行入口。
-- `data/`：当前输入、原始算例与溯源信息；`instances/`：classic10、rts24、rcuc20、ieee118s10 输入。
-- `tests/`：求解器回归；执行 `py -3.10 -m pytest -q tests`。
-- `.local/*.lic`：仅本地保留的授权文件。
+- `run_experiment.py`、`run_suc.py`：实验入口、结果记录和 Python 接口。
+- `suc_benders/config.py`、`data.py`：参数与输入校验。
+- `suc_benders/model.py`、`optimization.py`、`reference.py`：建模、Gurobi 调用和完整问题参考求解。
+- `suc_benders/solver.py`、`search.py`：初始化、时间块轮询、候选处理和预算管理。
+- `suc_benders/benders.py`、`qubo.py`、`anneal.py`、`validation.py`：割生成、搜索 QUBO、模拟退火、修复与独立校验。
 
-主线顺序：输入建模 → 独立参考求解 → 连续松弛与初始可行解 → 固定价格的持久分块 SA 轮询 → 全天修复/调度/校验。仅全天验证通过的方案能更新 UB。
+时间块只生成候选；全天调度生成认证最优性割与可行性割，共享最多 4096 条割及全天方案缓存。当前最好方案的割受到保护，其余割按先进先出淘汰，同时使对应方案缓存失效；再次遇到该方案时重新调度生成反馈。缓存不额外保留割向量，无割的离散不可行缓存继续有效。重复评估保留历史记录，但不重复计为新增方案。
 
-**跨块协调**：跨块行指变量落在不同时间块的约束。块之间不做乘子迭代，而是围绕当前最优全天方案（incumbent）做块坐标搜索：纯二进制跨块行（状态转移、最小开停机）把块外变量代入 incumbent 后作为块内硬约束；含连续变量的跨块行（跨边界爬坡、块末停机容量、冷启动窗口）在块费用中按初始化时连续松弛的对偶价格定价（`search_multipliers`），价格整个运行不变。块内候选一律经全天修复、调度和校验后才能更新 UB。
+每批固定块外开停机，把全天割投影到块内；跨块爬坡等连续约束由全天调度及其割反馈处理，纯二进制跨块约束仍作为硬边界。原始候选离散可行时直接调度并学习割，需要修复时继续全天修复；只有独立校验通过的真实费用可以更新 UB。连续松弛只用于初始化，不再使用局部定价调度或最佳局部块拼接。
 
-块 SA 使用搜索专用 QUBO（`qubo.search_qubo`）：成本取 incumbent 处最紧最优性割的线性代理，不含 theta 与最优性割松弛位；硬约束按行归一化后以 `sa_hard_weight` 加权；容量只含 `pmax·u`；跨块纯二进制约束代入 incumbent 后作为块内硬约束。能量单位是单个位的最大归一化成本，`sa_temperature`、`sa_cutoff` 同此单位，`sa_sweeps` 为每个温度的全位扫描次数。QUBO 只编码 anchor 处松弛量最小的 64 条可行割，每块至多保存 4096 条割（先进先出，丢弃数记入 `cuts_dropped`），块内缓存只存紧凑记录，使 QUBO 规模与内存不随轮数增长。
+每次 QUBO 选择当前点最紧最优性割，并按最新优先补足至多 8 条；可行性割按当前点违约程度选择至多 64 条。费用为基线割加共享非负修正 τ，约束 τ 不低于其余割与基线的差值，因此表示工作集的最大值。固定费用只计一次，保留硬约束、总容量和可行性割罚项；没有额外容量裕度。单机容量建模按启停降额条件去重，保留所有有效降额约束。
 
-每批只有一个搜索 QUBO，直接由稀疏 Q 构造 BINARY BQM，合并 `Qij+Qji`，不生成稠密 Ising 矩阵。每条链由采样器根据种子生成随机初态，每次一个 read。退火终态恢复固定变量后，先进行原始块候选评价／割学习，再走既有全天修复、调度和独立校验；通过校验才可更新 UB。温度从 `sa_temperature*energy_unit` 起逐次乘 `sa_cooling`，严格高于 `sa_cutoff*energy_unit` 时执行，倒数作为自定义 beta；每级执行 `sa_sweeps` 次顺序 Metropolis 扫描。[采样器 API](https://docs.dwavequantum.com/en/latest/ocean/api_ref_samplers/generated/dwave.samplers.SimulatedAnnealingSampler.sample.html)
+基线总费用斜率和割差斜率统一归一化；代入固定位后，以 Δ=1/[64(n+1)] 量化割差（n 为自由位数），理论包络误差不超过 1/128 个归一化费用单位。τ 与逐割松弛采用整数二进制编码，残差平方权重为 2Δ；超过双精度精确整数范围时明确失败。诊断区分选入工作集的割、实际编码的割和量化后在整个自由变量盒域上被基线支配的割，并记录 τ／松弛位数、费用缩放、量化误差界和采样包络违约量。若其他割均被支配，只需编码基线，无需 τ 辅助位。
 
-建模和采样均计入时间；链间检查预算，单条链不能硬中断，超时按实记录。稀疏接口消除了强制稠密化，但 QUBO 本身仍可能较密。历史不同搜索策略的实验保留各自口径。
+需要松弛位的可行性割在代入固定位、按行系数归一化后，以 h=1/[64(n+1)] 对系数和常数向下取整。搜索约束的放松量小于 1/64 个归一化残差单位；真实可行点的最小罚项为零，小于该量的违约可能不受搜索罚项惩罚。两自由位以内仍使用精确真值表。聚合容量的需求向上对齐到额定容量最大公约数格点，与原二进制容量条件等价；全天调度及物理校验均未放松。
 
-## 历史
+每条 SA 链随机初始化原始自由位，并精确配置辅助位。退火每段最多 8 个温度点，段间固定原始位，精确更新 τ 和各类松弛，再将该状态交给 D-Wave 公共采样器继续搜索。`sa_temperature` 是起温下限；实际起温还取初态原始位正向单比特能量增量的第 90 百分位数除以 ln(2)，使高系数模型不会沿用过低的起温。`sa_cooling`、`sa_cutoff` 和每温度扫描数含义不变，因此自适应升温可能增加温度点数。段前检查预算，返回每条链已完成状态中校正能量最低的方案；初始化方式标识为 `random_original_exact_aux_segmented_v2`。
 
-- v2.0.0（2026-11-04）：删除全部 LLM 组件——在线上界顾问（`llm.py`、`advisor_request.py`、`upper_advisor.py`、`context.py`）、离线 LLM 程序（`programs/`、`offline_pilot.py`、`offline_worker.py`）与邻域实验（`neighbourhood_search.py`、`run_neighbourhood_precheck.py`），以及全部 `llm_*` 参数、`config.local.json` 读取和 `tomli` 依赖。SA 只以当前最优方案为种子，其余搜索、修复与校验逻辑不变。
-- v1.4.0 及更早：含 LLM 的方法、程序训练与验证实验。代码见对应 git 标签与 GitHub Release，各版本的变更、结论与封存资产记录在 `archives/v*.json`。
+能量使用原始平方罚项求值，避免大矩阵系数相消。每条链记录配对的 `raw_energy`（选中状态在辅助位校正前的能量）、`energy`（返回状态校正后的能量）及 `auxiliary_energy_gap`，并记录 τ 偏差、实际起温、完成段数、原始位移动量和预算截断状态。`selected_state=initial` 表示链保留了初始校正状态；实际温度表位于每条链的 `beta_schedule`。`raw_bits` 与 `corrected_bits` 的原始位相同，辅助位可能不同。
+
+包络量化误差、可行性搜索约束放松和辅助位采样误差是三个不同指标。返回状态的辅助位已取条件最优，不代表段内单比特能垒已消除，也不保证全天真实费用排序正确。分段接口调用、升温及缓存失效后的重新调度都可能降低搜索效率。8 条割仅表示割池子集，固定块外开停机仍限制搜索邻域。QUBO 能量是搜索分数，不等于全天真实费用或认证下界。
+
+主算法搜索可行上界，不提供全局下界或全局最优性证明。每次运行从零开始，`latest-solution.json` 只保存方案，不能恢复搜索状态。建模、初始化、辅助位校正及采样接口开销都计入搜索预算；单段退火不能硬中断，实际耗时可能略超预算。

@@ -42,7 +42,6 @@ def save(path, value):
 def freeze_experiment(output, options):
     paths = [PROJECT / name for name in ("run_experiment.py", "run_suc.py", "requirements.txt", "README.md")]
     paths += sorted((PROJECT / "suc_benders").glob("*.py"))
-    paths += sorted((PROJECT / "tests").glob("*.py"))
     folder = Path(options.data_file).resolve().parent
     paths += sorted(folder.rglob("*.json"))
     paths += sorted(p for p in (folder / "sources").glob("*") if p.is_file())
