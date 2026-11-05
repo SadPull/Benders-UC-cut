@@ -78,6 +78,8 @@ def solution_snapshot(result, elapsed):
                 reference_status=result.reference.get("status"), reference_gap_percent=result.reference_gap_percent,
                 sa_backend=result.diagnostics.get("sa_backend"),
                 sa_initialization=result.diagnostics.get("sa_initialization"),
+                constraint_policy=result.diagnostics.get("constraint_policy"),
+                cut_selector=result.diagnostics.get("cut_selector"),
                 elapsed_seconds=elapsed,
                 model_fingerprint=result.diagnostics.get("model_fingerprint"),
                 sa_calls=result.diagnostics.get("sa_calls", 0))
@@ -132,6 +134,8 @@ def run_summary(result, progress, dimensions, solver_wall, final_save_seconds, s
     return dict(**dimensions, seed=SEED, status=result.status, message=result.message,
                 sa_backend=result.diagnostics.get("sa_backend"),
                 sa_initialization=result.diagnostics.get("sa_initialization"),
+                constraint_policy=result.diagnostics.get("constraint_policy"),
+                cut_selector=result.diagnostics.get("cut_selector"),
                 upper=result.objective, reference_gap_percent=result.reference_gap_percent,
                 reference={key: value for key, value in result.reference.items()
                            if key not in ("u", "v", "w", "scenarios")},
@@ -143,6 +147,7 @@ def run_summary(result, progress, dimensions, solver_wall, final_save_seconds, s
                 time_limit_overshoot_seconds=result.diagnostics.get("time_limit_overshoot", 0.),
                 wall_to_result_saved_seconds=perf_counter() - started,
                 sa_calls=result.diagnostics.get("sa_calls", 0),
+                dynamic_constraints_added=result.diagnostics.get("dynamic_constraints_added", 0),
                 data_dir=DATA_DIR, block_hours=BLOCK_HOURS, sa_sweeps=SA_SWEEPS,
                 dispatch_failures=result.diagnostics.get('dispatch_failures', 0),
                 complete_rounds=result.diagnostics.get('complete_rounds', 0),

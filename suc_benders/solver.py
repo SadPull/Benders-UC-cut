@@ -79,7 +79,7 @@ class _Run:
 
 # 主流程：独立参考 → 初始化 → 分块搜索 → 整理结果。
 # 保留阶段名定位失败，并在最终返回前独立复核全天方案。
-def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file=None):
+def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file=None, strategies=None):
     # started_at 是整体调用起点；搜索预算在参考结束后重新起计。
     total_started = perf_counter() if started_at is None else started_at
     if o.verbose:
@@ -90,7 +90,7 @@ def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file
     run = _Run(o, perf_counter(), reference, total_started)
     result = run.result
     try:
-        m = _initialize(run, d, scenarios, progress)
+        m = _initialize(run, d, scenarios, progress, strategies)
         try:
             _search(run, m)
         except SABudgetExhausted:
@@ -108,11 +108,11 @@ def solve(d, scenarios, o, *, progress=None, started_at=None, reference_log_file
 
 
 # 连续松弛只用于初始化；初始方案不使用参考解。
-def _initialize(run, d, scenarios, progress):
+def _initialize(run, d, scenarios, progress, strategies=None):
     o, result = run.o, run.result
     m = model(d, scenarios)
     full = partition(m, d.horizon)[0][0]
-    whole = run.whole = WholeDay(m, full, o, run.deadline, result, run.started, progress)
+    whole = run.whole = WholeDay(m, full, o, run.deadline, result, run.started, progress, strategies)
     phase = perf_counter()
     relaxation = optimize(m, run.remaining())
     whole.timings["initialization"] += perf_counter() - phase

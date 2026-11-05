@@ -1,7 +1,6 @@
 """Sparse search QUBO for block SA; energies are search scores, never bounds."""
 # 模块职责：把块内硬约束行、跨块边界行、容量与可行性割编码为稀疏 QUBO，
 # 先由硬约束传播固定位，再对自由位加权罚函数和费用代理。
-from fractions import Fraction
 from collections import deque
 from itertools import product
 import math
@@ -9,6 +8,8 @@ from types import SimpleNamespace as NS
 
 import numpy as np
 from scipy import sparse
+
+from .constraints import legacy_square_policy
 
 
 # 用低位二进制权重加末位剩余量，覆盖整数区间 [0, maximum] 而不超过给定上界。
@@ -116,25 +117,40 @@ def _fixed_binary(m, binary):
 # 搜索 QUBO 编码全天割投影的最大值；τ 与松弛位只服务搜索，不属于物理方案。
 # 硬约束按行归一化，容量只用 u 列。能量包含罚项和量化误差，不能作为任何界。
 # m 为块的 hard_rows 结果。
-def search_qubo(m, b, cuts, point, boundary, o):
+def search_qubo(m, b, cuts, point, boundary, o, *, constraint_policy=None, extra_rows=()):
+    """Build a block QUBO using an injected constraint policy.
+
+    The positional interface remains the archived one. Policies only change
+    the capacity/feasibility rows and never turn QUBO energy into a certificate.
+    """
+    constraint_policy = constraint_policy or legacy_square_policy
     nx = m.nx
     if np.shape(point) != (nx,) or not np.isin(point, [0, 1]).all():
         raise ValueError("Search QUBO requires a complete binary cost-reference point")
     binary = m.A.tocsr()
-    rows = [(binary.indices[binary.indptr[k]:binary.indptr[k + 1]],
-             binary.data[binary.indptr[k]:binary.indptr[k + 1]], m.rhs[k], m.eq[k]) for k in range(binary.shape[0])]
-    rows += [(np.asarray(js, int), np.asarray(values, float), rhs, eq) for js, values, rhs, eq in boundary]
-    I = [k for k, row in enumerate(rows) for _ in row[0]]
-    J = [j for row in rows for j in row[0]]
-    V = [v for row in rows for v in row[1]]
-    view = NS(rhs=np.asarray([row[2] for row in rows], float), eq=np.asarray([row[3] for row in rows], bool))
-    fixed = _fixed_binary(view, sparse.coo_matrix((V, (I, J)), shape=(len(rows), nx)).tocsr())
+    base_rows = [(binary.indices[binary.indptr[k]:binary.indptr[k + 1]],
+                  binary.data[binary.indptr[k]:binary.indptr[k + 1]], m.rhs[k], m.eq[k], "hard")
+                 for k in range(binary.shape[0])]
+    base_rows += [(np.asarray(js, int), np.asarray(values, float), rhs, eq, "hard")
+                  for js, values, rhs, eq in boundary]
+    policy_rows = constraint_policy.rows(b, cuts, o, extra_rows)
+    I = [k for k, row in enumerate(base_rows) for _ in row[0]]
+    J = [j for row in base_rows for j in row[0]]
+    V = [v for row in base_rows for v in row[1]]
+    view = NS(rhs=np.asarray([row[2] for row in base_rows], float),
+              eq=np.asarray([row[3] for row in base_rows], bool))
+    fixed = _fixed_binary(view, sparse.coo_matrix((V, (I, J)), shape=(len(base_rows), nx)).tocsr())
+    rows = base_rows + [(row.indices, row.values, row.rhs, row.equality, row.kind)
+                        for row in policy_rows]
     free = np.flatnonzero(np.isnan(fixed))
     mapping = np.full(nx, -1); mapping[free] = np.arange(len(free))
     qi, qj, qv, R, constants = [], [], [], [], []
     nv = len(free)
     offset = 0.
     slacks, feasibility_bounds = [], []
+    local_bound = max(1., float(np.abs(b.obj[b.binary][free]).sum(initial=0.)))
+    for cut in cuts:
+        local_bound += float(np.abs(cut.beta[free]).sum())
 
     # 加入 weight*(a*x+c)^2 或 weight*max(0, a*x+c)^2；系数先按整行最大值归一化。
     # 两自由位以内用精确真值表；可行性割的整数化只放松搜索罚项，不误罚真实可行点。
@@ -183,23 +199,10 @@ def search_qubo(m, b, cuts, point, boundary, o):
             nv += len(weights)
         R.append((ids, np.sqrt(weight) * a)); constants.append(np.sqrt(weight) * c)
 
-    for js, values, rhs, equality in rows:
-        penalty(js, values, rhs, equality, o.sa_hard_weight, 1.)
-    position = np.full(len(b.obj), -1); position[b.binary] = np.arange(nx)
-    units = position[b.u]
-    # 容量行只保留 pmax*u；启停降额由全天修复与独立校验复核。格点取各 pmax 的最大公约数。
-    pmax = [Fraction(str(v)) for v in b.d.pmax]
-    denominator = math.lcm(*(v.denominator for v in pmax))
-    step = Fraction(math.gcd(*(int(v * denominator) for v in pmax)), denominator)
-    capacity_units = np.asarray([int(v / step) for v in pmax], float) if step else np.zeros(len(pmax))
-    for t, hour in enumerate(b.times):
-        required = (1 + b.d.reserve_fraction) * max(s.load[hour] for s in b.scenarios)
-        required_units = math.ceil(Fraction(str(required)) / step) if step else 0
-        _integer_bounds(-capacity_units, required_units)
-        penalty(units[:, t], -capacity_units, -required_units, False, o.sa_capacity_weight, 1., 'capacity')
-    for c in cuts:
-        if not c.optimality:
-            penalty(np.arange(nx), c.beta, -c.alpha, False, o.sa_capacity_weight, 1., 'feasibility')
+    for js, values, rhs, equality, kind in rows:
+        if kind == "capacity":
+            _integer_bounds(np.asarray(values, dtype=int), int(-rhs))
+        penalty(js, values, rhs, equality, constraint_policy.weight(kind, local_bound, o), 1., kind)
 
     # 基线割加非负修正 τ，避免把多条费用斜率相加；固定变量先代入截距。
     optimality = [c for c in cuts if c.optimality]
@@ -263,4 +266,6 @@ def search_qubo(m, b, cuts, point, boundary, o):
     return NS(Q=Q.tocsr(), cost=cost, cost_unit=unit, offset=offset + float(c @ c), envelope=envelope,
               slacks=slacks, penalty_matrix=A, penalty_constants=c, direct=direct,
               linear=linear, linear_offset=offset, feasibility_relaxation_bound=max(feasibility_bounds, default=0.),
-              fixed=fixed, free=free, nx=nx, energy_unit=1.)
+              fixed=fixed, free=free, nx=nx, energy_unit=1.,
+              constraint_policy=constraint_policy.name, constraint_rows=len(policy_rows),
+              local_objective_bound=local_bound)

@@ -26,6 +26,11 @@ class Options:
     # sa_reads 为独立退火链数，sa_sweeps 为每个温度对全部位的扫描次数。
     sa_hard_weight: float = 8
     sa_capacity_weight: float = 4
+    # 新策略把覆盖行与可行性割分开；sa_capacity_weight 保留给旧策略。
+    sa_cover_weight: float = 4
+    sa_feasibility_weight: float = 4
+    sa_constraint_policy: str = "legacy_square"
+    sa_cut_selector: str = "recent_tight"
     sa_reads: int = 8
     sa_enabled: bool = True
     # 辅助工作配额独立于搜索 time_limit；耗尽后结束搜索，None 表示不另设此配额。
@@ -41,7 +46,7 @@ INTEGER_OPTIONS = ("block_hours", "max_rounds", "sa_reads", "sa_sweeps", "seed")
 NONNEGATIVE_INTEGERS = ("seed",)
 # 数值参数须有限且为正，ZERO_ALLOWED 中的参数还可为 0。
 NUMERIC_OPTIONS = ("time_limit", "reference_time_limit", "sa_temperature", "sa_cutoff", "tolerance",
-                   "sa_hard_weight", "sa_capacity_weight")
+                   "sa_hard_weight", "sa_capacity_weight", "sa_cover_weight", "sa_feasibility_weight")
 ZERO_ALLOWED = ("tolerance",)
 BOOLEAN_OPTIONS = ("verbose", "sa_enabled")
 
@@ -72,6 +77,10 @@ def load_options(overrides=None):
     for name in BOOLEAN_OPTIONS:
         if not isinstance(getattr(o, name), bool):
             raise ValueError(f"{name} must be boolean")
+    if o.sa_constraint_policy not in ("legacy_square", "cover"):
+        raise ValueError("sa_constraint_policy must be legacy_square or cover")
+    if o.sa_cut_selector not in ("recent_tight", "coverage"):
+        raise ValueError("sa_cut_selector must be recent_tight or coverage")
     if o.sa_budget_seconds is not None and (not _number(o.sa_budget_seconds) or o.sa_budget_seconds < 0):
         raise ValueError('SA budget requires a nonnegative finite value')
     return o

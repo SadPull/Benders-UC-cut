@@ -13,7 +13,13 @@ from .benders import discrete_feasible, dispatch, hard_rows
 from .model import fingerprint, relaxed_rows
 from .optimization import optimize
 from .qubo import search_qubo, fixed_binary
+from .strategies import strategies_for_options
 from .validation import fixed_cost, capacity, commitment, commitment_hash, pack, repair, unpack, validate, transition_allowed, reachable_shortfall
+
+
+def _default_sampler(q, o, seconds, seeds):
+    """Resolve the module-level sampler at call time so existing patches still work."""
+    return anneal(q, o, seconds, seeds)
 
 
 # 全天割池先进先出；每个块只编码小工作集，控制辅助位和稠密耦合规模。
@@ -38,9 +44,10 @@ class WholeDay:
     """Shared incumbent, measured feedback and deadline across all time blocks."""
 
     # 绑定输入模型与搜索截止时间，建立按来源统计的诊断和计时器。
-    def __init__(self, m, full, o, deadline, result, started, progress=None):
+    def __init__(self, m, full, o, deadline, result, started, progress=None, strategies=None):
         self.m, self.full, self.o, self.deadline = m, full, o, deadline
         self.d, self.scenarios, self.result, self.started = m.d, m.scenarios, result, started
+        self.strategies = strategies or strategies_for_options(o, sampler=_default_sampler)
         self.best = None
         self.cache = {}
         self.cuts = []
@@ -51,6 +58,7 @@ class WholeDay:
         self.diagnostics.update(sa_calls=0, evaluations=[], proposals=[], sampling=[], iterations=[],
                                 blocks=[], rounds=[], cuts_dropped=0, stored_cuts=0,
                                 cache_invalidations=0, re_evaluations=0,
+                                dynamic_constraints_added=0,
                                 cut_totals=self.cut_totals,
                                 complete_rounds=0, timings={name: 0. for name in (
                                     "initialization", "qubo", "annealing", "repair",
@@ -60,7 +68,12 @@ class WholeDay:
         self.diagnostics["model_fingerprint"] = fingerprint(m)
         self.sa_started = None
         self.diagnostics['sa_budget_seconds_used'] = 0.
-        self.diagnostics.update(search_mode='time_blocks', sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION)
+        self.diagnostics.update(search_mode='time_blocks', sa_backend=SA_BACKEND, sa_initialization=SA_INITIALIZATION,
+                                constraint_policy=self.strategies.constraint_policy.name,
+                                cut_selector=getattr(self.strategies.cut_selector, '__name__',
+                                                     type(self.strategies.cut_selector).__name__),
+                                sampler=getattr(self.strategies.sampler, '__name__',
+                                                type(self.strategies.sampler).__name__))
         phase = perf_counter()
         self.fixed = fixed_binary(hard_rows(full, reachability=True))
         start, stop = transition_allowed(self.d)
@@ -362,6 +375,8 @@ class BlockSearch:
         self.b, self.o, self.index, self.whole = b, o, index, whole
         self.columns = b.cols[b.binary]
         self.fixed = whole.fixed[self.columns].copy()
+        self.constraint_rows = []
+        self.constraint_signatures = set()
         self.hard = hard_rows(b, fixed=self.fixed)
         m = whole.m
         rows = m.A[b.cross].tocsr()
@@ -375,6 +390,18 @@ class BlockSearch:
                                sa_calls=0, first_visit_seconds=None)
         whole.diagnostics["blocks"].append(self.diagnostic)
 
+    def _observe_constraint(self, candidate, reason):
+        policy = self.whole.strategies.constraint_policy
+        for row in policy.observe(self.b, candidate, reason):
+            signature = row.signature()
+            if signature in self.constraint_signatures:
+                continue
+            self.constraint_signatures.add(signature)
+            self.constraint_rows.append(row)
+            self.diagnostic['dynamic_constraint_rows'] = len(self.constraint_rows)
+            self.whole.diagnostics['dynamic_constraints_added'] = (
+                self.whole.diagnostics.get('dynamic_constraints_added', 0) + 1)
+
     def boundary_rows(self, point):
         ring = self.boundary
         rhs = ring.rhs - ring.outer @ point
@@ -386,13 +413,10 @@ class BlockSearch:
         cuts = self.whole.cuts
         anchor = point[self.whole.full.binary]
         values = [c.alpha + c.beta @ anchor for c in cuts]
-        optimality = [k for k, c in enumerate(cuts) if c.optimality]
-        feasibility = [k for k, c in enumerate(cuts) if not c.optimality]
-        chosen = []
-        if optimality:
-            chosen = [max(optimality, key=lambda k: values[k])]
-            chosen += [k for k in reversed(optimality) if k != chosen[0]][:QUBO_OPTIMALITY_CUTS-1]
-        selected_feasibility = sorted(feasibility, key=lambda k: -values[k])[:QUBO_FEASIBILITY_CUTS]
+        optimality = [k for k, cut in enumerate(cuts) if cut.optimality]
+        feasibility = [k for k, cut in enumerate(cuts) if not cut.optimality]
+        chosen, selected_feasibility = self.whole.strategies.cut_selector(
+            cuts, values, self.columns, QUBO_OPTIMALITY_CUTS, QUBO_FEASIBILITY_CUTS)
         # 原始全天割不变；每批按块外快照重新投影截距。
         outside = anchor.copy(); outside[self.columns] = 0.
         projected = [NS(alpha=cuts[k].alpha + cuts[k].beta @ outside,
@@ -414,9 +438,14 @@ class BlockSearch:
         phase = perf_counter()
         boundary = self.boundary_rows(baseline)
         cuts, counts = self.qubo_cuts(baseline)
-        q = search_qubo(self.hard, b, cuts, baseline[self.columns], boundary, o)
+        q = search_qubo(self.hard, b, cuts, baseline[self.columns], boundary, o,
+                        constraint_policy=whole.strategies.constraint_policy,
+                        extra_rows=self.constraint_rows)
         counts.update(optimality_cuts_encoded=q.envelope.cuts,
-                      optimality_cuts_dominated=counts['optimality_cuts_selected']-q.envelope.cuts)
+                      optimality_cuts_dominated=counts['optimality_cuts_selected']-q.envelope.cuts,
+                      constraint_policy=q.constraint_policy, constraint_rows=q.constraint_rows,
+                      local_objective_bound=q.local_objective_bound,
+                      dynamic_constraint_rows=len(self.constraint_rows))
         whole.timings["qubo"] += perf_counter() - phase
         self.diagnostic.update(counts)
         if whole.progress is not None:
@@ -430,7 +459,7 @@ class BlockSearch:
         self.diagnostic["sa_calls"] += 1
         sample_seeds = [int(np.random.SeedSequence([o.seed, whole.diagnostics["sa_calls"], j]).generate_state(1)[0])
                         for j in range(o.sa_reads)]
-        proposals, sampling = anneal(q, o, whole.remaining(), sample_seeds)
+        proposals, sampling = whole.strategies.sampler(q, o, whole.remaining(), sample_seeds)
         whole.timings["annealing"] += perf_counter() - phase
         sampling.update(block=self.index, round=k, seed=sample_seeds, boundary_rows=len(boundary),
                         **counts, anchor=anchor_id, anchor_cost=anchor_cost,
@@ -454,11 +483,19 @@ class BlockSearch:
                           raw_fixed_bit_violations=int(np.count_nonzero(candidate[known] != whole.fixed[known])),
                           raw_discrete_feasible=discrete, outcome='discrete_infeasible')
             whole.diagnostics['proposals'].append(record)
-            if discrete and whole.accept(candidate, 'sa_raw', record):
-                continue
+            if discrete:
+                accepted = whole.accept(candidate, 'sa_raw', record)
+                if record.get('outcome') == 'duplicate':
+                    self._observe_constraint(x, 'repeated')
+                if accepted:
+                    continue
+            else:
+                self._observe_constraint(x, 'discrete_infeasible')
             repaired_record = dict(proposal_id=proposal_id + ':repair', block=self.index, round=k)
             repaired = whole.prepare(z.u, 'sa', repaired_record)
             whole.accept(repaired, 'sa', repaired_record)
+            if repaired_record.get('outcome') in {'duplicate', 'repair_discrete_infeasible', 'reachable_infeasible'}:
+                self._observe_constraint(x, 'repair_infeasible')
         if whole.remaining() <= 0:
             return
         whole.result.history.append(dict(block=self.index, round=k, incumbent=whole.result.objective,
